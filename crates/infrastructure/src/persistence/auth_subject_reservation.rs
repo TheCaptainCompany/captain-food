@@ -78,4 +78,24 @@ impl AuthSubjectReservationRepository for PgAuthSubjectReservationRepository {
         .map_err(db_err)?;
         Ok(holder == Some(principal.id()))
     }
+
+    async fn holder_of(
+        &self,
+        subject: AuthSubject,
+        kind: domain::generated::scalars::PrincipalKind,
+    ) -> Result<Option<uuid::Uuid>, DomainError> {
+        let holder: Option<uuid::Uuid> = sqlx::query(
+            "SELECT principal_id FROM auth_subject_reservations \
+             WHERE principal_kind = $1 AND auth_subject = $2",
+        )
+        .bind(kind.to_text())
+        .bind(subject.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?
+        .map(|row| row.try_get("principal_id"))
+        .transpose()
+        .map_err(db_err)?;
+        Ok(holder)
+    }
 }

@@ -1278,6 +1278,107 @@ pub mod member_sign_in {
     }
 }
 
+/// `restaurant-invitation` contract (#639 part C step 6-iv, ADR-20260905-101349 §2/§3): the roster
+/// and the invitation. Counters carry NO email/token/invitationId label -- the `member_sign_in`
+/// module's own posture.
+pub mod restaurant_invitation {
+    use super::*;
+
+    fn sent_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RESTAURANT_INVITATION_SENT_TOTAL).build())
+    }
+
+    fn accepted_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RESTAURANT_INVITATION_ACCEPTED_TOTAL).build())
+    }
+
+    fn expired_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RESTAURANT_INVITATION_EXPIRED_TOTAL).build())
+    }
+
+    fn revoked_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RESTAURANT_INVITATION_REVOKED_TOTAL).build())
+    }
+
+    /// `restaurant_invitation_sent_total{authority}` — `inviteRestaurantMember` appended.
+    pub fn sent(authority: &str) {
+        sent_counter().add(1, &[KeyValue::new("authority", authority.to_string())]);
+    }
+
+    /// `restaurant_invitation_accepted_total` — `acceptRestaurantInvitation` appended.
+    pub fn accepted() {
+        accepted_counter().add(1, &[]);
+    }
+
+    /// `restaurant_invitation_expired_total` — the TTL reminder recorded the expiry.
+    pub fn expired() {
+        expired_counter().add(1, &[]);
+    }
+
+    /// `restaurant_invitation_revoked_total` — `revokeRestaurantInvitation` appended.
+    pub fn revoked() {
+        revoked_counter().add(1, &[]);
+    }
+
+    fn roster_lag_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::RESTAURANT_ROSTER_LAG_POSITIONS).build())
+    }
+
+    fn invitation_list_lag_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter().i64_gauge(metric::RESTAURANT_INVITATION_LIST_LAG_POSITIONS).build()
+        })
+    }
+
+    /// `restaurant_roster_lag_positions` — the `RestaurantRoster` projector group's pending page
+    /// length at each scan (the `rider_standing_lag_positions`/`scope_membership_lag_positions`
+    /// shape): a lower bound capped at `batch_size` while draining, re-recorded only when the log
+    /// moves, 0 only on the first scan that finds nothing.
+    pub fn roster_lag(positions: i64) {
+        roster_lag_gauge().record(positions, &[]);
+    }
+
+    /// `restaurant_invitation_list_lag_positions` — same shape, for the `RestaurantInvitationList`
+    /// projector group.
+    pub fn invitation_list_lag(positions: i64) {
+        invitation_list_lag_gauge().record(positions, &[]);
+    }
+
+    // The gate-liveness gauge (the `member_sign_in::door_enforcing` inverted dead-man shape,
+    // ADR-20260810-231300): `-1` = never declared, `0`/`1` re-asserted on every export cycle.
+    static DOOR_ENFORCING: AtomicI64 = AtomicI64::new(-1);
+
+    fn door_enforcing_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::RESTAURANT_INVITATION_DOOR_ENFORCING)
+                .with_callback(|observer| {
+                    let state = DOOR_ENFORCING.load(Ordering::Relaxed);
+                    if state >= 0 {
+                        observer.observe(state, &[]);
+                    }
+                })
+                .build()
+        })
+    }
+
+    /// Declare the door's liveness (`restaurant_invitation_door_enforcing`): 1 while
+    /// `RUN_RESTAURANT_INVITATION` enforces its refusal on a request, 0 the moment the composition
+    /// root boots with the key OFF. Call at composition AND wherever the gate is actually
+    /// consulted (the `member_sign_in::door_enforcing` precedent).
+    pub fn door_enforcing(enforcing: bool) {
+        DOOR_ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
+        let _ = door_enforcing_gauge();
+    }
+}
+
 /// `graphql-limits` contract (#639 part C step 6-ii, ADR-20260905-101349 §9): the per-role
 /// depth/complexity ceiling applied at `parse_query`, on every role's schema.
 pub mod graphql_limits {

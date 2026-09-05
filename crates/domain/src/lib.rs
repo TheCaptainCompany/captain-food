@@ -25,6 +25,7 @@ pub mod prospect;
 pub mod reclamation;
 pub mod restaurant;
 pub mod restaurant_account;
+pub mod restaurant_invitation;
 pub mod restaurant_membership;
 pub mod service_window;
 pub mod rider;

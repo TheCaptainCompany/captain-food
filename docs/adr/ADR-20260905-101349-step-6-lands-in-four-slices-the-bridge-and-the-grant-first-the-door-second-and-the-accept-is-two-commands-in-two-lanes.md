@@ -67,6 +67,22 @@ for new development; and a stamped subject with no binding row is `Identity::Unb
    on the membership stream, sequenced by the accepting member's client — acceptance-first, PENDING — never one handler
    staging two streams and never a process manager** ("the human is the process manager" stands for V0). FORK 2
    unchanged: the membership fold is a check, not a lock. 6-i itself is one aggregate, one stream, one lane.
+
+   **Amendment, round 2 of the 6-iv card (2026-09-05, consent, Consulted block below).** §2's leg 2 as
+   first landed was `GrantRestaurantAccess` widened to accept an ADMIN-authored grant OR an
+   invitation-carried one on the same command, distinguished by which optional fields were present.
+   That is exactly the "illegal states stay spellable" shape ADR-20260803-234035 rules out -- a caller
+   could send `basis: MEMBER_INVITATION` with no invitation proof, or an ADMIN-shaped payload through
+   the public door. **Split by privilege, not by field**: `GrantRestaurantAccess` reverts to
+   ADMIN-only with every field required (the 6-i shape, unchanged); a new PUBLIC command
+   `GrantRestaurantAccessByInvitation { invitationId, token }` is leg 2 of the accept, proof is the
+   SAME token `AcceptRestaurantInvitation` already verifies (no new legal actor, no new proof
+   instrument), and `membershipId`/`memberId` are DERIVED -- UUIDv5 of `invitationId` under a
+   command-local namespace constant, never caller-supplied -- so one invitation can never mint two
+   memberships: the invariant is structural, not a runtime check. The two-lane, client-sequenced
+   accept (leg 1 on the invitation stream, leg 2 on the membership stream, never one handler staging
+   both, never a process manager) is UNCHANGED by this split; only leg 2's command shape and
+   authorization surface change.
 3. **Vocabulary (evans).** `MemberAuthority = { MANAGER, OPERATOR }` — `ADMINISTRATOR` refused (one stem for two
    populations on an authorization surface; `restaurant_manager` already means the person who runs one shop); two
    values, additive-only, no `*AuthorityChanged` (a change is revoke + grant). `AccessEvidence` is renamed
@@ -190,3 +206,17 @@ hand-provisioned and the restriction door's precondition (1) is not discharged b
 - **observability-agent** — consent; the sign-in contract lands with 6-ii, 6-i's fold with 6-i; OTLP-only for the anonymous door; never an address/token label; refuse any `on_roster` label; limits need headroom histograms and a max gauge; the correlation break across the mail hop.
 - **legal-specialist** — consent; the closed revoke ground; §6.5's false ground corrected; the lifetime binding written; Art. 14 and Art. 30 before the first grant; the refusal screen's legal link; four external items for the founder; not clearance.
 - **ux-designer** — consent with two conditions: the 19:40 lockout is real (`/auth/refresh` exists, Max-Age 3600, and NO caller in `crates/web`) — one silent refresh retry before any `unauthenticated:` bounce plus `?next=` is a named dependency of flipping the door key (a longer TTL would reverse ADR-20260810-194548); the parked session must be claimable by the link-opening tab; print the verified address on the refusal screen; 6-iii ships `requires_auth: true` + `unauthenticated:` + a System refusal screen or stays dark (an un-darkened board with 401'd reads shows a lane holding a paid order as "none"); step 0 (how a provisioned restaurateur learns the URL) is a named GAP(journey).
+
+## Consulted, round 2 amendment (2026-09-05, ADR-20260812-143619 — one line per lens)
+
+- **reviewer** — consent; the widened single-command shape let a caller spell `basis: MEMBER_INVITATION` with no proof or an ADMIN-shaped payload through the public door — split by privilege closes both, and derived ids make the one-membership-per-invitation invariant a compile/derivation fact, not a runtime check to remember.
+- **vernon** — consent; leg 2 stays a single-aggregate command on the membership stream either way, so the split changes authorization surface, not stream topology; the derived `membershipId` is still minted by the handler, never client-supplied, matching ADR-0034.
+- **young** — consent; two commands read cleanly on the write side; the derived-id namespace constant needs its own test asserting determinism (landed as a unit test on the fold), not just an integration happy path.
+- **evans** — consent; `GrantRestaurantAccessByInvitation` names the ubiquitous-language act precisely (grant, by invitation) rather than overloading the ADMIN grant with a mode flag.
+- **legal-specialist** — consent; no new proof instrument or legal actor is introduced — the token is the same one `AcceptRestaurantInvitation` already verifies — so Art. 14 analysis in RESTAURANT-INVITATION-PRECONDITIONS is unaffected by the split itself.
+- **ux-designer** — consent; the two-lane client sequencing the invitee experiences is unchanged; the split is invisible below the `/invitation` screen.
+- **beck** — consent; the STOP-then-split shape is exactly what a mutant on "ADMIN payload through the public path" would have caught had round 1 shipped the widened command — recorded as the round-2 finding it is.
+- **graphql-architect** — consent; `GrantRestaurantAccessByInvitation` is PUBLIC-schema-only, `GrantRestaurantAccess` stays ADMIN-schema-only — the role-as-path ACL now separates them at the SDL level, not just at runtime.
+- **observability-agent** — consent; no new span/label shape needed — leg 2's business.result values are unchanged by which command carries them.
+- **dba** — consent; no new table; the derived id is computed in the command handler, not stored redundantly anywhere.
+- **business-specialist** — consent; no seat-count or billing semantics touched by the split.

@@ -12,7 +12,7 @@
 // are unaffected by restriction`, ADR-20260904-081527 §4).
 #![allow(dead_code)]
 
-pub(crate) use super::super::acl::{RequestRole, RoleGuard, StandingGuard};
+pub(crate) use super::super::acl::{AuthorityGuard, RequestRole, RoleGuard, StandingGuard};
 use super::super::acl::role_allows;
 use async_graphql::GuardExt as _;
 
@@ -80,6 +80,12 @@ pub(crate) fn visible_public_customer_admin(ctx: &async_graphql::Context<'_>) ->
 pub(crate) const ALLOW_PUBLIC_RESTAURANT_ACCOUNT: &[RequestRole] = &[RequestRole::Public, RequestRole::RestaurantAccount];
 pub(crate) fn visible_public_restaurant_account(ctx: &async_graphql::Context<'_>) -> bool {
     role_allows(ctx, ALLOW_PUBLIC_RESTAURANT_ACCOUNT)
+}
+
+/// roles: [RESTAURANT]
+pub(crate) const ALLOW_RESTAURANT: &[RequestRole] = &[RequestRole::Restaurant];
+pub(crate) fn visible_restaurant(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_RESTAURANT)
 }
 
 /// roles: [RESTAURANT_ACCOUNT, ADMIN]

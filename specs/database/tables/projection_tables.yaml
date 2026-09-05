@@ -727,6 +727,117 @@ Member:
       unique: true
       note: "The login credential this person resolves through (6-ii's seam). UNIQUE, no other index (deliberately no `index: true` beside `unique:` -- the two are separate emitter passes and would emit a redundant second btree, the `Rider.auth_ref` precedent) -- see the table rule."
 
+
+# The roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2 amendment, PROP-20260831-180622
+# §6.4/§6.5): `restaurantRoster`'s source, ONE row per GRANTED membership. Own `ProjectorGroup
+# "RestaurantRoster"` checkpoint from 0 (the `RiderRoster`/`Member` #424 lesson).
+RestaurantRoster:
+  projector: app
+  aggregate: RestaurantMembership
+  slice: V0
+  database: { $ref: 'database/databases.yaml#/read_common' }
+  note: >
+    The MANAGER's/OPERATOR's own restaurant team list (`/team`, §8.2). ONE creating arm
+    (`RestaurantAccessGranted`, the `Member` precedent) and, round 3 (dba BLOCKING), ONE deleting
+    arm (`RestaurantAccessRevoked` -- ADDITIVE to the creating arm, never a replacement, a real
+    DELETE keyed on `membershipId` rather than a soft-status column, the `ScopeMembership`
+    targeted-revoke precedent). No `display_name`/email column (YAGNI, the `Member` precedent
+    exactly): nothing in this event stream carries one for a `CAPTAIN_ONBOARDING` grant, and
+    inventing a cross-stream join to the invitation's `invitedEmail` for the `MEMBER_INVITATION`
+    basis ONLY would make the same column mean two different things depending on how a row was
+    born -- the `/team` screen names this a `gaps:` entry rather than paint a partial truth.
+  rules:
+    - "Rebuild = checkpoint reset, never TRUNCATE (dba, PROP §6.4): upsert keyed on `membershipId` on the GRANT arm, delete keyed on `membershipId` on the REVOKE arm, so a from-zero replay applies grant-then-delete in the SAME global `position` order the live path folds in -- a granted-then-revoked membership ends the replay ABSENT, exactly as it is live. TRUNCATE + reset would hide every member closed for the length of the drain."
+    - "No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `RiderRoster`/`Member` precedent): a stray value fails the ONE row's projection rather than halting the whole group."
+    - "Predicates over this table are GRANT tests only (PROP §6.4) -- a row's ABSENCE is never the correctness signal (indistinguishable from 'not yet replayed' vs 'revoked' vs 'never granted'); every assertion is a positive existence + value check."
+  tombstone: { $ref: 'events.yaml#/RestaurantAccessRevoked' }
+  fedBy:
+    - { $ref: 'events.yaml#/RestaurantAccessGranted' }
+    - { $ref: 'events.yaml#/RestaurantAccessRevoked' }
+  indexes:
+    - [scope_id, member_id]   # the LIST's page order inside one restaurant -- no display_name column today (YAGNI above), so this is the widest page-order key the table can serve
+  columns:
+    membership_id:
+      type: { $ref: 'scalars.yaml#/MembershipId' }
+      pk: true
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted/properties/membershipId' }]
+      note: "Keyed on the GRANT relationship, not the person -- graphql: revoke is keyed on membershipId, so it MUST be exposed (round-1 graphql finding)."
+    scope_id:
+      type: { $ref: 'scalars.yaml#/RestaurantId' }
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted/properties/scopeId' }]
+      note: "The tenant scope this row is visible under -- `restaurantRoster`'s query never takes it as an argument (`ReadScope::Restaurant` supplies it, PROP §6.5), this column is what the WHERE clause filters on."
+    member_id:
+      type: { $ref: 'scalars.yaml#/MemberId' }
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted/properties/memberId' }]
+    authority:
+      type: { $ref: 'scalars.yaml#/MemberAuthority' }
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted/properties/authority' }]
+      note: "The ONLY expressible MANAGER condition for the `/team` screen's Invite/Revoke controls is resolver DATA on the viewer's OWN row (`viewerAuthority` on the connection), never a second `roles:` list (ux/graphql)."
+    since:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted' }]
+      note: "The occurred_at of the granting fact (an occurrence timestamp, no payload field) -- the `RiderRoster.reinstated_at` precedent, hand-written Compute hook."
+
+# The invitation list (#639 part C step 6-iv round 2, PROP-20260831-180622 §6.4): `restaurantInvitations`'s
+# source, ONE row per invitation. Own `ProjectorGroup "RestaurantInvitationList"` checkpoint from 0.
+RestaurantInvitationList:
+  projector: app
+  aggregate: RestaurantInvitation
+  slice: V0
+  database: { $ref: 'database/databases.yaml#/read_common' }
+  note: >
+    The MANAGER's/OPERATOR's own pending/accepted/revoked/expired invitation list (`/team`, §8.2).
+    Status-shaped: EVERY declared `RestaurantInvitation` event updates the SAME row in place
+    (`scalars.yaml#/RestaurantInvitationStatus` names the closed set, including the round-2
+    `ACCEPTED_PENDING_ACCESS` state and its named gap to plain `ACCEPTED`).
+  rules:
+    - "Rebuild = TRUNCATE + reset TOGETHER (dba, PROP §6.4, the `RiderRoster` precedent, opposite of `RestaurantRoster`'s): status is grant-shaped (a later fact OVERWRITES an earlier one on the SAME row, never accumulates), so a checkpoint-only reset without truncating would leave a stale REVOKED/EXPIRED row's status untouched if the replay window somehow skipped rewriting it -- truncating first guarantees every row's status is freshly derived from a full chronological replay."
+    - "No CHECK constraint (`DbFaultPolicy::Skip` semantics): a stray value fails the ONE row's projection rather than halting the whole group."
+    - "Predicates over this table are GRANT tests only (PROP §6.4) -- no `NOT EXISTS` anywhere; every assertion is a positive existence + status-value check."
+    - "Retention: `UNVERIFIED input` (register check, dba) -- no controlling record names a ceiling for how long a REVOKED/EXPIRED/ACCEPTED row stays listed; named here so a future record can supersede the current forever-retained default without silently reshaping the table."
+  fedBy:
+    - { $ref: 'events.yaml#/RestaurantInvitationSent' }
+    - { $ref: 'events.yaml#/RestaurantInvitationAccepted' }
+    - { $ref: 'events.yaml#/RestaurantInvitationRevoked' }
+    - { $ref: 'events.yaml#/RestaurantInvitationExpired' }
+  indexes:
+    - [scope_id, status, created_at]
+  columns:
+    invitation_id:
+      type: { $ref: 'scalars.yaml#/RestaurantInvitationId' }
+      pk: true
+      from: [{ $ref: 'events.yaml#/RestaurantInvitationSent/properties/invitationId' }]
+    scope_id:
+      type: { $ref: 'scalars.yaml#/RestaurantId' }
+      from: [{ $ref: 'events.yaml#/RestaurantInvitationSent/properties/restaurantId' }]
+    invited_email:
+      type: { $ref: 'scalars.yaml#/EmailAddress' }
+      from: [{ $ref: 'events.yaml#/RestaurantInvitationSent/properties/invitedEmail' }]
+    authority:
+      type: { $ref: 'scalars.yaml#/MemberAuthority' }
+      from: [{ $ref: 'events.yaml#/RestaurantInvitationSent/properties/authority' }]
+    status:
+      type: { $ref: 'scalars.yaml#/RestaurantInvitationStatus' }
+      derive:
+        RestaurantInvitationSent: PENDING
+        RestaurantInvitationAccepted: ACCEPTED_PENDING_ACCESS
+        RestaurantInvitationRevoked: REVOKED
+        RestaurantInvitationExpired: EXPIRED
+      from:
+        - { $ref: 'events.yaml#/RestaurantInvitationSent' }
+        - { $ref: 'events.yaml#/RestaurantInvitationAccepted' }
+        - { $ref: 'events.yaml#/RestaurantInvitationRevoked' }
+        - { $ref: 'events.yaml#/RestaurantInvitationExpired' }
+      note: "Mechanically derived (a literal map, the `RiderRoster.standing` precedent) -- every arm OVERWRITES in place, matching the aggregate's own terminal-once lifecycle."
+    expires_at:
+      type: timestamptz
+      nullable: true
+      from: []
+      note: "COMPLEX by declaration (empty `from:`, the generator's own occurred_at-vs-parsed-string classifier has no THIRD case for 'occurred_at plus a configuration offset', tools/codegen-rs/src/emit/projectors.rs::classify_column) -- a hand-written Compute hook computes SENT's occurred_at + RESTAURANT_INVITATION_TTL_SECONDS, the SAME configuration key the aggregate's own `reminders:` schedule reads. The resulting `view-column-no-source` WARNING is accepted (warning-baseline.json), named here so the next reader does not mistake it for an oversight. Nullable only because every OTHER event arm preserves the prior value (never actually null once born)."
+    # `created_at` is the IMPLICIT technical column (ADR-0040, ColMode::Timestamp) -- it is
+    # exactly the SENT fact's occurred_at already (the row's technical birth IS its business
+    # birth), so no explicit column is declared here (a duplicate would fail to generate).
+
 Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog

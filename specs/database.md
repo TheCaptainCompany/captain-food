@@ -414,6 +414,43 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `RestaurantRoster` · 🛶 V0 · source aggregate `RestaurantMembership`
+
+- **Fed by**: `RestaurantAccessGranted`, `RestaurantAccessRevoked`
+- **Rules**: Rebuild = checkpoint reset, never TRUNCATE (dba, PROP §6.4): upsert keyed on `membershipId` on the GRANT arm, delete keyed on `membershipId` on the REVOKE arm, so a from-zero replay applies grant-then-delete in the SAME global `position` order the live path folds in -- a granted-then-revoked membership ends the replay ABSENT, exactly as it is live. TRUNCATE + reset would hide every member closed for the length of the drain. No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `RiderRoster`/`Member` precedent): a stray value fails the ONE row's projection rather than halting the whole group. Predicates over this table are GRANT tests only (PROP §6.4) -- a row's ABSENCE is never the correctness signal (indistinguishable from 'not yet replayed' vs 'revoked' vs 'never granted'); every assertion is a positive existence + value check.
+- **Note**: The MANAGER's/OPERATOR's own restaurant team list (`/team`, §8.2). ONE creating arm (`RestaurantAccessGranted`, the `Member` precedent) and, round 3 (dba BLOCKING), ONE deleting arm (`RestaurantAccessRevoked` -- ADDITIVE to the creating arm, never a replacement, a real DELETE keyed on `membershipId` rather than a soft-status column, the `ScopeMembership` targeted-revoke precedent). No `display_name`/email column (YAGNI, the `Member` precedent exactly): nothing in this event stream carries one for a `CAPTAIN_ONBOARDING` grant, and inventing a cross-stream join to the invitation's `invitedEmail` for the `MEMBER_INVITATION` basis ONLY would make the same column mean two different things depending on how a row was born -- the `/team` screen names this a `gaps:` entry rather than paint a partial truth.
+
+- **Indexes**: `(scope_id, member_id)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `membership_id` | `MembershipId` | `UUID` | PK | Keyed on the GRANT relationship, not the person -- graphql: revoke is keyed on membershipId, so it MUST be exposed (round-1 graphql finding). |
+| `scope_id` | `RestaurantId` | `UUID` | — | The tenant scope this row is visible under -- `restaurantRoster`'s query never takes it as an argument (`ReadScope::Restaurant` supplies it, PROP §6.5), this column is what the WHERE clause filters on. |
+| `member_id` | `MemberId` | `UUID` | — |  |
+| `authority` | `MemberAuthority` | `TEXT` | — | The ONLY expressible MANAGER condition for the `/team` screen's Invite/Revoke controls is resolver DATA on the viewer's OWN row (`viewerAuthority` on the connection), never a second `roles:` list (ux/graphql). |
+| `since` | `timestamptz` | `TIMESTAMPTZ` | — | The occurred_at of the granting fact (an occurrence timestamp, no payload field) -- the `RiderRoster.reinstated_at` precedent, hand-written Compute hook. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+### `RestaurantInvitationList` · 🛶 V0 · source aggregate `RestaurantInvitation`
+
+- **Fed by**: `RestaurantInvitationSent`, `RestaurantInvitationAccepted`, `RestaurantInvitationRevoked`, `RestaurantInvitationExpired`
+- **Rules**: Rebuild = TRUNCATE + reset TOGETHER (dba, PROP §6.4, the `RiderRoster` precedent, opposite of `RestaurantRoster`'s): status is grant-shaped (a later fact OVERWRITES an earlier one on the SAME row, never accumulates), so a checkpoint-only reset without truncating would leave a stale REVOKED/EXPIRED row's status untouched if the replay window somehow skipped rewriting it -- truncating first guarantees every row's status is freshly derived from a full chronological replay. No CHECK constraint (`DbFaultPolicy::Skip` semantics): a stray value fails the ONE row's projection rather than halting the whole group. Predicates over this table are GRANT tests only (PROP §6.4) -- no `NOT EXISTS` anywhere; every assertion is a positive existence + status-value check. Retention: `UNVERIFIED input` (register check, dba) -- no controlling record names a ceiling for how long a REVOKED/EXPIRED/ACCEPTED row stays listed; named here so a future record can supersede the current forever-retained default without silently reshaping the table.
+- **Note**: The MANAGER's/OPERATOR's own pending/accepted/revoked/expired invitation list (`/team`, §8.2). Status-shaped: EVERY declared `RestaurantInvitation` event updates the SAME row in place (`scalars.yaml#/RestaurantInvitationStatus` names the closed set, including the round-2 `ACCEPTED_PENDING_ACCESS` state and its named gap to plain `ACCEPTED`).
+
+- **Indexes**: `(scope_id, status, created_at)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `invitation_id` | `RestaurantInvitationId` | `UUID` | PK |  |
+| `scope_id` | `RestaurantId` | `UUID` | — |  |
+| `invited_email` | `EmailAddress` | `TEXT` | — |  |
+| `authority` | `MemberAuthority` | `TEXT` | — |  |
+| `status` | `RestaurantInvitationStatus` | `TEXT` | — | Mechanically derived (a literal map, the `RiderRoster.standing` precedent) -- every arm OVERWRITES in place, matching the aggregate's own terminal-once lifecycle. |
+| `expires_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | COMPLEX by declaration (empty `from:`, the generator's own occurred_at-vs-parsed-string classifier has no THIRD case for 'occurred_at plus a configuration offset', tools/codegen-rs/src/emit/projectors.rs::classify_column) -- a hand-written Compute hook computes SENT's occurred_at + RESTAURANT_INVITATION_TTL_SECONDS, the SAME configuration key the aggregate's own `reminders:` schedule reads. The resulting `view-column-no-source` WARNING is accepted (warning-baseline.json), named here so the next reader does not mistake it for an oversight. Nullable only because every OTHER event arm preserves the prior value (never actually null once born). |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `Catalog` · 🛶 V0 · source aggregate `Catalog`
 
 - **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`, `CatalogSlugConfigured`

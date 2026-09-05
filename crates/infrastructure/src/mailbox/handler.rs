@@ -676,6 +676,26 @@ impl MailboxCommandHandler {
                     )
                     .await;
             }
+            // #639 part C step 6-iv round 2 (#902): the TTL reminder records the expiry on its
+            // invitation's own stream — Recorded / NoChange (already terminal, or the stream is
+            // gone), never a rejection (a deadline's passage cannot be refused), the SAME shape as
+            // `RecordLeg::Order` above.
+            RecordLeg::RestaurantInvitation(e) => {
+                let result = application::commands::record_inbound_restaurant_invitation_expiry(
+                    store.as_ref(),
+                    e,
+                    &actor,
+                )
+                .await;
+                // Round 3 (obs, BLOCKING): before this line the expiry was recorded SILENTLY --
+                // #902's row said RESOLVED while `restaurant_invitation::expired()` had never been
+                // called. Only the genuinely-recorded outcome counts; a redelivered NoChange (the
+                // stream is gone, or already terminal) is not a NEW expiry.
+                if let Ok(RecordOutcome::Recorded) = result {
+                    telemetry::meters::restaurant_invitation::expired();
+                }
+                result
+            }
         };
         let delivery = match outcome {
             Ok(RecordOutcome::Recorded) | Ok(RecordOutcome::Updated) => {

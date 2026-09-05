@@ -371,6 +371,7 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         run_rider_restriction_door: false,
         run_member_access_grant: false,
         run_member_sign_in_door: false,
+        run_restaurant_invitation: false,
     };
     Door { mailbox, identity, riders, sessions, deps, app }
 }

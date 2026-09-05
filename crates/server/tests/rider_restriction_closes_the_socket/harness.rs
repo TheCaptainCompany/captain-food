@@ -182,6 +182,7 @@ pub fn spawn_mailbox_workers(
         run_rider_restriction_door: true,
         run_member_access_grant: false,
         run_member_sign_in_door: false,
+        run_restaurant_invitation: false,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
@@ -338,6 +339,12 @@ pub fn schema_over(
         infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
     );
     let rider_roster: Arc<dyn RiderRosterReadRepository> = Arc::new(roster);
+    let member_authority: Arc<dyn application::queries::MemberAuthorityRepository> =
+        Arc::new(infrastructure::PgMemberAuthorityRepository::new(pool.clone()));
+    let restaurant_roster: Arc<dyn application::queries::RestaurantRosterReadRepository> =
+        Arc::new(infrastructure::PgRestaurantRosterRepository::new(pool.clone()));
+    let restaurant_invitations: Arc<dyn application::queries::RestaurantInvitationListReadRepository> =
+        Arc::new(infrastructure::PgRestaurantInvitationListRepository::new(pool.clone()));
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
@@ -377,6 +384,9 @@ pub fn schema_over(
             deliveries,
             rider_restrictions,
             rider_roster,
+            member_authority,
+            restaurant_roster,
+            restaurant_invitations,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,

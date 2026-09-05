@@ -307,6 +307,65 @@ pub fn project_member<C: MemberCompute>(c: &C, state: Option<MemberRow>, env: &E
     })
 }
 
+/// Hand-written business logic for `RestaurantRoster`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait RestaurantRosterCompute {
+}
+
+pub fn project_restaurant_roster<C: RestaurantRosterCompute>(c: &C, state: Option<RestaurantRosterRow>, env: &Envelope) -> Option<RestaurantRosterRow> {
+    let _ = c;
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::RestaurantAccessGranted(e) => Some(RestaurantRosterRow {
+            membership_id: e.membership_id.clone(),
+            scope_id: e.scope_id.clone(),
+            member_id: e.member_id.clone(),
+            authority: e.authority.clone(),
+            since: env.occurred_at,
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        DomainEvent::RestaurantAccessRevoked(_) => None,
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
+/// Hand-written business logic for `RestaurantInvitationList`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait RestaurantInvitationListCompute {
+    fn expires_at(&self, prev: Option<&RestaurantInvitationListRow>, env: &Envelope) -> Option<chrono::DateTime<chrono::Utc>>;
+}
+
+pub fn project_restaurant_invitation_list<C: RestaurantInvitationListCompute>(c: &C, state: Option<RestaurantInvitationListRow>, env: &Envelope) -> Option<RestaurantInvitationListRow> {
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::RestaurantInvitationSent(e) => Some(RestaurantInvitationListRow {
+            invitation_id: e.invitation_id.clone(),
+            scope_id: e.restaurant_id.clone(),
+            invited_email: e.invited_email.clone(),
+            authority: e.authority.clone(),
+            status: RestaurantInvitationStatus::PENDING,
+            expires_at: c.expires_at(state.as_ref(), env),
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        DomainEvent::RestaurantInvitationAccepted(_) => { let mut row = state?; row.status = RestaurantInvitationStatus::ACCEPTED_PENDING_ACCESS; Some(row) },
+        DomainEvent::RestaurantInvitationRevoked(_) => { let mut row = state?; row.status = RestaurantInvitationStatus::REVOKED; Some(row) },
+        DomainEvent::RestaurantInvitationExpired(_) => { let mut row = state?; row.status = RestaurantInvitationStatus::EXPIRED; Some(row) },
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
 /// Hand-written business logic for `Catalog`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait CatalogCompute {

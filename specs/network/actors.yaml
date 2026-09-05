@@ -199,6 +199,11 @@ RestaurantMembership:
     # rule `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of either an
     # ERROR, and `pm-emits-human-only-event` makes a `receives[].emits:` of RestaurantAccessGranted
     # (or RestaurantAccessRevoked) an ERROR too -- no PM inbox may declare either.
+    # Round 2 REVERT (ADR-20260905-101349 §2 amendment, reviewer/vernon/evans/graphql B1): the
+    # round-1 PUBLIC widening of THIS message is undone -- `GrantRestaurantAccess` is ADMIN-only
+    # again, because per-field authz cannot express "PUBLIC only for basis: MEMBER_INVITATION".
+    # The invitation accept's second command is its OWN message below, PUBLIC, with its OWN
+    # payload -- one name, one door (ADR-20260803-234035 compiler-first).
     - message: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
       requires:
         acting:
@@ -208,6 +213,19 @@ RestaurantMembership:
         - { $ref: 'errors.yaml#/MemberAccessGrantDoorClosed' }
         - { $ref: 'errors.yaml#/AccessBasisNotYetAccepted' }
         - { $ref: 'errors.yaml#/MemberAuthSubjectAlreadyBound' }
+    # Round 2 (ADR-20260905-101349 §2 amendment): the PUBLIC second half of the two-lane accept,
+    # its OWN message on the SAME aggregate/stream/lane -- no `requires: acting` (an unauthenticated
+    # caller has no credential yet; the `AcceptRestaurantInvitation`/`RequestMemberSignInLink`
+    # precedent below). Emits the SAME event as the ADMIN door above.
+    - message: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+      emits: [{ $ref: 'events.yaml#/RestaurantAccessGranted' }]
+      throws:
+        - { $ref: 'errors.yaml#/MemberAccessGrantDoorClosed' }
+        - { $ref: 'errors.yaml#/MemberAuthSubjectAlreadyBound' }
+        - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+      effect: "Verify the magic-link token with the auth provider (the SAME token the invitation-accept leg proved); derive scopeType/scopeId/memberId/authority from the RestaurantInvitation stream invitationId names, requiring it to be terminal ACCEPTED with acceptedAuthSubject equal to the just-proved subject; membershipId is UUIDv5-derived from invitationId, never client-supplied."
     - message: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
       requires:
         acting:
@@ -238,3 +256,87 @@ RestaurantMembership:
         - { $ref: 'errors.yaml#/MemberSignInRequiresSession' }
         - { $ref: 'errors.yaml#/MemberSignInDoorClosed' }
       effect: "Verify the magic-link token with the auth provider, look the proved subject up in the Member bridge (auth_subject -> member_id, step 6-i): no member -> MemberNotLinked, nothing stamped, the session still parked so the refusal screen has a real cookie; a member -> stamp { role: MEMBER } on the provider user and park the post-stamp session for POST /auth/session. No event."
+
+
+RestaurantInvitation:
+  type: aggregate
+  identity: { $ref: '#/RestaurantInvitation/state/invitationId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    The roster and the invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3,
+    PROP-20260831-180622 §6.1): one restaurant MANAGER's invite of one email address to one
+    restaurant scope. Its OWN aggregate, OWN stream (`RestaurantInvitation-{invitationId}`), OWN
+    lane -- FORK 1 Option A again: a targeted revoke needs its own identity distinct from the
+    `RestaurantMembership` it may precede (6-i). The accept is TWO commands in TWO lanes, sequenced
+    by the accepting member's CLIENT, never a process manager: `AcceptRestaurantInvitation` here,
+    then `GrantRestaurantAccessByInvitation` (PUBLIC, round 2's split, ADR-20260905-101349 §2
+    amendment) on the membership stream.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/RestaurantInvitationStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/RestaurantInvitationSent' }
+        to: PENDING
+    transitions:
+      - { from: [PENDING], event: { $ref: 'events.yaml#/RestaurantInvitationAccepted' }, to: ACCEPTED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/RestaurantInvitationRevoked' }, to: REVOKED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/RestaurantInvitationExpired' }, to: EXPIRED }
+    terminal: [ACCEPTED, REVOKED, EXPIRED]
+  reminders:
+    RestaurantInvitationExpired:
+      payload: { $ref: 'events.yaml#/RestaurantInvitationExpired' }
+      after: { $ref: 'configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS' }
+      # ADR-20260810-231300: expiry is a recorded fact via a co-committed schedule, never an
+      # engine timer. `keep`, the OrderAcceptanceTimedOut shape -- a redelivered birth fact must
+      # never move the deadline (there is exactly one birth per invitationId, but the discipline
+      # is the same: the FIRST scheduled_at wins).
+      reschedule: keep
+  receives:
+    # The MANAGER-authority door (#639 part C step 6-iv, §8.2): `roles: [RESTAURANT]` at the API.
+    # Authority is not a `requires: acting` predicate this DSL can express (acting matches an
+    # IDENTITY field against the aggregate's own state, never a business attribute read from a
+    # DIFFERENT aggregate's log) -- round 1's STOP finding. Round 2 (ADR-20260905-101349 §2
+    # amendment) BUILDS the guard where this session CAN reach: a hand-written GraphQL
+    # `AuthorityGuard` (`crates/server/src/graphql/acl.rs`, the `StandingGuard` composition
+    # precedent) resolving the caller's own authority through
+    # `application::queries::MemberAuthorityRepository` -- the ALREADY-LANDED `member` identity
+    # bridge (6-i/6-ii) joined to the WRITE-SIDE `domain_events` log itself, NEVER the
+    # `RestaurantRoster` projection this round adds (young: a roster rebuild window must never
+    # change what this write-path guard accepts) -- genuine protection on the only REACHABLE
+    # production path (the mailbox is not independently reachable by an external caller), but not
+    # a second, aggregate-level belt: `crates/infrastructure/src/mailbox/handler.rs::resolve_actor`
+    # still has no RESTAURANT branch (the #144 bridge, the SAME gap `Actor.domain_id` already
+    # documents as unbridged for RESTAURANT/RIDER, and that file stays FENCED for this dispatch).
+    # Closing #144 for RESTAURANT commands generally is follow-up work, not this slice's.
+    - message: { $ref: 'commands.yaml#/InviteRestaurantMember' }
+      emits: [{ $ref: 'events.yaml#/RestaurantInvitationSent' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantInvitationDoorClosed' }
+      schedules:
+        - { $ref: '#/RestaurantInvitation/reminders/RestaurantInvitationExpired' }
+    - message: { $ref: 'commands.yaml#/RevokeRestaurantInvitation' }
+      emits: [{ $ref: 'events.yaml#/RestaurantInvitationRevoked' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantInvitationNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantInvitationAlreadyRevoked' }
+    # PUBLIC, identify-only: no `requires: acting` (an unauthenticated caller has no credential
+    # yet), the RequestMemberSignInLink/ConfirmMemberSignIn precedent above.
+    - message: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      emits: [{ $ref: 'events.yaml#/RestaurantInvitationAccepted' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+      effect: "Verify the magic-link token with the auth provider; the invited email must equal the verified email, case-folded, and the invitation must be PENDING -- any other outcome is the SAME typed RestaurantInvitationNotAcceptable, no enumeration oracle."
+    - message: { $ref: '#/RestaurantInvitation/reminders/RestaurantInvitationExpired' }
+      emits: [{ $ref: 'events.yaml#/RestaurantInvitationExpired' }]
+      effect: >
+        The promotion pass delivers the TTL: record the expiry with record semantics iff the
+        invitation is STILL PENDING -- Recorded (PENDING -> EXPIRED), or NoChange (already
+        accepted/revoked/expired, or the stream is gone) -- NEVER Rejected (the
+        OrderExpired/OrderAcceptanceTimedOut precedent: a deadline's passage cannot be refused).
+        Round 2 (#639 part C step 6-iv) wires the `RecordLeg::RestaurantInvitation` arm in
+        `crates/infrastructure/src/mailbox/handler.rs` -- round 1 PARKED this delivery citing a
+        fence on that file that named no concurrent claim; the recorder was already written and
+        idempotent, so finishing the wiring was the honest fix (issue #902 tracks the follow-up
+        observability, not the delivery itself, which now exists).

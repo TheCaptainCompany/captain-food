@@ -527,3 +527,63 @@ RestaurantAccessRevoked:
   required:
     - membershipId
     - ground
+
+
+# --- The roster and the invitation: the RestaurantInvitation aggregate (#639 part C step 6-iv,
+# ADR-20260905-101349 §2/§3) -----------------------------------------------------------------
+
+RestaurantInvitationSent:
+  description: >
+    A restaurant MANAGER invited a colleague by email (§8.2). `memberId` is CALLER-MINTED (the
+    ADR-0034 doctrine, `commands.yaml#/InviteRestaurantMember`'s own note) -- the person this
+    invitation names exists from this fact forward, before any credential proves who they are.
+    Business payload only (ADR-0041): the inviting member is envelope `domain_events.user_id`.
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    invitedEmail:
+      $ref: 'scalars.yaml#/EmailAddress'
+    authority:
+      $ref: 'scalars.yaml#/MemberAuthority'
+    memberId:
+      $ref: 'scalars.yaml#/MemberId'
+  required: [invitationId, restaurantId, invitedEmail, authority, memberId]
+
+
+RestaurantInvitationRevoked:
+  description: "A pending invitation was withdrawn before acceptance (§8.4)."
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+  required: [invitationId]
+
+
+RestaurantInvitationAccepted:
+  description: >
+    The invited person accepted (§8.3) -- the first of the two-lane accept's two commands.
+    `authSubject` is `verify_email_token`'s OUTPUT, never a client-supplied field (the same
+    boundary-crossing discipline as `RestaurantAccessGranted.authSubject`).
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+    authSubject:
+      $ref: 'scalars.yaml#/AuthSubject'
+  required: [invitationId, authSubject]
+
+
+RestaurantInvitationExpired:
+  description: >
+    The invitation's TTL (`configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS`) elapsed
+    while still pending -- a recorded fact delivered by the promotion pass
+    (ADR-20260810-231300: expiry is a scheduled reminder, never an engine timer), never appended
+    over an already-terminal invitation (accepted/revoked/expired).
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+  required: [invitationId]

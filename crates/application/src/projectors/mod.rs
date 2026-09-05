@@ -20,6 +20,8 @@ pub mod order_conversation;
 pub mod order_tracking;
 pub mod prospection_pipeline;
 pub mod restaurant;
+pub mod restaurant_invitation_list;
+pub mod restaurant_roster;
 pub mod rider;
 pub mod rider_restriction;
 pub mod rider_roster;

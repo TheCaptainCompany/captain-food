@@ -41,6 +41,20 @@ public_user:
       steps:
         RequestMemberSignInLink: { $ref: 'api.yaml#/mutations/requestMemberSignInLink' }   # identical outcome whether or not the address is on the roster
         ConfirmMemberSignIn: { $ref: 'api.yaml#/mutations/confirmMemberSignIn' }   # identify-only; the session then arrives via POST /auth/session, never in the response
+    AcceptRestaurantInvitation:
+      description: >
+        As a visitor who received an invitation email, I accept it and become a restaurant member --
+        the two-lane accept, client-sequenced, never a process manager (#639 part C step 6-iv,
+        ADR-20260905-101349 §2, PROP-20260831-180622 §8.3). Walked from
+        `restos.captain.food/invitation` (`specs/screens/restaurant_backoffice.yaml`, transport role
+        PUBLIC): `acceptRestaurantInvitation` first, then the client itself dispatches the SECOND,
+        PUBLIC-only command `grantRestaurantAccessByInvitation` (round 2, ADR-20260905-101349 §2
+        amendment -- its own door, never a `basis` argument on the ADMIN grant) and signs in via
+        `POST /auth/session`. Renamed from `AcceptRestaurantMembershipInvitation` (evans B3): the
+        first command alone creates no membership.
+      steps:
+        AcceptInvitation: { $ref: 'api.yaml#/mutations/acceptRestaurantInvitation' }
+        GrantAccessFromInvitation: { $ref: 'api.yaml#/mutations/grantRestaurantAccessByInvitation' }
 
 customer:
   description: An authenticated person who orders food via Captain.Food.
@@ -227,7 +241,14 @@ restaurant_manager:
         ReadInternalNotes: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' }
         EscalateToAdmin: { $ref: 'api.yaml#/mutations/escalateToAdmin' }   # pull an admin in with a reason (#129)
         MuteParticipant: { $ref: 'api.yaml#/mutations/muteParticipant' }   # mute a disruptive role, reason required (#129)
-        UnmuteParticipant: { $ref: 'api.yaml#/mutations/unmuteParticipant' }
+        UnmuteParticipant: { $ref: 'api.yaml#/mutations/unmuteParticipant' }   # lift a mute (#129)
+    ManageTeam:
+      description: As a MANAGER, I see my restaurant's roster and invitation list, invite a colleague by email, and withdraw an unaccepted invitation -- self-service staff onboarding, ships dark behind RUN_RESTAURANT_INVITATION (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §8.2/§8.4). The OPERATOR authority sees the roster but never this activity's Invite/Revoke controls (§8.2, resolver-data condition on viewerAuthority, not a persona split).
+      steps:
+        ViewRoster: { $ref: 'api.yaml#/queries/restaurantRoster' }
+        ViewInvitations: { $ref: 'api.yaml#/queries/restaurantInvitations' }
+        InviteMember: { $ref: 'api.yaml#/mutations/inviteRestaurantMember' }
+        RevokeInvitation: { $ref: 'api.yaml#/mutations/revokeRestaurantInvitation' }
     HandleClaims:
       description: As a manager, I decide customers' claims on my orders — resolving or rejecting each (#151).
       steps:

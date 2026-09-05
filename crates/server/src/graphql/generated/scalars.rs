@@ -1410,9 +1410,11 @@ impl From<AuthSubject> for ds::AuthSubject {
 /// A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C).
 /// Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo.
 /// Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.
+/// #639 part C step 6-iv, round 2: a `MemberId` can now be minted at INVITATION time, for a person who has typed no address of their own and may never acquire an `AuthSubject` at all (an invitation that is revoked or left to expire); the bridge to an `AuthSubject` is completed only on acceptance, at which point this same id is the one the accepting person's future grants and sign-ins resolve to.
+/// Round 3 (evans): `MemberId` is minted by the INVITING caller at invitation time, never the handler -- and at grant, `GrantRestaurantAccessByInvitation` resolves it as the `(MEMBER, authSubject)` reservation HOLDER when the accepting person is already bound to one (a re-hire, or a second restaurant), else reuses the invitation's own caller-minted id. `MembershipId` -- NOT `MemberId` -- is the value DERIVED on this path: UUIDv5 of the invitation's own id, never caller-supplied, enforcing one membership per accepted invitation structurally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MemberId(pub uuid::Uuid);
-async_graphql::scalar!(MemberId, "MemberId", "A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.");
+async_graphql::scalar!(MemberId, "MemberId", "A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change. #639 part C step 6-iv, round 2: a `MemberId` can now be minted at INVITATION time, for a person who has typed no address of their own and may never acquire an `AuthSubject` at all (an invitation that is revoked or left to expire); the bridge to an `AuthSubject` is completed only on acceptance, at which point this same id is the one the accepting person's future grants and sign-ins resolve to. Round 3 (evans): `MemberId` is minted by the INVITING caller at invitation time, never the handler -- and at grant, `GrantRestaurantAccessByInvitation` resolves it as the `(MEMBER, authSubject)` reservation HOLDER when the accepting person is already bound to one (a re-hire, or a second restaurant), else reuses the invitation's own caller-minted id. `MembershipId` -- NOT `MemberId` -- is the value DERIVED on this path: UUIDv5 of the invitation's own id, never caller-supplied, enforcing one membership per accepted invitation structurally.");
 impl From<ds::MemberId> for MemberId {
     fn from(v: ds::MemberId) -> Self {
         Self(v.0)
@@ -3149,7 +3151,7 @@ impl From<MemberAuthority> for ds::MemberAuthority {
     }
 }
 
-/// WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager (ADR-20260905-101349 §2).
+/// WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. Step 6-i's `GrantRestaurantAccess` handler accepted only `CAPTAIN_ONBOARDING`; **6-iv adds `MEMBER_INVITATION`**, as the second command of the two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`, never a process manager, ADR-20260905-101349 §2) -- the handler DERIVES `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's own recorded facts rather than trusting the client's copies (`GrantRestaurantAccess.invitationId` is the sole proof). `GOOGLE_BUSINESS_PROFILE` and `OWNER_DECLARATION` stay declared-but-refused with the typed error `errors.yaml#/AccessBasisNotYetAccepted`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum AccessBasis {
     #[graphql(name = "CAPTAIN_ONBOARDING")]
@@ -3203,6 +3205,58 @@ impl From<AccessRevocationGround> for ds::AccessRevocationGround {
         match v {
             AccessRevocationGround::LEFT_THE_RESTAURANT => Self::LEFT_THE_RESTAURANT,
             AccessRevocationGround::ACCESS_NO_LONGER_NEEDED => Self::ACCESS_NO_LONGER_NEEDED,
+        }
+    }
+}
+
+/// Identity of one `RestaurantInvitation` (#639 part C step 6-iv) -- one invite of one email address to one restaurant scope. REQUIRED and CALLER-MINTED on `InviteRestaurantMember`, the `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to route at all. Carried as `GrantRestaurantAccess.invitationId` on the accept leg's SECOND command as the sole proof that a grant on `basis: MEMBER_INVITATION` corresponds to a real, ACCEPTED invitation -- the handler derives `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's OWN recorded facts rather than trusting the client's copies of them (6-iv STOP finding: see the hand-back for the full reasoning).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantInvitationId(pub uuid::Uuid);
+async_graphql::scalar!(RestaurantInvitationId, "RestaurantInvitationId", "Identity of one `RestaurantInvitation` (#639 part C step 6-iv) -- one invite of one email address to one restaurant scope. REQUIRED and CALLER-MINTED on `InviteRestaurantMember`, the `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to route at all. Carried as `GrantRestaurantAccess.invitationId` on the accept leg's SECOND command as the sole proof that a grant on `basis: MEMBER_INVITATION` corresponds to a real, ACCEPTED invitation -- the handler derives `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's OWN recorded facts rather than trusting the client's copies of them (6-iv STOP finding: see the hand-back for the full reasoning).");
+impl From<ds::RestaurantInvitationId> for RestaurantInvitationId {
+    fn from(v: ds::RestaurantInvitationId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantInvitationId> for ds::RestaurantInvitationId {
+    fn from(v: RestaurantInvitationId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (`ACCEPTED_PENDING_ACCESS` -- round 2, ux/business: the two-lane accept's FIRST leg landed but the SECOND, `GrantRestaurantAccessByInvitation`, has not yet been observed by this projector; its own status, never painted as a plain failure on `/invitation`), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). The final `ACCEPTED_PENDING_ACCESS` -> `ACCEPTED` transition (once the grant leg's own `RestaurantAccessGranted` fact is observed) is round 2's NAMED GAP, tracked by #902's sibling follow-up -- `RestaurantInvitationList` never regresses a row FROM this state, so the gap is honest under-reporting, never a wrong answer. Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RestaurantInvitationStatus {
+    #[graphql(name = "PENDING")]
+    PENDING,
+    #[graphql(name = "ACCEPTED_PENDING_ACCESS")]
+    ACCEPTED_PENDING_ACCESS,
+    #[graphql(name = "ACCEPTED")]
+    ACCEPTED,
+    #[graphql(name = "REVOKED")]
+    REVOKED,
+    #[graphql(name = "EXPIRED")]
+    EXPIRED,
+}
+impl From<ds::RestaurantInvitationStatus> for RestaurantInvitationStatus {
+    fn from(v: ds::RestaurantInvitationStatus) -> Self {
+        match v {
+            ds::RestaurantInvitationStatus::PENDING => Self::PENDING,
+            ds::RestaurantInvitationStatus::ACCEPTED_PENDING_ACCESS => Self::ACCEPTED_PENDING_ACCESS,
+            ds::RestaurantInvitationStatus::ACCEPTED => Self::ACCEPTED,
+            ds::RestaurantInvitationStatus::REVOKED => Self::REVOKED,
+            ds::RestaurantInvitationStatus::EXPIRED => Self::EXPIRED,
+        }
+    }
+}
+impl From<RestaurantInvitationStatus> for ds::RestaurantInvitationStatus {
+    fn from(v: RestaurantInvitationStatus) -> Self {
+        match v {
+            RestaurantInvitationStatus::PENDING => Self::PENDING,
+            RestaurantInvitationStatus::ACCEPTED_PENDING_ACCESS => Self::ACCEPTED_PENDING_ACCESS,
+            RestaurantInvitationStatus::ACCEPTED => Self::ACCEPTED,
+            RestaurantInvitationStatus::REVOKED => Self::REVOKED,
+            RestaurantInvitationStatus::EXPIRED => Self::EXPIRED,
         }
     }
 }

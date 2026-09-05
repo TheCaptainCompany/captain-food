@@ -129,6 +129,31 @@ pub struct MemberRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The MANAGER's/OPERATOR's own restaurant team list (`/team`, §8.2). ONE creating arm (`RestaurantAccessGranted`, the `Member` precedent) and, round 3 (dba BLOCKING), ONE deleting arm (`RestaurantAccessRevoked` -- ADDITIVE to the creating arm, never a replacement, a real DELETE keyed on `membershipId` rather than a soft-status column, the `ScopeMembership` targeted-revoke precedent). No `display_name`/email column (YAGNI, the `Member` precedent exactly): nothing in this event stream carries one for a `CAPTAIN_ONBOARDING` grant, and inventing a cross-stream join to the invitation's `invitedEmail` for the `MEMBER_INVITATION` basis ONLY would make the same column mean two different things depending on how a row was born -- the `/team` screen names this a `gaps:` entry rather than paint a partial truth. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestaurantRosterRow {
+    pub membership_id: MembershipId,
+    pub scope_id: RestaurantId,
+    pub member_id: MemberId,
+    pub authority: MemberAuthority,
+    pub since: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The MANAGER's/OPERATOR's own pending/accepted/revoked/expired invitation list (`/team`, §8.2). Status-shaped: EVERY declared `RestaurantInvitation` event updates the SAME row in place (`scalars.yaml#/RestaurantInvitationStatus` names the closed set, including the round-2 `ACCEPTED_PENDING_ACCESS` state and its named gap to plain `ACCEPTED`). 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestaurantInvitationListRow {
+    pub invitation_id: RestaurantInvitationId,
+    pub scope_id: RestaurantId,
+    pub invited_email: EmailAddress,
+    pub authority: MemberAuthority,
+    pub status: RestaurantInvitationStatus,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatalogRow {
     pub catalog_id: CatalogId,

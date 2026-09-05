@@ -13,7 +13,7 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    AuthSubject, CatalogId, MemberId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
+    AuthSubject, CatalogId, MemberAuthority, MemberId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
     RiderStanding, ScopeType, SessionId, Slug,
     StockStatus, UserType,
 };
@@ -43,6 +43,12 @@ pub use crate::generated::rows::RiderRestrictionRow;
 /// The admin's rider roster (#639 part C step 4-iii-A, ADR-20260904-152807 §1) — the source of
 /// `riders`/`rider`.
 pub use crate::generated::rows::RiderRosterRow;
+/// The restaurant's own team roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+/// amendment) — the source of `restaurantRoster`.
+pub use crate::generated::rows::RestaurantRosterRow;
+/// The restaurant's own invitation list (#639 part C step 6-iv round 2) — the source of
+/// `restaurantInvitations`.
+pub use crate::generated::rows::RestaurantInvitationListRow;
 
 /// Optional filters for public restaurant discovery — mirrors the `restaurants` query args in api.yaml.
 /// V0 applies a subset (the rest are accepted and ignored until the read model backs them).
@@ -135,6 +141,18 @@ pub trait AuthSubjectReservationRepository: Send + Sync {
     /// `Ok(false)` = bound to a DIFFERENT principal of that kind. The caller maps `false` to the
     /// population's typed error (`RiderAuthSubjectAlreadyBound` for riders).
     async fn reserve(&self, subject: AuthSubject, principal: BoundPrincipal) -> Result<bool, DomainError>;
+
+    /// A PURE read of the current holder of `(kind, subject)`, or `None` if unbound -- unlike
+    /// [`Self::reserve`], never binds. #639 part C step 6-iv (ADR-20260905-101349 §2): the
+    /// invitation-accept grant leg must know whether the accepting auth subject already holds a
+    /// MEMBER binding (a re-hire, or a person taking a second restaurant) BEFORE deciding which
+    /// `memberId` the resulting `RestaurantAccessGranted` fact carries -- a stray
+    /// `MemberAuthSubjectAlreadyBound` after a terminal accept, with no retry, is not acceptable.
+    async fn holder_of(
+        &self,
+        subject: AuthSubject,
+        kind: PrincipalKind,
+    ) -> Result<Option<uuid::Uuid>, DomainError>;
 }
 
 #[async_trait]
@@ -446,6 +464,22 @@ pub trait MemberIdentityRepository: Send + Sync {
     async fn member_id_by_auth_subject(&self, auth_subject: AuthSubject) -> Result<Option<MemberId>, DomainError>;
 }
 
+/// #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment): the `AuthorityGuard`'s source
+/// of truth for "does this MEMBER hold MANAGER authority on this restaurant scope right now" --
+/// resolved from the ALREADY-LANDED `member` identity bridge (6-i/6-ii) joined to the WRITE-SIDE
+/// `domain_events` log itself, NEVER from the roster projection this round adds (young: a roster
+/// rebuild window must never change what a write-path guard accepts). `None` on every negative --
+/// unknown subject, wrong restaurant, or a revoked membership -- fail-closed, indistinguishable by
+/// design (this is an authorization question, not a diagnostic one).
+#[async_trait]
+pub trait MemberAuthorityRepository: Send + Sync {
+    async fn authority_for_subject(
+        &self,
+        auth_subject: AuthSubject,
+        restaurant_id: RestaurantId,
+    ) -> Result<Option<MemberAuthority>, DomainError>;
+}
+
 /// Read port over the `RiderRestriction` attribution table (#639 part C step 4-i,
 /// ADR-20260904-081527 §2/§4) — the source of `myStanding`.
 #[async_trait]
@@ -464,6 +498,28 @@ pub trait RiderRestrictionReadRepository: Send + Sync {
 pub trait RiderRosterReadRepository: Send + Sync {
     async fn all(&self) -> Result<Vec<RiderRosterRow>, DomainError>;
     async fn by_id(&self, rider_id: RiderId) -> Result<Option<RiderRosterRow>, DomainError>;
+}
+
+/// The `restaurantRoster` source (#639 part C step 6-iv round 2, PROP §6.5) — flat, scoped, paged.
+#[async_trait]
+pub trait RestaurantRosterReadRepository: Send + Sync {
+    async fn by_scope(
+        &self,
+        scope_id: RestaurantId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RestaurantRosterRow>, DomainError>;
+}
+
+/// The `restaurantInvitations` source (#639 part C step 6-iv round 2, PROP §6.5) — flat, scoped, paged.
+#[async_trait]
+pub trait RestaurantInvitationListReadRepository: Send + Sync {
+    async fn by_scope(
+        &self,
+        scope_id: RestaurantId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RestaurantInvitationListRow>, DomainError>;
 }
 
 /// Optional filters for the order list — mirrors the `orders` query args in api.yaml

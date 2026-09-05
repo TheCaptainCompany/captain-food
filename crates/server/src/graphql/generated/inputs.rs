@@ -975,10 +975,10 @@ pub struct RecordProspectReplyInput {
     pub note: Option<String>,
 }
 
-/// Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants.
+/// Grant a `MemberId` access to a restaurant scope by hand (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants. `roles: [ADMIN]` ONLY (round-2 REVERT: one name, one door -- 6-iv's PUBLIC-reachable widening of THIS command was a compiler-first violation the reviewer/vernon/evans/graphql lenses found at the round-1 presentation: per-field `@auth` cannot express "PUBLIC only for basis: MEMBER_INVITATION", so an anonymous caller could mint a MANAGER membership on any scope for any subject. The PUBLIC accept leg is now its OWN command, `GrantRestaurantAccessByInvitation`, below).
 /// `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command.
 /// `membershipId` is REQUIRED and CALLER-MINTED: the mailbox lane address declares `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than migrate later. Submitting an already-granted `membershipId` is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship.
-/// The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
+/// The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES every other declared `AccessBasis` value, `MEMBER_INVITATION` included, with the typed `AccessBasisNotYetAccepted` (unimplemented on THIS door -- it has its own door now). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct GrantRestaurantAccessInput {
@@ -996,6 +996,19 @@ pub struct GrantRestaurantAccessInput {
     pub authority: MemberAuthority,
     #[graphql(name = "basis")]
     pub basis: AccessBasis,
+}
+
+/// The SECOND command of the two-lane accept (round-2 split, ADR-20260905-101349 §2 amendment; reviewer B1, vernon B1/B2, evans B1, graphql B1): a PUBLIC-reachable door, entirely separate from the ADMIN-only `GrantRestaurantAccess` above, so no `roles:` union and no per-field authz is ever asked to express a per-argument privilege split (ADR-20260803-234035 compiler-first, level 4 -- the field for this basis simply does not exist on the ADMIN door's schema).
+/// Payload is EXACTLY `{ invitationId, token }` -- nothing else, nothing nullable. The handler: (1) `verify_email_token(token)` -> `authSubject` (the SAME identity port `AcceptRestaurantInvitation`/`ConfirmMemberSignIn` use); (2) folds the `RestaurantInvitation-{invitationId}` stream and refuses with the typed `RestaurantInvitationNotAcceptable` -- BYTE-IDENTICAL to an unknown invitationId -- unless the invitation is terminal `ACCEPTED` **and** its recorded `acceptedAuthSubject` equals the proved `authSubject` (the CALLER-IS-THE-SUBJECT proof, vernon B2: a stranger who learns or guesses an `invitationId` for someone else's already-accepted invitation gains nothing, because they cannot produce a token that verifies to that OTHER subject); (3) `membershipId` is DERIVED as `UUIDv5(RESTAURANT_INVITATION_MEMBERSHIP_NAMESPACE, invitationId)` -- never client-supplied (vernon B1: stream identity then enforces "one accepted invitation, at most one membership"; the `sirene.rs` deterministic-id precedent); a second call for the same accepted invitation folds an existing membership and returns the ordinary idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`), never a second fact. (4) `memberId` is the CURRENT reservation HOLDER for `(MEMBER, authSubject)` when one already exists (a re-hire, or a person joining a second restaurant, young B1: neither may be refused `MemberAuthSubjectAlreadyBound` after a terminal accept, with no retry available), else the invitation's own caller-minted `memberId`. (5) emits the SAME `RestaurantAccessGranted` fact as the ADMIN door, `basis: MEMBER_INVITATION` -- no stored-shape migration (evans: one event, two doors that may append it).
+/// `RESTAURANT_INVITATION_MEMBERSHIP_NAMESPACE` is a fixed UUIDv5 namespace constant with no controlling record (`UNVERIFIED input`, register check: no ADR/decision row names a UUIDv5 namespace for this derivation) -- named here so a future record can supersede it without silently reshaping every already-derived `membershipId`.
+/// Gated by the SAME `configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT` as the ADMIN door: a member-invitation grant is equally the irreversible moment that starts a real Tours human's legal clock.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantRestaurantAccessByInvitationInput {
+    #[graphql(name = "invitationId")]
+    pub invitation_id: RestaurantInvitationId,
+    #[graphql(name = "token")]
+    pub token: EmailVerificationToken,
 }
 
 /// End one `RestaurantMembership` (ADR-20260905-101349 §2/§11). Revocation of ACCESS is never release of the underlying `(MEMBER, authSubject)` reservation (§4, PROP §7): the human stays bound to their `MemberId` forever, so a later re-invitation cannot mint a second person for the same credential. `ground` is the closed, additive-only `AccessRevocationGround` -- no free-text field exists on this command, on purpose (the ADR-20260904-014136 precedent: a stored performance-keyed reason is the strongest requalification exhibit a labour dispute could ask for). Never gated: releasing access is always safe to allow (the `ReinstateRider`/ `RestrictRider` asymmetry, ADR-20260904-152807 §7).
@@ -1023,6 +1036,40 @@ pub struct RequestMemberSignInLinkInput {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmMemberSignInInput {
+    #[graphql(name = "token")]
+    pub token: EmailVerificationToken,
+}
+
+/// A restaurant MANAGER invites a colleague by email (§8.2). `roles: [RESTAURANT]` at the API, with a MANAGER-authority guard the OPERATOR authority never satisfies -- the control is ABSENT for OPERATOR in the `/equipe` UI (a resolver-data condition, never a form-field condition) AND refused again at the server (a GraphQL `AuthorityGuard`, `crates/server/src/graphql/acl.rs`). `memberId` is REQUIRED and CALLER-MINTED -- the ADR-0034 doctrine every other id in this DSL follows (client/ACL-generated, idempotent replay by construction), corrected from an earlier handler-mint draft of this command (6-iv STOP finding: a handler-random mint is untestable by this DSL's exact-literal behaviour-test comparison AND breaks ADR-0034, so the client mints it at invite time instead -- "ours, so it exists before any credential does" is satisfied either way, since the platform still mints it before the invitee ever authenticates). The SAME id is then available to stamp on `RestaurantAccessGranted` at the end of the two-lane accept without a second mint. `invitationId` is ALSO REQUIRED and CALLER-MINTED, the `GrantRestaurantAccess.membershipId` precedent: the mailbox lane address needs it present to route at all. Gated by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (default false), checked BEFORE the store is touched -- an invitation nobody can accept yet is a dead letter, and an unsendable email is worse than no invitation at all. Schedules `RestaurantInvitationExpired` at `configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS` out, `reschedule: keep` (the `OrderAcceptanceTimedOut` shape -- a redelivered birth never moves the deadline).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteRestaurantMemberInput {
+    #[graphql(name = "invitationId")]
+    pub invitation_id: RestaurantInvitationId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "invitedEmail")]
+    pub invited_email: EmailAddress,
+    #[graphql(name = "authority")]
+    pub authority: MemberAuthority,
+    #[graphql(name = "memberId")]
+    pub member_id: MemberId,
+}
+
+/// Withdraw a pending invitation before it is accepted (§8.4's revoke sheet, the same authority guard as `InviteRestaurantMember`). NEVER gated: withdrawing an offer nobody has accepted yet is always safe to allow (the `RevokeRestaurantAccess`/`RestrictRider` asymmetry). A revoked invitation's `AcceptRestaurantInvitation` is refused identically to an unknown or expired one (`errors.yaml#/RestaurantInvitationNotAcceptable`) -- no enumeration oracle at the accept door.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeRestaurantInvitationInput {
+    #[graphql(name = "invitationId")]
+    pub invitation_id: RestaurantInvitationId,
+}
+
+/// The invited person accepts (§8.3, `roles: [PUBLIC]`) -- identify-only, the first of the two-lane accept's two commands (never a process manager, ADR-20260905-101349 §2). The token is the magic link `InviteRestaurantMember`'s handler sent to `invitedEmail`; verified through the SAME identity port `ConfirmMemberSignIn`/`ConfirmEmailVerification` use. `RestaurantInvitationAccepted.authSubject` is `verify_email_token`'s OUTPUT, never a payload field here (the `ClaimRestaurantListing.accountId` contrast is step 7, not this slice). The invited email must equal the verified email, case-folded, else the SAME typed refusal as every other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked" (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client sequences `GrantRestaurantAccessByInvitation` (PUBLIC, `{invitationId, token}`, round 2's split -- ADR-20260905-101349 §2 amendment) itself once this returns.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptRestaurantInvitationInput {
+    #[graphql(name = "invitationId")]
+    pub invitation_id: RestaurantInvitationId,
     #[graphql(name = "token")]
     pub token: EmailVerificationToken,
 }
@@ -1487,6 +1534,24 @@ pub struct ProspectionPipelineQueryInput {
     pub min_score: Option<ProspectionScore>,
     #[graphql(name = "status")]
     pub status: Option<ProspectPipelineStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantRosterQueryInput {
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+    #[graphql(name = "offset")]
+    pub offset: Option<PageOffset>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationsQueryInput {
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+    #[graphql(name = "offset")]
+    pub offset: Option<PageOffset>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

@@ -121,13 +121,34 @@ RestaurantMembershipRevocationIsFinal:
   description: "RevokeRestaurantAccess on an unknown membershipId is rejected (RestaurantMembershipNotFound); on an already-revoked one it is rejected (RestaurantMembershipAlreadyRevoked) rather than silently re-recorded -- the log is never overwritten (#639 part C step 6-i)."
 
 GrantRestaurantAccessIsAHumanAct:
-  description: "GrantRestaurantAccess and RevokeRestaurantAccess are roles: [ADMIN] with requires: acting: { ADMIN: any } and no EXTERNAL key -- Captain provisions by hand, the human is the process manager (PROP-20260831-180622 §6.2 Q1); no process manager may `send` either (validator pm-sends-human-only-command) (#639 part C step 6-i, ADR-20260905-101349 §1)."
+  description: "RevokeRestaurantAccess is roles: [ADMIN] with requires: acting: { ADMIN: any }; GrantRestaurantAccess is roles: [ADMIN, PUBLIC] with requires: acting: { ADMIN: any, PUBLIC: any } (6-iv adds the invitation-accept caller) -- neither carries an EXTERNAL key, so both stay human-only (Captain provisions by hand, or a real person accepts an invitation; a process manager may `send` neither, validator pm-sends-human-only-command) (#639 part C step 6-i/6-iv, ADR-20260905-101349 §1/§2)."
 
 MemberAccessGrantGatedBeforeStore:
   description: "GrantRestaurantAccess refuses with the typed MemberAccessGrantDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT is off; RevokeRestaurantAccess is never gated -- releasing access is always safe to allow (#639 part C step 6-i, ADR-20260905-101349 §6, the RestrictRider/ReinstateRider asymmetry)."
 
 RestaurantAccessBasisAcceptedSetIsNarrower:
-  description: "AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three with the typed AccessBasisNotYetAccepted (#639 part C step 6-i, ADR-20260905-101349 §3)."
+  description: "AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three (GOOGLE_BUSINESS_PROFILE, OWNER_DECLARATION, and -- round 2 -- MEMBER_INVITATION, which now has its OWN door, GrantRestaurantAccessByInvitation) with the typed AccessBasisNotYetAccepted (#639 part C step 6-i/6-iv, ADR-20260905-101349 §3)."
+
+RestaurantInvitationExpiryIsARecordedFact:
+  description: "RestaurantInvitationExpired is scheduled at RESTAURANT_INVITATION_TTL_SECONDS out (reschedule: keep) and delivered by the promotion pass as a recorded fact -- never an engine timer (ADR-20260810-231300); only a STILL-PENDING invitation records it, with record semantics (#639 part C step 6-iv)."
+
+RestaurantInvitationRevocationIsFinal:
+  description: "RevokeRestaurantInvitation on an unknown invitationId is rejected (RestaurantInvitationNotFound); on an already-revoked one it is rejected (RestaurantInvitationAlreadyRevoked) rather than silently re-recorded (#639 part C step 6-iv, the RestaurantMembershipRevocationIsFinal precedent)."
+
+RestaurantInvitationGatedBeforeStore:
+  description: "InviteRestaurantMember refuses with the typed RestaurantInvitationDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_RESTAURANT_INVITATION is off; RevokeRestaurantInvitation is never gated -- withdrawing an unaccepted offer is always safe to allow (#639 part C step 6-iv)."
+
+RestaurantInvitationAcceptIsUniformlyRefused:
+  description: "AcceptRestaurantInvitation refuses an unknown invitationId, a wrong invited/verified email, an already-accepted, a revoked, and an expired invitation with the SAME typed error (RestaurantInvitationNotAcceptable) and the same shape -- no enumeration oracle for a stranger holding any invitationId (#639 part C step 6-iv, the 6-ii sign-in door's no-enumeration posture carried)."
+
+MemberInvitationGrantDerivesFromInvitation:
+  description: "GrantRestaurantAccessByInvitation (round 2, ADR-20260905-101349 §2 amendment) verifies its own token, derives scopeType/scopeId/memberId/authSubject/authority from the RestaurantInvitation stream identified by invitationId -- never from a client-supplied copy of any of them, since the command carries none -- and requires that invitation to be terminal ACCEPTED with acceptedAuthSubject equal to the caller's own proved auth subject; any other outcome is the SAME typed RestaurantInvitationNotAcceptable as an unknown invitation (#639 part C step 6-iv, ADR-20260905-101349 §2)."
+
+RestaurantAccessGrantByInvitationDerivesMembershipId:
+  description: "GrantRestaurantAccessByInvitation's membershipId is DERIVED as UUIDv5(namespace, invitationId), never client-supplied -- one accepted invitation can produce at most one RestaurantMembership stream; a second call for the same accepted invitation folds the existing membership and returns the ordinary idempotent no-op (#639 part C step 6-iv round 2, ADR-20260905-101349 §2 amendment)."
+
+RestaurantAccessGrantByInvitationReusesTheHeldMemberId:
+  description: "GrantRestaurantAccessByInvitation's memberId is the CURRENT reservation holder for (MEMBER, authSubject) when one already exists (a re-hire, or a person joining a second restaurant), never the invitation's own minted memberId in that case -- neither is refused MemberAuthSubjectAlreadyBound after a terminal accept, with no retry available (#639 part C step 6-iv round 2, young B1)."
 
 
 MemberSignInIdentifiesOnly:

@@ -5703,12 +5703,17 @@ Catalog:
         for i in &issues {
             assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
         }
-        const LEGITIMATELY_UNADDRESSED: [&str; 5] = [
+        const LEGITIMATELY_UNADDRESSED: [&str; 6] = [
             "RequestPhoneVerification",
             "RequestRiderSignInCode",
             "ConfirmRiderSignIn",
             "RequestMemberSignInLink",
             "ConfirmMemberSignIn",
+            // #639 part C step 6-iv round 2: PUBLIC, `{invitationId, token}` only -- the caller has
+            // no credential of its own besides the token, and `membershipId` is DERIVED server-side
+            // (UUIDv5 of `invitationId`, never client-supplied), the same addressing-only shape as
+            // the sign-in doors above.
+            "GrantRestaurantAccessByInvitation",
         ];
         let mut inventory: Vec<(String, &str)> = issues
             .iter()
@@ -5728,6 +5733,7 @@ Catalog:
             vec![
                 ("actors.yaml/Customer".to_string(), "RequestPhoneVerification"),
                 ("actors.yaml/RestaurantMembership".to_string(), "ConfirmMemberSignIn"),
+                ("actors.yaml/RestaurantMembership".to_string(), "GrantRestaurantAccessByInvitation"),
                 ("actors.yaml/RestaurantMembership".to_string(), "RequestMemberSignInLink"),
                 ("actors.yaml/Rider".to_string(), "ConfirmRiderSignIn"),
                 ("actors.yaml/Rider".to_string(), "RequestRiderSignInCode"),
@@ -6806,10 +6812,13 @@ Catalog:
                 // — not an engine-internal timer that would move the subject's status screen with no
                 // foldable cause in the log.
                 ("Customer", "CustomerErasureDue"),
+                // The invitation TTL (#639 part C step 6-iv): PENDING -> EXPIRED, delivered through
+                // `RecordLeg::RestaurantInvitation` (round 2 wired it; #902).
+                ("RestaurantInvitation", "RestaurantInvitationExpired"),
                 ("Order", "OrderExpired"),
                 ("Order", "OrderAcceptanceTimedOut"),
             ],
-            "the declared reminders: the retention pilot, the #167 acceptance deadline, the #708 erasure window"
+            "the declared reminders: the retention pilot, the #167 acceptance deadline, the #708 erasure window, the #639 invitation TTL"
         );
         let deletions = parse_deletions(&model);
         assert_eq!(
@@ -16835,7 +16844,8 @@ mod screen_roles_gate {
     /// The real tree is GREEN under every §26 ERROR. The rider door was the first screen to
     /// declare a transport role; #639 part C step 6-ii adds the member sign-in door's THREE PUBLIC
     /// screens (`sign_in`, `sign_in_return` — round 2's magic-link return landing —, `not_linked`)
-    /// on `restaurant_backoffice.yaml` alongside it.
+    /// on `restaurant_backoffice.yaml` alongside it; 6-iv round 2 adds a FOURTH, `invitation_accept`
+    /// (the invitation-accept landing, also PUBLIC and hand-written).
     #[test]
     fn the_real_corpus_is_clean_and_the_rider_door_is_the_one_declared_transport_role() {
         let model = real_model();
@@ -16872,6 +16882,9 @@ mod screen_roles_gate {
             vec![
                 "screens/restaurant_backoffice.yaml/sign_in".to_string(),
                 "screens/restaurant_backoffice.yaml/sign_in_return".to_string(),
+                // #639 part C step 6-iv round 2: the invitation-accept landing, PUBLIC, hand-written
+                // for the same reasons `sign_in_return` is (see `crates/web/src/invitation_accept.rs`).
+                "screens/restaurant_backoffice.yaml/invitation_accept".to_string(),
                 "screens/restaurant_backoffice.yaml/not_linked".to_string(),
                 "screens/rider.yaml/sign_in".to_string(),
             ]

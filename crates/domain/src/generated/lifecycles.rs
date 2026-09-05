@@ -188,6 +188,54 @@ pub mod restaurant {
     }
 }
 
+/// RestaurantInvitation lifecycle over [`RestaurantInvitationStatus`] (specs/actors.yaml#/RestaurantInvitation/lifecycle).
+pub mod restaurant_invitation {
+    use crate::generated::events::DomainEvent;
+    use crate::generated::scalars::RestaurantInvitationStatus;
+    
+    /// Terminal states — no outgoing transitions.
+    pub const TERMINAL: &[RestaurantInvitationStatus] = &[RestaurantInvitationStatus::ACCEPTED, RestaurantInvitationStatus::REVOKED, RestaurantInvitationStatus::EXPIRED];
+
+    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
+    pub fn initial(event: &DomainEvent) -> Option<RestaurantInvitationStatus> {
+        match event {
+            DomainEvent::RestaurantInvitationSent(_) => Some(RestaurantInvitationStatus::PENDING),
+            _ => None,
+        }
+    }
+
+    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
+    pub fn transition(from: RestaurantInvitationStatus, event: &DomainEvent) -> Option<RestaurantInvitationStatus> {
+        match (from, event) {
+            (RestaurantInvitationStatus::PENDING, DomainEvent::RestaurantInvitationAccepted(_)) => Some(RestaurantInvitationStatus::ACCEPTED),
+            (RestaurantInvitationStatus::PENDING, DomainEvent::RestaurantInvitationRevoked(_)) => Some(RestaurantInvitationStatus::REVOKED),
+            (RestaurantInvitationStatus::PENDING, DomainEvent::RestaurantInvitationExpired(_)) => Some(RestaurantInvitationStatus::EXPIRED),
+            _ => None,
+        }
+    }
+
+    /// The state `event` drives the machine to, irrespective of the current state — at fold
+    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
+    pub fn target(event: &DomainEvent) -> Option<RestaurantInvitationStatus> {
+        match event {
+            DomainEvent::RestaurantInvitationAccepted(_) => Some(RestaurantInvitationStatus::ACCEPTED),
+            DomainEvent::RestaurantInvitationRevoked(_) => Some(RestaurantInvitationStatus::REVOKED),
+            DomainEvent::RestaurantInvitationExpired(_) => Some(RestaurantInvitationStatus::EXPIRED),
+            _ => None,
+        }
+    }
+
+    /// Whether `state` is terminal (no outgoing transitions).
+    pub fn is_terminal(state: RestaurantInvitationStatus) -> bool {
+        TERMINAL.contains(&state)
+    }
+}
+
 /// Cart lifecycle over [`CartStatus`] (specs/actors.yaml#/Cart/lifecycle).
 pub mod cart {
     use crate::generated::events::DomainEvent;

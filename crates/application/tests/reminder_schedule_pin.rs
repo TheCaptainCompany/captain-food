@@ -115,6 +115,19 @@ fn reminder_schedule_table_is_exactly_the_declared_set() {
             std::time::Duration::from_secs(3650 * DAY),
             ReschedulePolicy::InPlace,
         ),
+        // #639 6-iv: the invitation TTL. `reschedule: keep` — a re-invite (there is none in this
+        // slice) must never extend an already-running deadline; RESTAURANT_INVITATION_TTL_SECONDS
+        // = 604800 SECONDS (7 days, `UNVERIFIED input` default, ADR-20260905-101349).
+        (
+            "RestaurantInvitation",
+            "InviteRestaurantMember",
+            "RestaurantInvitationExpired",
+            "RestaurantInvitationExpired",
+            "invitationId",
+            "RESTAURANT_INVITATION_TTL_SECONDS",
+            std::time::Duration::from_secs(604_800),
+            ReschedulePolicy::Keep,
+        ),
     ];
 
     assert_eq!(

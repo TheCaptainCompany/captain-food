@@ -23,7 +23,8 @@ use std::time::Duration;
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
     project_member, project_order_conversation, project_order_tracking,
-    project_prospection_pipeline, project_restaurant, project_rider, project_rider_restriction,
+    project_prospection_pipeline, project_restaurant, project_restaurant_invitation_list,
+    project_restaurant_roster, project_rider, project_rider_restriction,
     project_rider_roster, project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
@@ -35,6 +36,8 @@ use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
+use application::projectors::restaurant_invitation_list::RestaurantInvitationListProjector;
+use application::projectors::restaurant_roster::RestaurantRosterProjector;
 use application::projectors::rider::RiderProjector;
 use application::projectors::rider_restriction::RiderRestrictionProjector;
 use application::projectors::rider_roster::RiderRosterProjector;
@@ -42,7 +45,8 @@ use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{
-    CartId, CatalogId, CustomerId, MemberId, OrderId, RestaurantId, RiderId,
+    CartId, CatalogId, CustomerId, MemberId, MembershipId, OrderId, RestaurantId,
+    RestaurantInvitationId, RiderId,
 };
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
@@ -54,7 +58,8 @@ use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     member_store, order_conversation_store, order_tracking_store, prospection_store,
-    restaurant_store, rider_restriction_store, rider_roster_store, rider_store,
+    restaurant_invitation_list_store, restaurant_roster_store, restaurant_store,
+    rider_restriction_store, rider_roster_store, rider_store,
     scope_membership_store, slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
@@ -168,6 +173,16 @@ enum ReadModelProjector {
     /// the person) — the same cross-stream-key shape as `ScopeMembership`'s `RestaurantListingClaimed`
     /// arm. Its OWN checkpoint group (see the registry below), born at 0.
     Member,
+    /// The restaurant's own team roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+    /// amendment): `restaurantRoster`'s source. Keyed on `membershipId`, matching the
+    /// `RestaurantMembership-{membershipId}` stream's own aggregate id (the `Rider`/`Restaurant`
+    /// fast-path shape, NOT `Member`'s cross-stream one). Its OWN checkpoint group, born at 0 —
+    /// never a prefix under `Member`'s already-advanced checkpoint (the #424 lesson).
+    RestaurantRoster,
+    /// The restaurant's own invitation list (#639 part C step 6-iv round 2): `restaurantInvitations`'s
+    /// source. Keyed on `invitationId`, matching the `RestaurantInvitation-{invitationId}` stream.
+    /// Its OWN checkpoint group, born at 0.
+    RestaurantInvitationList,
     /// SET-shaped (#144): one event GRANTS/REVOKES N membership rows, so there is no
     /// `load -> project -> upsert` triple; the pure fold lives in
     /// `application::projectors::scope_membership`, and this arm resolves its lookups and applies
@@ -363,6 +378,50 @@ impl ReadModelProjector {
                 let state = member_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_member(&MemberProjector, state, env) {
                     member_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                }
+            }
+            Self::RestaurantRoster => {
+                // membershipId matches the stream's own aggregate id -- the fast path.
+                let id = MembershipId(aggregate_uuid_of(env, "RestaurantMembership-", "membershipId")?);
+                let state = restaurant_roster_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                let had_row = state.is_some();
+                match project_restaurant_roster(&RestaurantRosterProjector, state, env) {
+                    Some(next) => {
+                        restaurant_roster_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                    }
+                    // Round 3 (#639 part C step 6-iv, dba BLOCKING): the table's declared
+                    // `tombstone:` (`RestaurantAccessRevoked`) -- the mechanical dispatch above
+                    // already answers `None` for it; this is where `None` becomes an actual
+                    // DELETE rather than a silent no-op, ADDITIVE to the GRANT arm (the table's
+                    // own `rules:`), the `scope_membership_store::revoke_member` shape. A failed
+                    // delete is a STALE LISTING standing on this one row until the next
+                    // checkpoint-reset replay -- same safety posture as ScopeMembership's targeted
+                    // revoke above. Guarded on `had_row`: a revoke arriving with no prior roster
+                    // row (never observed live, but not excluded by the fold) deletes nothing.
+                    None if had_row => {
+                        if let Err(e) = restaurant_roster_store::delete(&mut *conn, id).await {
+                            tracing::error!(
+                                membership_id = %id.0,
+                                error = %e,
+                                "RESTAURANT ROSTER REVOKE-DELETE FAILED -- a revoked member stays LISTED until a RestaurantRoster checkpoint-reset replay"
+                            );
+                            return Err(FoldFault::Database(e));
+                        }
+                    }
+                    None => {}
+                }
+            }
+            Self::RestaurantInvitationList => {
+                let id =
+                    RestaurantInvitationId(aggregate_uuid_of(env, "RestaurantInvitation-", "invitationId")?);
+                let state =
+                    restaurant_invitation_list_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                if let Some(next) =
+                    project_restaurant_invitation_list(&RestaurantInvitationListProjector, state, env)
+                {
+                    restaurant_invitation_list_store::upsert(&mut *conn, &next)
+                        .await
+                        .map_err(FoldFault::Database)?;
                 }
             }
             Self::ScopeMembership => {
@@ -629,6 +688,26 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "Member",
         stream_prefixes: &["RestaurantMembership-"],
         projectors: &[ReadModelProjector::Member],
+        scope: "network",
+    },
+    // The restaurant's own team roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+    // amendment, PROP-20260831-180622 §6.4): its OWN checkpoint group, born at 0 -- the `Member`
+    // #424 lesson generalised again: a table born after the log is backfilled by replay, never a
+    // migration-time copy. Rebuild by resetting the `RestaurantRoster` checkpoint, NEVER TRUNCATE
+    // (the table's own `rules:`).
+    ProjectorGroup {
+        checkpoint: "RestaurantRoster",
+        stream_prefixes: &["RestaurantMembership-"],
+        projectors: &[ReadModelProjector::RestaurantRoster],
+        scope: "network",
+    },
+    // The restaurant's own invitation list (#639 part C step 6-iv round 2): its OWN checkpoint
+    // group, born at 0. Rebuild = TRUNCATE + reset TOGETHER (the table's own `rules:`, the
+    // `RiderRoster` precedent, opposite of `RestaurantRoster`'s).
+    ProjectorGroup {
+        checkpoint: "RestaurantInvitationList",
+        stream_prefixes: &["RestaurantInvitation-"],
+        projectors: &[ReadModelProjector::RestaurantInvitationList],
         scope: "network",
     },
     // The CustomerCreditBalance read model (#158, Part B of #207): the per-customer store-credit
@@ -942,6 +1021,14 @@ impl ProjectionWorker {
             // fixed here — architect-owned issue).
             if group.checkpoint == "Rider" {
                 telemetry::meters::rider_restriction::lag(pending.len() as i64);
+            }
+            // Round 3 (obs, #639 part C step 6-iv): the SAME shape for the two projector groups
+            // this slice's round 2 added — their replay lag had zero emit sites until now.
+            if group.checkpoint == "RestaurantRoster" {
+                telemetry::meters::restaurant_invitation::roster_lag(pending.len() as i64);
+            }
+            if group.checkpoint == "RestaurantInvitationList" {
+                telemetry::meters::restaurant_invitation::invitation_list_lag(pending.len() as i64);
             }
             if pending.is_empty() {
                 return Ok(());

@@ -52,6 +52,11 @@ resolvers:
   # locations and binds the selected one. See the screen's `gaps` for the by-id query this really wants.
   restaurant.locations: { query: { $ref: 'api.yaml#/queries/restaurantLocationsByAccount' } }
   reclamation.byId:   { query: { $ref: 'api.yaml#/queries/reclamation' } }
+  # #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment, PROP §6.4/§6.5): the roster
+  # and the invitation list. TWO distinct root segments (#717's own lesson, restated above): a
+  # shared root would shadow one of the two.
+  roster.mine:      { query: { $ref: 'api.yaml#/queries/restaurantRoster' } }
+  invitations.mine: { query: { $ref: 'api.yaml#/queries/restaurantInvitations' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA LAYER — ACTIONS (writes + client behaviours). All mutations exist in api.yaml already.
@@ -96,6 +101,14 @@ actions:
   # calls it from Rust, the SAME `checkout.rs`/`HandWrittenScreen` shape.
   confirm_member_sign_in: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/confirmMemberSignIn' } }
   sign_out: { kind: auth, note: "Supabase Auth sign-out (out of domain, #94, unwired -- kind: auth renders ActionPlan::Disabled). Round 2 R2-U3: the not-yet-linked refusal's exit control uses `navigate` to `/sign-in` instead until #94 lands; this declaration is kept as the named target for that follow-up." }
+  # #639 part C step 6-iv round 2: the roster and the invitation.
+  invite_restaurant_member:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/inviteRestaurantMember' } }
+  revoke_restaurant_invitation: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/revokeRestaurantInvitation' } }
+  # Round 2 R2-D: the `/invitation` acceptance page (`sdui: false`, the `sign_in_return.rs`
+  # precedent) dispatches both from Rust -- neither is ever rendered by an SDUI control, exactly
+  # the `confirm_member_sign_in` shape above.
+  accept_restaurant_invitation: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/acceptRestaurantInvitation' } }
+  grant_restaurant_access_by_invitation: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/grantRestaurantAccessByInvitation' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME — the staff top bar (shared across the four screens).
@@ -190,6 +203,42 @@ bottom_sheets:
       # primitive exists in this DSL); this control is always active.
       - { type: text_button, id: member_resend_link, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.resend' }, action: { type: request_member_sign_in_link, variables: { email: "{{ member_email.value }}" }, loading_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.sending' } } }
       - { type: text_button, id: member_sign_in_confirmation_close, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.close' }, action: { type: close_sheet } }
+
+  # #639 part C step 6-iv round 2 (§8.2): invite a colleague by email. Round 2 R2-D: the Art.
+  # 14 in-context line (a third party's own address, typed by the manager) sits AT the field --
+  # what is sent, to whom, by whom, that the colleague may object, and that the manager confirms
+  # they may share this address. `on_success` chaining (closing the sheet AND refreshing the list)
+  # is unsupported (#872) -- declared in the screen's own `gaps:`, not invented here.
+  invite_member_sheet:
+    id: invite_member_sheet
+    type: bottom_sheet
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.title' }
+    drag_to_close: true
+    sections:
+      - { type: email_input, id: invite_email, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.email_label' }, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.email_placeholder' }, autofocus: true }
+      - type: chip_multi_select
+        id: invite_authority
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.authority_label' }
+        single_select: true
+        # Bare tokens (the `issue_resolution_sheet`/`DeliveryIssueResolution` precedent for a
+        # closed-enum chip picker) — MANAGER/OPERATOR, `scalars.yaml#/MemberAuthority`'s two values.
+        options:
+          - { value: MANAGER,  label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.authority.manager' } }
+          - { value: OPERATOR, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.authority.operator' } }
+      - { type: text, id: invite_legal_notice, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.legal_notice' } }
+      - type: button
+        id: invite_member_btn
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.confirm' }
+        variant: primary
+        full_width: true
+        action:
+          # invitationId/memberId are CALLER-MINTED birth keys (ADR-0034) -- the `{{ $uuid }}` mint
+          # token (#147, `post_message`/`openReclamation` precedent), resolved to a fresh UUIDv7 at
+          # dispatch time by `crate::executor::fill_mint_tokens`, never an invented grammar.
+          type: invite_restaurant_member
+          variables: { invitationId: "{{ $uuid }}", restaurantId: "{{ restaurant.id }}", invitedEmail: "{{ invite_email.value }}", authority: "{{ invite_authority.value }}", memberId: "{{ $uuid }}" }
+          on_success: [{ type: close_sheet }]
+      - { type: inline_error, id: invite_member_error, for_action: invite_restaurant_member }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
@@ -616,6 +665,86 @@ screens:
                 reason: "{{ reject_reason.value }}"
       - { component: staff_nav }
 
+  # SCREEN — Team (#639 part C step 6-iv round 2, ADR-20260905-101349 §2 amendment, PROP §8.2):
+  # the restaurant's own roster + invitation list. MANAGER and OPERATOR both see the lists;
+  # `roster.viewerAuthority` (resolver DATA, never a form field, never a second `roles:` list) is
+  # the ONLY expressible MANAGER condition -- Invite/per-row Revoke are `visible_when` on it.
+  - id: team
+    roles: [RESTAURANT]
+    route: "/team"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.title' }
+    sdui: true
+    requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
+    data_requirements: [roster.mine, invitations.mine]
+    actions_used: [invite_restaurant_member, revoke_restaurant_invitation, open_bottom_sheet]
+    gaps:
+      - "The per-row Revoke control on the invitation list dispatches `revokeRestaurantInvitation` DIRECTLY off the row, with no confirmation step — `open_bottom_sheet` only toggles a sheet's `hidden` flag and carries no per-row context into it (the SAME #870-class limitation `member_sign_in_confirmation_sheet`'s own `gaps:` line already documents: a `text`/action-variable binding resolves from the SCREEN's own resolver data, never from a DIFFERENT item's row context passed at open time). A confirmation sheet is the card's suggested shape; it cannot correctly bind `invitationId` today without a renderer change this round did not build."
+      - "No display name/email column on the roster (`RestaurantRoster`'s own `note:`, YAGNI): a row shows `memberId` and `authority` only, never a human name — a real gap for a MANAGER trying to recognise a colleague, named rather than painted with a fabricated column. Round 3 (dba/young): this list is DISPLAY-ONLY — nothing derives authority from it; the `AuthorityGuard` resolves from the acting member's own `RestaurantMembership` stream fold, never this projection, and the table's own `RestaurantAccessRevoked` delete arm keeps it in step with the live roster."
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.title' } }
+      - type: button
+        id: invite_member_open_btn
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invite.open' }
+        variant: primary
+        visible_when: "roster.viewerAuthority == 'MANAGER'"
+        action: { type: open_bottom_sheet, sheet_id: invite_member_sheet }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.roster_heading' } }
+      - type: list
+        id: roster_list
+        items: "{{ roster.items }}"
+        empty_state:
+          title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.roster.empty.title' }
+          body: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.roster.empty.body' }
+        item_components:
+          - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.roster.member' }, value: "{{ item.memberId }}" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.authority.manager' },  variant: info, visible_when: "item.authority == 'MANAGER'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.authority.operator' }, variant: outline, visible_when: "item.authority == 'OPERATOR'" }
+          - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.roster.since' }, value: "{{ item.since }}" }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invitations_heading' } }
+      - type: list
+        id: invitations_list
+        items: "{{ invitations }}"
+        empty_state:
+          title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invitations.empty.title' }
+          body: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invitations.empty.body' }
+        item_components:
+          - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invitations.email' }, value: "{{ item.invitedEmail }}" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.status.pending' },                 variant: warning, visible_when: "item.status == 'PENDING'" }
+          # ux/business: the accepted-not-yet-granted state is its OWN status, never painted as a
+          # plain failure -- "access being activated", not "something went wrong".
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.status.accepted_pending_access' }, variant: info,    visible_when: "item.status == 'ACCEPTED_PENDING_ACCESS'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.status.accepted' },                variant: success, visible_when: "item.status == 'ACCEPTED'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.status.revoked' },                 variant: outline, visible_when: "item.status == 'REVOKED'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.status.expired' },                 variant: outline, visible_when: "item.status == 'EXPIRED'" }
+          # No expiry COUNTDOWN (no timer primitive in this DSL, the `member_sign_in_confirmation_sheet`
+          # precedent) -- a server-rendered date instead.
+          - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invitations.expires' }, value: "{{ item.expiresAt }}", visible_when: "item.status == 'PENDING'" }
+          # No "Renvoyer" (resend) control: a re-mint is a new invitation, never an action on an
+          # existing row (the card's own instruction) -- omitted rather than rendered dead.
+          # Round 3 (ux BLOCKING): `visible_when` has no compound (`&&`) grammar
+          # (`crates/web/src/condition.rs`'s parser: one comparison, a quoted literal/null/integer
+          # right-hand side) -- NESTING is the corpus's conjunction (`specs/screens/rider.yaml`
+          # `:~449,463`'s conditional_section-in-conditional_section), so "PENDING and MANAGER"
+          # nests a `conditional_section` around the `visible_when`-gated button instead of
+          # rendering it (and doing nothing) on every terminal row. Before this round the button
+          # rendered on ACCEPTED/ACCEPTED_PENDING_ACCESS/REVOKED/EXPIRED rows too -- the server
+          # already refused a non-PENDING `revokeRestaurantInvitation`
+          # (`RestaurantInvitationAlreadyRevoked`/terminal-state checks), so it was never a
+          # security gap, only a control that renders and does nothing (#888's class).
+          - type: conditional_section
+            id: revoke_invitation_row_gate
+            condition: "item.status == 'PENDING'"
+            if_true:
+              - type: button
+                id: revoke_invitation_row_btn
+                label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.revoke.confirm' }
+                variant: destructive
+                visible_when: "roster.viewerAuthority == 'MANAGER'"
+                action: { type: revoke_restaurant_invitation, variables: { invitationId: "{{ item.invitationId }}" } }
+      - { component: staff_nav }
+
   # SCREEN — Restaurant profile: the editable LOCATION fields behind UpdateRestaurant.
   #
   # This screen is why `Restaurant.description` exists at all. The column was a spec hole for a long
@@ -827,6 +956,27 @@ screens:
     actions_used: [confirm_member_sign_in]
     gaps:
       - "`?next=` return-to-screen (ADR-20260905-101349 §13) is a NAMED DEPENDENCY of flipping RUN_MEMBER_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the orders queue), never back to whatever page the 401 originated from. MEMBER-SIGN-IN-DOOR-PRECONDITIONS names the follow-up."
+
+  # SCREEN — Invitation acceptance (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+  # amendment, PROP §8.3): the two-lane accept, client-sequenced. The SAME reasons `sign_in_return`
+  # is hand-written (query-string `?token=`/`?invitationId=` extraction; acceptance-first
+  # dispatch+poll sequencing this DSL declares no binding grammar for) apply here TWICE over, since
+  # this page sequences TWO commands rather than one.
+  - id: invitation_accept
+    roles: [PUBLIC]
+    route: "/invitation"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.invitation.title' }
+    sdui: false
+    sdui_reason: "Query-string token/invitationId extraction + a TWO-command acceptance-first sequence (acceptRestaurantInvitation then grantRestaurantAccessByInvitation) -- the sign_in_return precedent, doubled."
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [accept_restaurant_invitation, grant_restaurant_access_by_invitation]
+    gaps:
+      - "No consent PREVIEW (restaurant name / invited email / authority) before dispatching: `invitationPreview`, the query the card's R2-C section proposed for this, was not built this round (STOPped and reported: it needs a resolver combining live identity-provider verification with a read-model lookup, a shape with no precedent in this codebase's mechanical query-emission pipeline). The page dispatches straight from the URL's token, exactly like `sign_in_return` does for the sign-in door."
+      - "No REFUSE control: there is nothing to decline before either command runs (no preview to refuse FROM), and once accepted the invitation is spent regardless — a `/sign-in` link is offered on every terminal state instead, the `sign_in_return`/`not_linked` precedent."
+      - "Terminal states collapse to ONE generic refusal (\"this invitation link is no longer valid\") for every server-side non-acceptable cause (unknown invitationId, wrong verified email, already accepted BY SOMEONE ELSE, revoked, expired) — this is the SERVER's own no-enumeration property (`errors.yaml#/RestaurantInvitationNotAcceptable` is ONE typed refusal for all five), not a missing state machine: the client cannot route differently on a distinction the server itself never reveals. A SEPARATE state exists for leg 2 failing AFTER leg 1 succeeded (the invitation WAS validly accepted) — that state never says \"invalid\"."
+      - "Round 3 R3-2 (legal): this page carries NO Art. 13 notice and NO privacy link (the `sign_in` screen's own gaps at :~905/:~987 name the same absence for its door) — `RESTAURANT-INVITATION-PRECONDITIONS.yaml` names both as flip preconditions, not resolved here."
 
   # SCREEN — The not-yet-linked refusal (#639 part C step 6-ii, PROP-20260831-180622 §8.5): its
   # own screen, not a banner -- no nav, no tabs, no counts, no phone (no voice leg). Reached when

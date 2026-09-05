@@ -41,3 +41,17 @@ code_refs:
     used_by: crates/web/src/sign_in_return.rs
   - key: back.sign_in_return.back_to_sign_in
     used_by: crates/web/src/sign_in_return.rs
+  # The invitation acceptance landing (crates/web/src/invitation_accept.rs, #639 part C step 6-iv
+  # round 2, ADR-20260905-101349 §2 amendment) is a non-SDUI, hand-written render path (the
+  # `sign_in_return.rs` precedent, doubled: TWO commands sequenced). (back.invitation.title IS
+  # screen-$ref'd from restaurant_backoffice.yaml, so the screen already marks it used.)
+  - key: back.invitation.working
+    used_by: crates/web/src/invitation_accept.rs
+  - key: back.invitation.no_token
+    used_by: crates/web/src/invitation_accept.rs
+  - key: back.invitation.failed
+    used_by: crates/web/src/invitation_accept.rs
+  - key: back.invitation.access_pending
+    used_by: crates/web/src/invitation_accept.rs
+  - key: back.invitation.back_to_sign_in
+    used_by: crates/web/src/invitation_accept.rs

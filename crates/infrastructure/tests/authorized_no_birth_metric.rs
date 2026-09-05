@@ -109,6 +109,7 @@ use application::generated::services::{
 };
 use application::ports::{Actor, EventStore};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use domain::generated::entities::{Address, CartLineItem, Money};
 use domain::generated::events::{
     CartLineAdded, CartStarted, DomainEvent, PaymentAuthorized, RestaurantActivated,
@@ -282,6 +283,7 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>, closed: Arc<Atomi
         run_rider_restriction_door: false,
         run_member_access_grant: false,
         run_member_sign_in_door: false,
+        run_restaurant_invitation: false,
         store: Arc::new(GatedOrderReads {
             inner: Arc::new(PgEventStore::new(pool.clone())),
             closed,
@@ -465,17 +467,22 @@ async fn drain_all(w: &MailboxWorker) -> u64 {
     n
 }
 
-/// Move a stranded hop's clock back. The row itself came from the real chain; only its age is
-/// synthetic, because a truncating `extract(epoch ...)` cannot tell two rows a millisecond apart
-/// apart, and a value-derived control is inexpressible without distinct ages.
-async fn age_hop(pool: &PgPool, intent: &str, seconds: i64) {
+/// Move a stranded hop's clock back **relative to the SAME pinned `now` the tick reads with**
+/// (round 3, beck): binding `now` here instead of calling SQL's own `now()` means
+/// `birth_gap_watch_tick(pool, now)` computes `now - received_at` = exactly `seconds`, whatever
+/// real wall-clock time this test's own setup burns between the two calls. The row itself came
+/// from the real chain; only its age is synthetic, because a truncating `extract(epoch ...)`
+/// cannot tell two rows a millisecond apart apart, and a value-derived control is inexpressible
+/// without distinct ages.
+async fn age_hop(pool: &PgPool, intent: &str, seconds: i64, now: DateTime<Utc>) {
     let n = sqlx::query(
-        "UPDATE inbound_messages SET received_at = now() - make_interval(secs => $2) \
+        "UPDATE inbound_messages SET received_at = $3::timestamptz - make_interval(secs => $2) \
          WHERE actor_type = 'PlaceOrderProcess' AND message_type = 'PaymentAuthorized' \
            AND payload->'payload'->>'paymentIntentId' = $1",
     )
     .bind(intent)
     .bind(seconds as f64)
+    .bind(now)
     .execute(pool)
     .await
     .expect("age the hop")
@@ -483,14 +490,15 @@ async fn age_hop(pool: &PgPool, intent: &str, seconds: i64) {
     assert_eq!(n, 1, "exactly one real chained hop for {intent} — ageing nothing tests nothing");
 }
 
-/// Same, for the log residue the `no_run` reason reads.
-async fn age_fact(pool: &PgPool, intent: &str, seconds: i64) {
+/// Same, for the log residue the `no_run` reason reads — pinned to the same `now`.
+async fn age_fact(pool: &PgPool, intent: &str, seconds: i64, now: DateTime<Utc>) {
     let n = sqlx::query(
-        "UPDATE domain_events SET occurred_at = now() - make_interval(secs => $2) \
+        "UPDATE domain_events SET occurred_at = $3::timestamptz - make_interval(secs => $2) \
          WHERE event_type = 'PaymentAuthorized' AND payload->>'paymentIntentId' = $1",
     )
     .bind(intent)
     .bind(seconds as f64)
+    .bind(now)
     .execute(pool)
     .await
     .expect("age the fact")
@@ -501,12 +509,13 @@ async fn age_fact(pool: &PgPool, intent: &str, seconds: i64) {
 /// Same clock move, for the BORN-but-uncaptured population `payment_authorized_unsettled_age_seconds`
 /// reads. The row is folded by the real [`ProjectionWorker`] from a real `OrderPlaced`; only
 /// `placed_at` is moved, for the same truncation reason as the two helpers above.
-async fn age_order(pool: &PgPool, order: u128, seconds: i64) {
+async fn age_order(pool: &PgPool, order: u128, seconds: i64, now: DateTime<Utc>) {
     let n = sqlx::query(
-        "UPDATE ordertracking SET placed_at = now() - make_interval(secs => $2) WHERE order_id = $1",
+        "UPDATE ordertracking SET placed_at = $3::timestamptz - make_interval(secs => $2) WHERE order_id = $1",
     )
     .bind(uid(order))
     .bind(seconds as f64)
+    .bind(now)
     .execute(pool)
     .await
     .expect("age the projected order")
@@ -568,6 +577,12 @@ async fn stranded_authorization_ages_and_clears() {
     let Some(db) = common::TestDb::acquire("authorized_no_birth_metric").await else { return };
     let pool = db.pool();
 
+    // Pinned ONCE for the whole test (round 3, beck): every `age_*` fixture and every
+    // `birth_gap_watch_tick` call below reads against this SAME instant, so a fixture that ages a
+    // row to "1200s old" and a tick reading that row's age agree byte-for-byte regardless of how
+    // much real wall-clock time this test's own setup (enqueue/drain/project) burns between them.
+    let now = Utc::now();
+
     const CART_A: u128 = 0xCA71;
     const CART_B: u128 = 0xCA72;
     const CART_C: u128 = 0xCA73;
@@ -595,7 +610,7 @@ async fn stranded_authorization_ages_and_clears() {
     // Nothing stranded, nothing authorized, nothing even ordered: every declared reason must still
     // produce a data point, at 0. By EQUALITY over the whole set — a `contains` assertion cannot
     // see the member that stopped reporting, which is the entire failure mode.
-    birth_gap_watch_tick(&pool).await.expect("a tick over an empty database");
+    birth_gap_watch_tick(&pool, now).await.expect("a tick over an empty database");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
@@ -680,7 +695,7 @@ async fn stranded_authorization_ages_and_clears() {
     // it: without this the negative control is vacuous at its own assertion point — a sweep that
     // counted born orders too would still read max(age) = 0 over C's freshly-delivered hop and
     // pass, dying only three assertions later at the recovery tick.
-    age_hop(&pool, &intent_c, 9000).await;
+    age_hop(&pool, &intent_c, 9000, now).await;
 
     // ── (c2) the BORN-BUT-UNCAPTURED population, projected for real ──────────────────────────────
     // `payment_authorized_unsettled_age_seconds` is the OTHER gauge this sweep carries, and it
@@ -698,7 +713,7 @@ async fn stranded_authorization_ages_and_clears() {
         authorized_rows, 1,
         "C's born order is AUTHORIZED in the read model -- FOLDED from OrderPlaced, not hand-set"
     );
-    age_order(&pool, ORDER_C, 1800).await;
+    age_order(&pool, ORDER_C, 1800, now).await;
 
     // ── (c3) `delivery_exhausted`: a TERMINAL hop whose run never resolved ───────────────────────
     // D authorizes exactly like C, but the Order-stream read is closed for that one delivery, so
@@ -735,7 +750,7 @@ async fn stranded_authorization_ages_and_clears() {
         1,
         "D's order was NOT born"
     );
-    age_hop(&pool, &intent_d, 1200).await;
+    age_hop(&pool, &intent_d, 1200, now).await;
 
     // ── A and B: authorized, and then NOTHING ───────────────────────────────────────────────────
     // The Payment lane records both facts and chains both hops; the PlaceOrderProcess lane is not
@@ -762,12 +777,12 @@ async fn stranded_authorization_ages_and_clears() {
     .await
     .expect("the real seam records an orphaned authorization -- facts are never dropped");
 
-    age_hop(&pool, &intent_a, 3600).await;
-    age_hop(&pool, &intent_b, 60).await;
-    age_fact(&pool, "pi_608_orphan", 120).await;
+    age_hop(&pool, &intent_a, 3600, now).await;
+    age_hop(&pool, &intent_b, 60, now).await;
+    age_fact(&pool, "pi_608_orphan", 120, now).await;
 
     // ── (b) the VALUE-DERIVED POSITIVE CONTROL ──────────────────────────────────────────────────
-    birth_gap_watch_tick(&pool).await.expect("a tick with three stranded authorizations");
+    birth_gap_watch_tick(&pool, now).await.expect("a tick with three stranded authorizations");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
@@ -790,7 +805,7 @@ async fn stranded_authorization_ages_and_clears() {
     // ── (d) SECOND TICK over UNCHANGED state ────────────────────────────────────────────────────
     // Delta temporality makes a once-at-startup emitter drain identically to a correct one on tick
     // 1; this is the only assertion that can tell them apart.
-    birth_gap_watch_tick(&pool).await.expect("a second tick");
+    birth_gap_watch_tick(&pool, now).await.expect("a second tick");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
@@ -814,8 +829,8 @@ async fn stranded_authorization_ages_and_clears() {
 
     // ── (b') a DIFFERENT age gives a DIFFERENT value ────────────────────────────────────────────
     // Without this, a watcher emitting a latched constant passes everything above.
-    age_hop(&pool, &intent_a, 7200).await;
-    birth_gap_watch_tick(&pool).await.expect("a tick after the oldest aged further");
+    age_hop(&pool, &intent_a, 7200, now).await;
+    birth_gap_watch_tick(&pool, now).await.expect("a tick after the oldest aged further");
     assert_eq!(
         spy.drain().points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
         all_reasons(&[
@@ -841,9 +856,9 @@ async fn stranded_authorization_ages_and_clears() {
     // row past C's is the SECOND value for that gauge: two rows at distinct ages must give the
     // OLDER, and 5400 != the 1800 asserted twice above, so a latched constant dies here too.
     project(&pool).await;
-    age_order(&pool, ORDER_A, 5400).await;
+    age_order(&pool, ORDER_A, 5400, now).await;
 
-    birth_gap_watch_tick(&pool).await.expect("a tick after recovery");
+    birth_gap_watch_tick(&pool, now).await.expect("a tick after recovery");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),

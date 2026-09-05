@@ -36,6 +36,7 @@ boundedContexts:
       - { $ref: 'actors.yaml#/Restaurant' }
       - { $ref: 'actors.yaml#/Prospect' }
       - { $ref: 'actors.yaml#/RestaurantMembership' }
+      - { $ref: 'actors.yaml#/RestaurantInvitation' }
   catalog:
     description: "Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import."
     aggregates:
@@ -250,6 +251,11 @@ containers:
     description: "Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT."
     realizes:
       - { $ref: 'actors.yaml#/RestaurantMembership' }
+  actor-restaurant-invitation:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION."
+    realizes:
+      - { $ref: 'actors.yaml#/RestaurantInvitation' }
   actor-catalog:
     technology: "Rust — mailbox worker bin"
     description: "Drains Catalog lanes (incl. HubRise imports); appends its domain events."

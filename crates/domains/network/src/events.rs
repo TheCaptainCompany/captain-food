@@ -245,3 +245,36 @@ pub struct RestaurantAccessRevoked {
     pub membership_id: MembershipId,
     pub ground: AccessRevocationGround,
 }
+
+/// A restaurant MANAGER invited a colleague by email (§8.2). `memberId` is CALLER-MINTED (the ADR-0034 doctrine, `commands.yaml#/InviteRestaurantMember`'s own note) -- the person this invitation names exists from this fact forward, before any credential proves who they are. Business payload only (ADR-0041): the inviting member is envelope `domain_events.user_id`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationSent {
+    pub invitation_id: RestaurantInvitationId,
+    pub restaurant_id: RestaurantId,
+    pub invited_email: EmailAddress,
+    pub authority: MemberAuthority,
+    pub member_id: MemberId,
+}
+
+/// A pending invitation was withdrawn before acceptance (§8.4).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationRevoked {
+    pub invitation_id: RestaurantInvitationId,
+}
+
+/// The invited person accepted (§8.3) -- the first of the two-lane accept's two commands. `authSubject` is `verify_email_token`'s OUTPUT, never a client-supplied field (the same boundary-crossing discipline as `RestaurantAccessGranted.authSubject`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationAccepted {
+    pub invitation_id: RestaurantInvitationId,
+    pub auth_subject: AuthSubject,
+}
+
+/// The invitation's TTL (`configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS`) elapsed while still pending -- a recorded fact delivered by the promotion pass (ADR-20260810-231300: expiry is a scheduled reminder, never an engine timer), never appended over an already-terminal invitation (accepted/revoked/expired).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationExpired {
+    pub invitation_id: RestaurantInvitationId,
+}
