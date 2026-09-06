@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Guard tests for .claude/hooks/register-check.sh, plus the wiring- and drift-checks that keep the
-# register-check discipline alive (run from stop-gate.sh on every turn -- pure shell, ~200ms).
+# register-check discipline alive (run from stop-gate.sh on every turn -- pure shell; ~4s and GROWS
+# WITH THE CASE COUNT, not the ~200ms once true here -- see .github/workflows/ci.yml's
+# `gate-scripts` job for the measured antecedent, #914).
 #
 # WHY THIS EXISTS. "A gate never seen to fire is an unverified claim" (#292, beck): each case below
 # shows the hook red or green against the REAL script before any session trusts it. The hook is
@@ -315,8 +317,11 @@ EOF
 # #910): the fixture above stays EMPTY on purpose (0 test-naming hits), because it is shared by
 # every pre-existing Lane D case and none of them carry a `Red-first:` section -- widening it would
 # flip D2/D12/D13/D14 from ALLOW to BLOCK, exactly the "altered existing verdict" the card's STOP
-# condition forbids. This one is cited ONLY by the new RF cases below. Line 4 is the sole hit line
-# (tokens: test, belt) -- every RF case that needs a resolvable hit line points at it by number.
+# condition forbids. This one is cited ONLY by the new RF cases below. TWO lines hit the token set
+# -- line 1 ("...a record that names a test...") and line 4 ("...belt for Rule 1") -- so
+# `rf_hit_count` over this file is 2, not 1 (#914 item 2: the earlier comment here claimed line 4
+# was the SOLE hit line, which is false and was never checked by any case). Every RF case that
+# needs a resolvable hit line points at line 4 specifically, by number.
 cat > "$FIX/docs/adr/ADR-20260906-050000-fixture-redfirst.md" <<'EOF'
 # Fixture: a record that names a test (Rule 1 / red-first cases)
 
@@ -519,11 +524,16 @@ expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LA
 expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
 # ── Lane D: the dispatch card (Agent surface, ADR-20260831-141500) ──────────────────────────────
-expect_d() { # expect_d <case> <want-exit> <payload> [want-reason]
-  local case="$1" want="$2" payload="$3" want_reason="${4:-}" got reason log="$FIX/case.log"
+expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd]
+  local case="$1" want="$2" payload="$3" want_reason="${4:-}" cwd="${5:-}" got reason log="$FIX/case.log"
   : > "$log"
-  printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
-    REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+  if [ -n "$cwd" ]; then
+    ( cd "$cwd" && printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1 )
+  else
+    printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+  fi
   got=$?
   if [ "$got" -ne "$want" ]; then
     echo "register-check selftest: case $case FAILED (want exit $want, got $got)" >&2
@@ -605,13 +615,49 @@ expect_d RF2-redfirst-entry-missing-fields 2 "{\"tool_name\":\"Agent\",\"tool_in
 #    token (fixture line 3) -- the anti-theatre half of Rule 1, mirroring Lane D's own D7/D15.
 expect_d RF3-redfirst-line-no-token 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:3 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
 # RF4 ALLOW: the explicit negative on a record that names NO test (the shared empty fixture,
-#    0 hits) -- a genuinely test-free citation is exactly what the negative is for.
+#    0 hits). #914 item 2: at 0 hits Rule 1 used to never enter the parse block at all, so `none`
+#    was accepted by the rule not firing, never by the rule actually reading and validating it --
+#    deleting the `[Nn]one*` ALLOW arm left this case green regardless (beck). The entry parse now
+#    runs whatever the hit count is; the count decides only two things (a MISSING section refused,
+#    and `none` refused as a false negative), both gated on hits > 0. This case pins the
+#    `[Nn]one*` ALLOW arm itself: a genuinely test-free citation, actually read and found clean.
 expect_d RF4-redfirst-negative-clean 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260821-095957 names no test\"}}" dispatch-trail-ok
+# RF4b BLOCK: at 0 hits, a POSITIVE entry pinned to the 0-hit record itself, at a line the file
+#    does not even have (the empty fixture has no line 1) -- proves the parse actually runs and
+#    actually checks the line at 0 hits too, not just that `none` is accepted there.
+expect_d RF4b-redfirst-positive-malformed-on-zero-hit-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::test_x — ADR-20260821-095957:1 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
+# RF4c ALLOW: at 0 hits, a POSITIVE entry pinned to a DIFFERENT record that DOES carry the token
+#    (an honest over-declaration, farley) -- the entry stands on its own citation, never on the
+#    trail's own hit count, so this must still ALLOW.
+expect_d RF4c-redfirst-positive-founded-elsewhere-on-zero-hit-record 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::test_x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-trail-ok
+# RF4d BLOCK: pins the KNOWN VERDICT CHANGE A-prime introduces (beck, checkpoint D5b -- "a change
+#    never seen red is an unverified claim"). At 0 hits, prose that merely MENTIONS `Red-first:`
+#    with no valid entry and no `none` (verified live: `Red-first: see the section below`) now
+#    blocks with `dispatch-redfirst-shape` -- the SAME verdict the >0-hit path already gave that
+#    shape. The remedy is the same explicit negative.
+expect_d RF4d-redfirst-mentioned-not-entered-on-zero-hits 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: see the section below\"}}" dispatch-redfirst-shape
 # RF5 BLOCK: the SAME explicit-negative text, but on a record that DOES name a test -- the
 #    negative claims the opposite of what the citation shows and is refused.
 expect_d RF5-redfirst-false-negative 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-false-negative
 # RF6 ALLOW: a compliant card -- one well-shaped entry pinned to the real hit line.
 expect_d RF6-redfirst-compliant 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_gate_is_red_first — ADR-20260906-050000:4 — mutant: delete the token check — expected red: register-check selftest RF6 fails\"}}" dispatch-trail-ok
+# RF7 BLOCK: `<record>:<line>` resolves to a REAL file but a line PAST EOF (the fixture has 5
+#    lines; line 99 does not exist) -- the branch the removed `wc -l` guard held (`sed -n Np` on a
+#    line past EOF prints nothing, and nothing cannot match the token regex) has never been seen
+#    red (#914 item 3, reviewer/beck).
+expect_d RF7-redfirst-line-past-eof 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:99 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
+# RF8/RF9 (#914 item 4, farley): no case pinned the ON-DISK `<test path>` arm, so it shipped
+# unproven by the suite. `<test path>` is derived from `$HOOK` relative to `$ROOT` -- pinning the
+# hook itself, never a hand literal or the selftest's own path -- so a rename of the hook file
+# updates this test path with it. RF8 runs with `cwd = $FIX` (a mktemp dir, never `$ROOT`) so the
+# cwd-relative `$tpath` arm of `[ ! -e "$ROOT/$tpath" ] && [ ! -e "$tpath" ]` cannot pass and only
+# the `$ROOT/$tpath` arm can -- extended `expect_d` with an optional 5th `cwd` arg rather than
+# writing the case inline, to keep the reason-check plumbing shared with every other RF case.
+TPATH_HOOK="${HOOK#"$ROOT"/}"
+# RF8 ALLOW: an EXISTING on-disk test path (the hook itself) resolves via `$ROOT/$tpath`.
+expect_d RF8-redfirst-existing-test-path 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: $TPATH_HOOK::test_x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-trail-ok "$FIX"
+# RF9 BLOCK: a test path that is neither `NEW` nor on disk anywhere -- the existence check itself.
+expect_d RF9-redfirst-missing-test-path 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: tests/does_not_exist.rs::x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "$FIX"
 
 # ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
 # A parse failure was being reported as a read declaration of read-only, so each of these was
@@ -667,15 +713,33 @@ fi
 # LD3: the live docs tree resolves a real record id -- the anti-theatre check is only as good as
 # its resolver, and a resolver pointed at the wrong root refuses EVERY citation (fail-shut drift
 # that would read as "the coordinator keeps writing bad trails"). Carries a `Red-first:` entry
-# since #910: the REAL ADR-20260821-095957 names its own test discipline (8 hit lines today), so
-# once Rule 1 exists a trail-only citation of it is refused -- keeping this card trail-only would
-# have flipped LD3's own verdict, which the card's STOP condition forbids. NAMED RESIDUAL: pinned
-# to line 17 of the live file; if that ADR is ever edited and line 17 stops naming a test, this
-# case reds for a reason unrelated to Lane D itself -- re-pin it to any surviving hit line.
-printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::proves_live_docs_resolve — ADR-20260821-095957:17 — mutant: delete the docs override guard — expected red: register-check selftest LD3 fails to resolve\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
-if [ $? -ne 0 ]; then
-  echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
+# since #910: the REAL ADR-20260821-095957 names its own test discipline, so once Rule 1 exists a
+# trail-only citation of it is refused -- keeping this card trail-only would have flipped LD3's own
+# verdict, which the card's STOP condition forbids.
+# #914 item 5 (reviewer, beck): this used to pin a HARD-CODED line 17, structure-sensitive to an
+# edit of that ADR unrelated to Lane D itself. The hit line is now DERIVED at selftest time, the
+# same way the corpus test (`every_record_in_the_corpus_is_citable_through_lane_d`,
+# tools/codegen-rs/src/tests.rs) does: read `REDFIRST_TOKENS` FROM THE HOOK FILE itself (one `sed`
+# over its own `REDFIRST_TOKENS='...'` declaration -- no second copy of the token set to drift),
+# then `grep -niE` the live file for its own first hit line.
+ld3_tokens="$(sed -n "s/^REDFIRST_TOKENS='\(.*\)'\$/\1/p" "$HOOK")"
+ld3_file="$(ls "$ROOT"/docs/adr/ADR-20260821-095957-*.md 2>/dev/null | head -1)"
+ld3_line=""
+if [ -n "$ld3_tokens" ] && [ -n "$ld3_file" ]; then
+  ld3_line="$(grep -niE "$ld3_tokens" "$ld3_file" 2>/dev/null | head -1 | cut -d: -f1)"
+fi
+if [ -z "$ld3_tokens" ]; then
+  echo "register-check selftest: case LD3 FAILED -- could not extract REDFIRST_TOKENS from $HOOK; the sed pattern here is out of sync with the hook's own declaration" >&2
   fail=1
+elif [ -z "$ld3_line" ]; then
+  echo "register-check selftest: case LD3 FAILED -- no line of $ld3_file matches the extracted token set; re-pin or investigate before trusting this case" >&2
+  fail=1
+else
+  printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::proves_live_docs_resolve — ADR-20260821-095957:$ld3_line — mutant: delete the docs override guard — expected red: register-check selftest LD3 fails to resolve\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 (derived hit line $ld3_line) did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
+    fail=1
+  fi
 fi
 
 # ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────

@@ -108,15 +108,27 @@
 # RULE 1 — THE RED-FIRST CARD STEP (ADR-20260906-024838, #910), riding INSIDE Lane D, after the
 # trail above has already resolved. Every RESOLVED cited record (the file the trail actually named
 # and that `resolve_record` found — never the live corpus at large) is grepped for a line naming a
-# test, a belt or a mutant (tokens: `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`).
-# A hit obliges a `Red-first:` section in the SAME dispatch: one entry per the shape
+# test, a belt or a mutant (tokens: `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`);
+# the count of matching lines is `rf_hit_count`. A PRESENT `Red-first:` section is ALWAYS
+# shape-validated, whatever `rf_hit_count` is (#914 item 2, beck: earlier, the parse ran only
+# inside `rf_hit_count -gt 0`, so at 0 hits `none` was accepted by the rule never firing, never by
+# being read and found true, and a POSITIVE entry pinned to a 0-hit citation was silently accepted
+# too). `rf_hit_count` decides exactly two things: a MISSING `Red-first:` section is refused only
+# when `rf_hit_count` is > 0 (nothing to prove at 0 hits, so no section is correct); and the
+# explicit negative
+#   Red-first: none — <record> names no test
+# is refused as a false negative only when `rf_hit_count` is > 0 (the negative speaks for the whole
+# trail, not per-record — a card citing two records, one with a hit, cannot say `none`; at 0 hits
+# it is simply true). Otherwise, a present section is graded on shape alone: one entry per
 #   Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
 # (the test path exists on disk or is marked `NEW`; `<record>:<line>` itself resolves to a file and
-# a line, and that line carries one of the tokens above) — or the explicit negative
-#   Red-first: none — <record> names no test
-# which is refused if ANY cited record actually has a hit (the negative speaks for the whole
-# trail, not per-record — a card citing two records, one with a hit, cannot say `none`). CHECKABLE,
-# same honesty limit as the rest of Lane D: presence, resolution, shape. NOT CHECKABLE: that the
+# a line, and that line carries one of the tokens above) is ALLOWED regardless of `rf_hit_count` --
+# a well-shaped entry founded on a DIFFERENT record than the ones the trail cites is an honest
+# over-declaration, never penalized (farley). KNOWN VERDICT CHANGE from the above: a 0-hit card
+# whose prose merely mentions `Red-first:` with no valid entry and no `none` now blocks with
+# `dispatch-redfirst-shape` — the SAME verdict the >0-hit path already gave that shape; the remedy
+# is the same explicit negative. CHECKABLE, same honesty limit as the rest of Lane D: presence,
+# resolution, shape. NOT CHECKABLE: that the
 # named test is real, that it was EVER actually seen red, or that the extraction from the cited
 # record is COMPLETE — those stay a lens read and the independent reviewer's read, exactly like
 # Lane D's own limit above (beck, farley, holub). The term *red-first card step* and this entry
@@ -437,77 +449,86 @@ EOF
     rf_ok=yes
     rf_reason=""
     rf_msg=""
-    if [ "$rf_hit_count" -gt 0 ]; then
-      rf_lines="$(printf '%s' "$payload" | grep -oE "${REDFIRST_MARKER}[^\"\\\\]*" || true)"
-      if [ -z "$rf_lines" ]; then
+    rf_lines="$(printf '%s' "$payload" | grep -oE "${REDFIRST_MARKER}[^\"\\\\]*" || true)"
+    if [ -z "$rf_lines" ]; then
+      # No `Red-first:` section at all. This is refused ONLY when a cited record actually names a
+      # test -- at 0 hits there is nothing to prove, so no section is exactly correct.
+      if [ "$rf_hit_count" -gt 0 ]; then
         rf_ok=no
         rf_reason="dispatch-redfirst-missing"
         rf_msg="register-check: a cited record names a test ($rf_hit_count matching line(s) across the cited record file(s)) and this dispatch carries no \`Red-first:\` section. Add one entry per hit, or the explicit negative if none of the hits actually name a test."
-      else
-        rf_saw_none=no
-        rf_entry_ok=no
-        while IFS= read -r rline; do
-          [ -n "$rline" ] || continue
-          entry="$(printf '%s' "$rline" | sed -E "s/^${REDFIRST_MARKER}[[:space:]]*//")"
-          case "$entry" in
-            [Nn]one*) rf_saw_none=yes; continue ;;
-          esac
-          # Fixed-separator parse (named residual, header comment): split at the FIRST occurrence
-          # of each literal separator, in order. A field that happens to repeat one of these
-          # literal strings is misparsed rather than rejected -- stated, not hidden.
-          case "$entry" in
-            *' — mutant: '*' — expected red: '*)
-              ab="${entry%% — mutant: *}"
-              rest="${entry#* — mutant: }"
-              mutant_text="${rest%% — expected red: *}"
-              expected_text="${rest#* — expected red: }"
-              ;;
-            *) ab=""; mutant_text=""; expected_text="" ;;
-          esac
-          [ -z "$mutant_text" ] && continue
-          [ -z "$expected_text" ] && continue
-          case "$ab" in
-            *' — '*) : ;;
-            *) continue ;;
-          esac
-          testref="${ab%% — *}"
-          recline="${ab#* — }"
-          case "$testref" in
-            *'::'*) : ;;
-            *) continue ;;
-          esac
-          tpath="${testref%%::*}"
-          tname="${testref#*::}"
-          [ -z "$tpath" ] && continue
-          [ -z "$tname" ] && continue
-          if [ "$tpath" != NEW ] && [ ! -e "$ROOT/$tpath" ] && [ ! -e "$tpath" ]; then continue; fi
-          rline_no="${recline##*:}"
-          rrecord="${recline%:*}"
-          [ -z "$rrecord" ] && continue
-          printf '%s' "$rline_no" | grep -qE '^[0-9]+$' || continue
-          [ "$rline_no" -ge 1 ] || continue
-          resolve_record "$rrecord" || continue
-          # No separate line-count/range check: `sed -n Np` on a line past EOF prints nothing, and
-          # an empty string cannot match the token regex either -- so "the line exists AND carries
-          # a token" is exactly what this one grep already proves, with no `wc -l` needed. Fewer
-          # moving parts than counting lines first matters here: `wc -l` counts NEWLINE BYTES, so a
-          # file whose last line lacks a trailing newline would undercount by one and reject that
-          # file's own final line even when `sed` prints it correctly (found while fixing #910's
-          # own corpus test, tools/codegen-rs/src/tests.rs).
-          sed -n "${rline_no}p" "$RESOLVED_PATH" | grep -qiE "$REDFIRST_TOKENS" || continue
-          rf_entry_ok=yes
-        done <<EOF2
+      fi
+    else
+      # A PRESENT `Red-first:` section is always shape-validated, whatever the hit count is.
+      # Full rationale and the KNOWN VERDICT CHANGE this introduces: see RULE 1's header comment
+      # above (#914 item 2, beck/farley) -- declared there once, not repeated here.
+      rf_saw_none=no
+      rf_entry_ok=no
+      while IFS= read -r rline; do
+        [ -n "$rline" ] || continue
+        entry="$(printf '%s' "$rline" | sed -E "s/^${REDFIRST_MARKER}[[:space:]]*//")"
+        case "$entry" in
+          [Nn]one*) rf_saw_none=yes; continue ;;
+        esac
+        # Fixed-separator parse (named residual, header comment): split at the FIRST occurrence
+        # of each literal separator, in order. A field that happens to repeat one of these
+        # literal strings is misparsed rather than rejected -- stated, not hidden.
+        case "$entry" in
+          *' — mutant: '*' — expected red: '*)
+            ab="${entry%% — mutant: *}"
+            rest="${entry#* — mutant: }"
+            mutant_text="${rest%% — expected red: *}"
+            expected_text="${rest#* — expected red: }"
+            ;;
+          *) ab=""; mutant_text=""; expected_text="" ;;
+        esac
+        [ -z "$mutant_text" ] && continue
+        [ -z "$expected_text" ] && continue
+        case "$ab" in
+          *' — '*) : ;;
+          *) continue ;;
+        esac
+        testref="${ab%% — *}"
+        recline="${ab#* — }"
+        case "$testref" in
+          *'::'*) : ;;
+          *) continue ;;
+        esac
+        tpath="${testref%%::*}"
+        tname="${testref#*::}"
+        [ -z "$tpath" ] && continue
+        [ -z "$tname" ] && continue
+        if [ "$tpath" != NEW ] && [ ! -e "$ROOT/$tpath" ] && [ ! -e "$tpath" ]; then continue; fi
+        rline_no="${recline##*:}"
+        rrecord="${recline%:*}"
+        [ -z "$rrecord" ] && continue
+        printf '%s' "$rline_no" | grep -qE '^[0-9]+$' || continue
+        [ "$rline_no" -ge 1 ] || continue
+        resolve_record "$rrecord" || continue
+        # No separate line-count/range check: `sed -n Np` on a line past EOF prints nothing, and
+        # an empty string cannot match the token regex either -- so "the line exists AND carries
+        # a token" is exactly what this one grep already proves, with no `wc -l` needed. Fewer
+        # moving parts than counting lines first matters here: `wc -l` counts NEWLINE BYTES, so a
+        # file whose last line lacks a trailing newline would undercount by one and reject that
+        # file's own final line even when `sed` prints it correctly (found while fixing #910's
+        # own corpus test, tools/codegen-rs/src/tests.rs).
+        sed -n "${rline_no}p" "$RESOLVED_PATH" | grep -qiE "$REDFIRST_TOKENS" || continue
+        rf_entry_ok=yes
+      done <<EOF2
 $rf_lines
 EOF2
-        if [ "$rf_saw_none" = yes ]; then
+      if [ "$rf_saw_none" = yes ]; then
+        # The explicit negative is only a LIE when a cited record actually has a hit; at 0 hits
+        # it is simply true, and is validated (not merely un-penalized) by having reached here.
+        if [ "$rf_hit_count" -gt 0 ]; then
           rf_ok=no
           rf_reason="dispatch-redfirst-false-negative"
           rf_msg="register-check: the trail says \`Red-first: none\`, but the cited record(s) DO name a test ($rf_hit_count matching line(s)) -- the explicit negative claims the opposite of what the citation shows. Name the actual test/belt/mutant lines instead."
-        elif [ "$rf_entry_ok" != yes ]; then
-          rf_ok=no
-          rf_reason="dispatch-redfirst-shape"
-          rf_msg="register-check: this dispatch carries a \`Red-first:\` section but no entry matches the required shape \`<test path>::<name> -- <record>:<line> -- mutant: <planted change> -- expected red: <message fragment>\` (the test path exists or is \`NEW\`; \`<record>:<line>\` resolves to a file and line, and that line carries a test/belt/mutant token)."
         fi
+      elif [ "$rf_entry_ok" != yes ]; then
+        rf_ok=no
+        rf_reason="dispatch-redfirst-shape"
+        rf_msg="register-check: this dispatch carries a \`Red-first:\` section but no entry matches the required shape \`<test path>::<name> -- <record>:<line> -- mutant: <planted change> -- expected red: <message fragment>\` (the test path exists or is \`NEW\`; \`<record>:<line>\` resolves to a file and line, and that line carries a test/belt/mutant token)."
       fi
     fi
 
