@@ -108,15 +108,27 @@
 # RULE 1 — THE RED-FIRST CARD STEP (ADR-20260906-024838, #910), riding INSIDE Lane D, after the
 # trail above has already resolved. Every RESOLVED cited record (the file the trail actually named
 # and that `resolve_record` found — never the live corpus at large) is grepped for a line naming a
-# test, a belt or a mutant (tokens: `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`).
-# A hit obliges a `Red-first:` section in the SAME dispatch: one entry per the shape
+# test, a belt or a mutant (tokens: `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`);
+# the count of matching lines is `rf_hit_count`. A PRESENT `Red-first:` section is ALWAYS
+# shape-validated, whatever `rf_hit_count` is (#914 item 2, beck: earlier, the parse ran only
+# inside `rf_hit_count -gt 0`, so at 0 hits `none` was accepted by the rule never firing, never by
+# being read and found true, and a POSITIVE entry pinned to a 0-hit citation was silently accepted
+# too). `rf_hit_count` decides exactly two things: a MISSING `Red-first:` section is refused only
+# when `rf_hit_count` is > 0 (nothing to prove at 0 hits, so no section is correct); and the
+# explicit negative
+#   Red-first: none — <record> names no test
+# is refused as a false negative only when `rf_hit_count` is > 0 (the negative speaks for the whole
+# trail, not per-record — a card citing two records, one with a hit, cannot say `none`; at 0 hits
+# it is simply true). Otherwise, a present section is graded on shape alone: one entry per
 #   Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
 # (the test path exists on disk or is marked `NEW`; `<record>:<line>` itself resolves to a file and
-# a line, and that line carries one of the tokens above) — or the explicit negative
-#   Red-first: none — <record> names no test
-# which is refused if ANY cited record actually has a hit (the negative speaks for the whole
-# trail, not per-record — a card citing two records, one with a hit, cannot say `none`). CHECKABLE,
-# same honesty limit as the rest of Lane D: presence, resolution, shape. NOT CHECKABLE: that the
+# a line, and that line carries one of the tokens above) is ALLOWED regardless of `rf_hit_count` --
+# a well-shaped entry founded on a DIFFERENT record than the ones the trail cites is an honest
+# over-declaration, never penalized (farley). KNOWN VERDICT CHANGE from the above: a 0-hit card
+# whose prose merely mentions `Red-first:` with no valid entry and no `none` now blocks with
+# `dispatch-redfirst-shape` — the SAME verdict the >0-hit path already gave that shape; the remedy
+# is the same explicit negative. CHECKABLE, same honesty limit as the rest of Lane D: presence,
+# resolution, shape. NOT CHECKABLE: that the
 # named test is real, that it was EVER actually seen red, or that the extraction from the cited
 # record is COMPLETE — those stay a lens read and the independent reviewer's read, exactly like
 # Lane D's own limit above (beck, farley, holub). The term *red-first card step* and this entry
@@ -437,13 +449,25 @@ EOF
     rf_ok=yes
     rf_reason=""
     rf_msg=""
-    if [ "$rf_hit_count" -gt 0 ]; then
-      rf_lines="$(printf '%s' "$payload" | grep -oE "${REDFIRST_MARKER}[^\"\\\\]*" || true)"
-      if [ -z "$rf_lines" ]; then
+    rf_lines="$(printf '%s' "$payload" | grep -oE "${REDFIRST_MARKER}[^\"\\\\]*" || true)"
+    if [ -z "$rf_lines" ]; then
+      # No `Red-first:` section at all. This is refused ONLY when a cited record actually names a
+      # test -- at 0 hits there is nothing to prove, so no section is exactly correct.
+      if [ "$rf_hit_count" -gt 0 ]; then
         rf_ok=no
         rf_reason="dispatch-redfirst-missing"
         rf_msg="register-check: a cited record names a test ($rf_hit_count matching line(s) across the cited record file(s)) and this dispatch carries no \`Red-first:\` section. Add one entry per hit, or the explicit negative if none of the hits actually name a test."
-      else
+      fi
+    else
+        # A PRESENT `Red-first:` section is always shape-validated, whatever the hit count is --
+        # #914 item 2 (beck): at 0 hits this used to be skipped entirely, so `none` was accepted by
+        # the rule never firing, never by being read and found true, and a POSITIVE entry pinned to
+        # a citation with no test-naming line was silently accepted too. `rf_hit_count` now decides
+        # only two things below: a MISSING section is refused only at >0 hits, and `none` is refused
+        # as a false negative only at >0 hits. KNOWN VERDICT CHANGE: a 0-hit card whose prose merely
+        # mentions `Red-first:` with no valid entry and no `none` now blocks with
+        # `dispatch-redfirst-shape` -- the same verdict the >0-hit path already gave that shape; the
+        # remedy is the same explicit negative.
         rf_saw_none=no
         rf_entry_ok=no
         while IFS= read -r rline; do
@@ -500,15 +524,18 @@ EOF
 $rf_lines
 EOF2
         if [ "$rf_saw_none" = yes ]; then
-          rf_ok=no
-          rf_reason="dispatch-redfirst-false-negative"
-          rf_msg="register-check: the trail says \`Red-first: none\`, but the cited record(s) DO name a test ($rf_hit_count matching line(s)) -- the explicit negative claims the opposite of what the citation shows. Name the actual test/belt/mutant lines instead."
+          # The explicit negative is only a LIE when a cited record actually has a hit; at 0 hits
+          # it is simply true, and is validated (not merely un-penalized) by having reached here.
+          if [ "$rf_hit_count" -gt 0 ]; then
+            rf_ok=no
+            rf_reason="dispatch-redfirst-false-negative"
+            rf_msg="register-check: the trail says \`Red-first: none\`, but the cited record(s) DO name a test ($rf_hit_count matching line(s)) -- the explicit negative claims the opposite of what the citation shows. Name the actual test/belt/mutant lines instead."
+          fi
         elif [ "$rf_entry_ok" != yes ]; then
           rf_ok=no
           rf_reason="dispatch-redfirst-shape"
           rf_msg="register-check: this dispatch carries a \`Red-first:\` section but no entry matches the required shape \`<test path>::<name> -- <record>:<line> -- mutant: <planted change> -- expected red: <message fragment>\` (the test path exists or is \`NEW\`; \`<record>:<line>\` resolves to a file and line, and that line carries a test/belt/mutant token)."
         fi
-      fi
     fi
 
     if [ "$rf_ok" = yes ]; then
