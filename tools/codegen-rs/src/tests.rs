@@ -967,6 +967,130 @@ keys:
         }
     }
 
+    // ─── #917 round 2 (decision by consent — farley/evans/beck): `runKind: door | worker` ────────
+    //
+    // Round 1's honest `decisionRow:` bind on `RUN_SIRENE_WORKER` falsified `run_flag_parity`'s own
+    // proxy (`decision_row.is_some()` for "is a door") — a worker CAN carry a row. The fix is a
+    // declared, closed-set attribute, required on every `RUN_*` bool key, never inferred from the
+    // name or the section it lives under.
+    mod run_kind_declared {
+        use super::*;
+
+        fn config_model(key_yaml: &str) -> Model {
+            let spec = format!("keys:\n  RUN_TEST_KEY:\n{key_yaml}");
+            Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(&spec).expect("parses"),
+                )]),
+                ..Default::default()
+            }
+        }
+
+        fn hits(model: &Model) -> Vec<Issue> {
+            let mut issues = Vec::new();
+            validate_configuration(model, &mut issues);
+            issues
+        }
+
+        /// The named gap: a `RUN_*` key of `type: bool` with no `runKind:` at all.
+        #[test]
+        fn a_run_bool_key_with_no_run_kind_is_an_error() {
+            let model = config_model("    type: bool\n    default: false\n    gates: \"Some toggle.\"\n");
+            let found = hits(&model);
+            assert!(
+                found.iter().any(|i| i.rule == "config-run-kind-missing"),
+                "expected config-run-kind-missing; got {:?}",
+                found.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        /// Either member of the closed set is accepted and produces neither finding.
+        #[test]
+        fn door_and_worker_are_both_legal() {
+            for kind in ["door", "worker"] {
+                let model = config_model(&format!(
+                    "    type: bool\n    default: false\n    runKind: {kind}\n    gates: \"Some toggle.\"\n"
+                ));
+                let found = hits(&model);
+                assert!(
+                    !found.iter().any(|i| i.rule == "config-run-kind-missing" || i.rule == "config-run-kind-unknown"),
+                    "runKind: {kind} must be legal; got {:?}",
+                    found.iter().map(|i| i.rule).collect::<Vec<_>>()
+                );
+            }
+        }
+
+        /// A third value is `config-run-kind-unknown`, not silently treated as absent.
+        #[test]
+        fn a_third_value_is_unknown_not_missing() {
+            let model = config_model(
+                "    type: bool\n    default: false\n    runKind: gateway\n    gates: \"Some toggle.\"\n",
+            );
+            let found = hits(&model);
+            assert!(
+                found.iter().any(|i| i.rule == "config-run-kind-unknown"),
+                "expected config-run-kind-unknown; got {:?}",
+                found.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+            assert!(
+                !found.iter().any(|i| i.rule == "config-run-kind-missing"),
+                "an unrecognised value is not the SAME finding as an absent one; got {:?}",
+                found.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        /// A non-`RUN_*` bool key, or a `RUN_*` key of a non-bool type, is untouched by
+        /// `config-run-kind-missing` — the rule's subject is exactly the fleet-parity gate's own
+        /// population.
+        #[test]
+        fn only_run_bool_keys_are_required_to_declare_it() {
+            let non_run = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(
+                        "keys:\n  ORDINARY_FLAG:\n    type: bool\n    default: false\n    gates: \"x\"\n",
+                    )
+                    .expect("parses"),
+                )]),
+                ..Default::default()
+            };
+            assert!(!hits(&non_run).iter().any(|i| i.rule == "config-run-kind-missing"));
+
+            let non_bool = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(
+                        "keys:\n  RUN_TIMEOUT_SECONDS:\n    type: int\n    default: 5\n    gates: \"x\"\n",
+                    )
+                    .expect("parses"),
+                )]),
+                ..Default::default()
+            };
+            assert!(!hits(&non_bool).iter().any(|i| i.rule == "config-run-kind-missing"));
+        }
+
+        /// THE MOTIVATING CASE. Every `RUN_*` bool key in the REAL corpus must declare `runKind:` —
+        /// RED before D5 (every such key is unannotated, so this lists all sixteen by name); GREEN
+        /// after D5 (each key is classified from its own `gates:` prose).
+        #[test]
+        fn every_run_bool_key_declares_run_kind() {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+            let model = load_model(&root.join("specs")).expect("load real specs");
+            let mut issues = Vec::new();
+            validate_configuration(&model, &mut issues);
+            let bad: Vec<&str> = issues
+                .iter()
+                .filter(|i| i.rule == "config-run-kind-missing" || i.rule == "config-run-kind-unknown")
+                .map(|i| i.location.as_str())
+                .collect();
+            assert!(
+                bad.is_empty(),
+                "every RUN_* bool key in the real corpus must declare a legal runKind: {bad:?}"
+            );
+        }
+    }
+
     /// `when.at` (RSO-1): the accepted grammar is a Z-NORMALIZED RFC3339 instant and nothing
     /// else — offsets, bare dates, spaces and out-of-range components are all refused, because
     /// the field exists precisely to remove clock ambiguity from clock-consuming tests.
@@ -9184,6 +9308,7 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
             BTreeMap::new()
         },
         decision_row: None,
+        run_kind_raw: None,
     };
     let keys = vec![
         key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source

@@ -21,6 +21,14 @@ description: >
     - type      : bool | string | int | enum. `bool` accepts true/1/yes/on and false/0/no/off,
                   case-insensitive, trimmed, quotes stripped (ADR-20260728-224500) — an unrecognised
                   value falls back to `default` AND logs that it did.
+    - runKind   : REQUIRED on every `RUN_*` key of `type: bool` (#917 round 2, decision by
+                  consent): closed set `door | worker` — `door` = a per-request/connection
+                  enforcement gate bound to a preconditions record; `worker` = a resident
+                  process-lifetime toggle that pauses a pipeline or a transport. The fleet-parity
+                  gate (`run_flag_parity`, ADR-20260905-223957 §5) filters on this, never on
+                  `decisionRow:` (a worker MAY carry one — `RUN_SIRENE_WORKER` does). Missing on a
+                  `RUN_*` bool key is `config-run-kind-missing`; any value outside the set is
+                  `config-run-kind-unknown`.
     - required  : list of PROFILES in which the key MUST be present at BOOT. A missing required key
                   is reported WITH EVERY OTHER missing key and the app STOPS. Absent (never
                   written) and explicit `[]` mean the SAME thing for boot — never required — but

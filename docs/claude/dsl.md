@@ -212,6 +212,28 @@ un-scoped rule also trips on non-toggle keys using the words in ordinary, unrela
 (`SIRENE_BUDGET_MINUTES`'s sweep "stopping" cleanly; `LOG_LEVEL` citing a "paused" pipeline as an
 example), neither sensibly bindable to a decision row.
 
+## `runKind:` — the declared door/worker split every `RUN_*` bool key must carry (#917 round 2, decision by consent)
+
+Binding `decisionRow: SIRENE-RESTART` to `RUN_SIRENE_WORKER` (round 1, correctly) tripped
+`run_flag_parity` (farley's #639 part C step 6-v fleet-parity gate, ADR-20260905-223957 §5): that
+test's population filter was `decision_row.is_some()`, used as a PROXY for "is a per-request door" —
+a proxy `RUN_SIRENE_WORKER`'s honest bind falsified, because it is a resident worker that also
+happens to carry a release-gate row. The fix (decision by consent — farley: a declared class,
+required, never inferred or hand-listed; evans: the word is `runKind`, already the ubiquitous term;
+beck: the red-first shapes) is a DECLARED, closed-set attribute: `runKind: door | worker` on
+`configuration.yaml`, REQUIRED on every `RUN_*` key of `type: bool` (`config-run-kind-missing` if
+absent, `config-run-kind-unknown` if the value is outside the closed set — `tools/codegen-rs/src/
+config.rs::validate_configuration`). `door` = a per-request/connection enforcement gate bound to a
+preconditions record (returns a typed refusal BEFORE the store/identity-provider is touched);
+`worker` = a resident process-lifetime toggle that pauses a pipeline or a transport. The name suffix
+is never the classifier: `RUN_RIDER_RESTRICTION_SOCKET_CLOSE` lives under the "Worker toggles"
+section heading but is a `door` (it terminates one connection per restriction fact, a per-connection
+enforcement gate), while `RUN_SIRENE_WORKER` (a `worker`) now carries a `decisionRow:` — `decisionRow:`
+and `runKind:` are ORTHOGONAL; a worker may carry a row. `run_flag_parity`
+(`tools/codegen-rs/src/tests.rs` `mod run_flag_parity`) filters its door population on `run_kind ==
+Some(RunKind::Door)`, never on `decisionRow:`. A closed set closed in the loader stays a bare token
+(ADR-20260811-014129): no `RunKind` scalar in `specs/**/scalars.yaml`.
+
 ## The specs index — full detail (moved from CLAUDE.md, 2026-08-01)
 
 CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
