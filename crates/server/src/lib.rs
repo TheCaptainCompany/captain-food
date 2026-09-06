@@ -518,7 +518,7 @@ pub fn build_graphql_di(
     // ADR-20260906-192007 D-H: `QUOTE_SIGNING_KEY_HMAC_SECRET`, resolved ONCE by the caller
     // (`Config::resolve`) — the minter needs only the CURRENT key (never the verifier's plural
     // set), so this is the one new parameter the read side needs.
-    quote_signing_key_hmac_secret: Option<String>,
+    quote_signing_key_hmac_secret: String,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -590,7 +590,7 @@ pub fn build_graphql_di(
     let quote_minter: Arc<application::quote::QuoteMinter> =
         Arc::new(application::quote::QuoteMinter::new(application::quote::SigningKey::from_resolved_secret(
             "current",
-            quote_signing_key_hmac_secret.as_deref().unwrap_or(""),
+            &quote_signing_key_hmac_secret,
         )));
     let read = ReadDeps {
         restaurants: restaurants.clone(),
@@ -1202,6 +1202,28 @@ pub async fn router() -> Router {
                         // #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door,
                         // the SAME resolved-once-here shape.
                         run_admin_sign_in_door: config.run_admin_sign_in_door,
+                        // ADR-20260906-192007 D-F/D-G/D-H: the write-side quote verify guard,
+                        // resolved ONCE here at boot -- the D-B interlock + D-H dev-key refusal
+                        // both fire inside `resolve_at_boot`, never per-request. Its own bulkhead
+                        // pool (D-K), never the shared `pool`.
+                        quote_guard: Arc::new(
+                            application::quote::QuoteGuard::resolve_at_boot(
+                                config.run_quote_required_on_place_order,
+                                config.run_fold_priced_cart_read,
+                                matches!(config.profile, crate::generated::config::Profile::Staging | crate::generated::config::Profile::Production),
+                                application::quote::SigningKey::from_resolved_secret(
+                                    "current",
+                                    &config.quote_signing_key_hmac_secret,
+                                ),
+                                config.quote_signing_key_previous_hmac_secret.as_deref().filter(|s| !s.is_empty()).map(
+                                    |s| application::quote::SigningKey::from_resolved_secret("previous", s),
+                                ),
+                                Arc::new(infrastructure::PgAsOfCatalogRepository::new(
+                                    infrastructure::PgAsOfCatalogRepository::bulkhead_pool(&pool),
+                                )),
+                            )
+                            .expect("boot refusal: RUN_QUOTE_REQUIRED_ON_PLACE_ORDER/RUN_FOLD_PRICED_CART_READ interlock or the dev signing key in a live profile (ADR-20260906-192007 D-B/D-H)"),
+                        ),
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare

@@ -174,7 +174,8 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    };
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+};
     let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));
     for (actor_type, width) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
@@ -281,7 +282,8 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
         as_of_price_authority: Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone())),
         run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
-        }),
+                    quote_minter: std::sync::Arc::new(application::quote::QuoteMinter::new(application::quote::SigningKey::dev_only("test"))),
+}),
         Some(server::graphql_schema::WriteDeps {
             event_store,
             ownership,

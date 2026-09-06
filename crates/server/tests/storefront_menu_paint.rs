@@ -463,7 +463,8 @@ fn schema() -> CaptainSchema {
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         as_of_price_authority: Arc::new(Empty),
         run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
-        }),
+                    quote_minter: std::sync::Arc::new(application::quote::QuoteMinter::new(application::quote::SigningKey::dev_only("test"))),
+}),
         None,
         None,
     )

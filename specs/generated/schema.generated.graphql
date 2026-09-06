@@ -1724,7 +1724,7 @@ input PlaceOrderInput {
   deliveryAddress: AddressInput
   note: OrderNote
   paymentMethodId: String!
-  expectedTotal: MoneyInput @deprecated(reason: "Retired by the quote (PROP-20260831-134539 slice 3b); today no shipped client sends it and the check is dead in production.")
+  expectedTotal: MoneyInput @deprecated(reason: "Retired by the quote (PROP-20260831-134539 slice 3b); ignored by the server. No shipped client sends it.")
   quote: CartQuote
 }
 

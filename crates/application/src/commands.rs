@@ -2676,14 +2676,14 @@ pub async fn place_replacement_order(
 /// This is ONLY the saga's first, command-initiated leg: validate the checkout, price the cart
 /// server-side from the LIVE catalog (`crate::pricing::price_cart` —
 /// rules.yaml#/ServerPriceAuthority: the server is the only price authority; an unresolvable line
-/// price rejects fail-closed with `errors.yaml#/PriceUnresolvable`, and a client `expectedTotal`
-/// that diverges from the recomputed total rejects with `errors.yaml#/PriceMismatch` — LIVE IN
-/// CODE, DEAD ON THE SHIPPED CLIENT (no shipped client sets `expectedTotal`,
-/// `crates/web/src/checkout.rs:610` is a test fixture only), so today every order is charged at
-/// HEAD unverified against anything the customer was shown. This equality check is superseded by
-/// `cmd.quote`'s verify guard once the quote is verified server-side (ADR-20260906-192007 D-A/D-F);
-/// both `expectedTotal` and this dead check stay declared until then) and create
-/// the Stripe PaymentIntent through the generated [`PaymentService`] port for exactly that recomputed amount
+/// price rejects fail-closed with `errors.yaml#/PriceUnresolvable`), then the signed-quote verify
+/// guard (`crate::quote::verify_quote`, ADR-20260906-192007 D-F): CLOSED (the write door's
+/// default everywhere), a no-op — the charge stays the HEAD-projection total above, `cmd.quote`
+/// unread, exactly today's behaviour; OPEN, an absent quote refuses `QuoteRequired`, a present one
+/// is verified and the charge becomes the FRESH fold recompute at the token's own coordinate. The
+/// retired `expectedTotal` equality check (`errors.yaml#/PriceMismatch`) is deleted — no shipped
+/// client ever sent it. Then create the Stripe PaymentIntent through the generated
+/// [`PaymentService`] port for exactly that (possibly fold-sourced) recomputed amount
 /// (a synchronous decline is the canonical `errors.yaml#/PaymentDeclined`). Returns the created
 /// intent so the mutation payload can carry `paymentIntentId`/`clientSecret` (api.yaml).
 ///
@@ -2725,6 +2725,12 @@ pub async fn place_order(
     // inside the handler, so the in-process test suite stays order-independent and both gate
     // edges are assertable (tests.yaml `when.gates`).
     enforce_service_hours_guard: bool,
+    // ADR-20260906-192007 D-F/D-G (seventh carve-out condition (b), "one argument threaded"):
+    // everything the write-side signed-quote verify guard needs, bundled into ONE value
+    // (`application::quote::QuoteGuard`) resolved ONCE at the composition root under the D-B
+    // interlock + D-H boot refusal — the handler never reads config/env itself, the `when_at`/
+    // `enforce_service_hours_guard` style.
+    quote_guard: &crate::quote::QuoteGuard,
 ) -> Result<PaymentRequestOutput, DomainError> {
     // The restaurant must exist, be ACTIVE and not PAUSED — folded from ITS stream (authoritative,
     // race-free; the saga may read other aggregates' streams through the same EventStore port).
@@ -2855,27 +2861,32 @@ pub async fn place_order(
     for line in &cart.lines {
         require_orderable_line(catalogs, &cmd.restaurant_id, line).await?;
     }
-    // The client's expectedTotal (optional) is a CONFIRMATION only — checked for equality against the
-    // recomputed total so the customer is never charged an amount other than the one displayed.
-    // LIVE IN CODE, DEAD ON THE SHIPPED CLIENT: no shipped client sets this field
-    // (crates/web/src/checkout.rs:610 is a test fixture only), so this branch never actually fires
-    // against a real order today. Superseded by `cmd.quote`'s verify guard once the quote is
-    // verified server-side (ADR-20260906-192007 D-A/D-F) — both this check and `expectedTotal`
-    // stay declared, unchanged, until then.
-    if let Some(expected) = &cmd.expected_total {
-        if *expected != priced.total_amount {
-            return Err(reject(
-                "PriceMismatch",
-                json!({
-                    "cartId": cmd.cart_id,
-                    "expectedAmountCents": priced.total_amount.amount_cents,
-                    "submittedAmountCents": expected.amount_cents,
-                    "currency": priced.total_amount.currency,
-                }),
-            ));
-        }
-    }
-    let gross = priced.total_amount.clone();
+    // THE SIGNED-QUOTE VERIFY GUARD (D-F, ADR-20260906-192007), at the position the equality
+    // check against the now-ignored `expectedTotal` used to occupy — strictly BEFORE
+    // `credit_to_apply`/`payments.request` below, same reasoning as the service-hours guard
+    // above: refusing after either would strand a real PaymentIntent or consume goodwill for an
+    // order we never meant to take at the quoted price. `expectedTotal` itself is superseded and
+    // read by nothing here (D-A's end state: "ignored by the server").
+    //
+    // CLOSED (`quote_guard.is_open()` false, the default everywhere): `verify_quote` returns
+    // `Ok(None)` immediately without inspecting `cmd.quote`/`catalogs`/`cart.lines` at all — the
+    // charge stays `priced.total_amount` (the HEAD-projection total), today's behaviour verbatim.
+    // OPEN: an absent `cmd.quote` refuses `QuoteRequired`; every structural/business refusal is
+    // ONE of the enumerated causes (D-D); on success the charge becomes the FRESH
+    // `price_cart_at` recompute at the token's own coordinate — never `priced.total_amount`,
+    // which is the HEAD-projection value the fold may disagree with (young's red-first:
+    // `the_charged_total_comes_from_the_fold_when_the_projection_disagrees`).
+    let verified_total = crate::quote::verify_quote(
+        quote_guard,
+        cmd.quote.as_ref(),
+        cmd.cart_id,
+        cmd.restaurant_id,
+        catalogs,
+        &cart.lines,
+        when_at,
+    )
+    .await?;
+    let gross = verified_total.unwrap_or_else(|| priced.total_amount.clone());
     // Store credit (goodwill) is SPENT at checkout (#158, Part B of #207): the available balance reduces
     // the CASH the buyer pays, up to the order total (currency-matched, never negative), keyed by the
     // order for exactly-once spend. The PaymentIntent is created for the REDUCED buyer total; the order's
@@ -5171,9 +5182,20 @@ mod credit_checkout_tests {
         // hours, so the verdict is HOURS_UNDECLARED at any instant and the checkout is accepted.
         let when_at: chrono::DateTime<chrono::Utc> =
             "2026-01-06T12:00:00Z".parse().expect("RFC3339 instant");
-        place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &actor(), when_at, false)
-            .await
-            .expect("checkout accepted");
+        place_order(
+            &bed.store,
+            &bed.catalogs,
+            &bed.payments,
+            &bed.payment_pm,
+            cmd,
+            None,
+            &actor(),
+            when_at,
+            false,
+            &crate::behaviour_support::quote_guard_closed(),
+        )
+        .await
+        .expect("checkout accepted");
 
         // The PaymentIntent charges the BUYER TOTAL (1000 − 300 = 700); the frozen checkout keeps gross.
         let payment = bed.store.stream("Payment-pi_123");

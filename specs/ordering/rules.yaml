@@ -53,56 +53,44 @@ RefundRequestByCustomer:
 # --- PlaceOrderProcess (checkout saga) ---
 ServerPriceAuthority:
   description: >
-    NOTE (evans, to action when the write-side verify guard lands): this phase-scaffolding
-    paragraph exists only to describe today's split and should be DELETED at that point, leaving
-    the rule's evergreen text to stand alone. Rewritten in the same change as the write-side
-    expand/contract door's SPEC shapes (PROP-20260831-134539 slice 3b + the command change,
-    ADR-20260906-192007 D-A/D-D/D-F) — the write-side ENFORCEMENT this rule describes still lands
-    only once the quote is verified server-side, together with `errors.yaml#/QuoteNoLongerHonoured`'s
-    real test coverage (the two cannot split across phases: `make validate`'s `test-uncovered-error`
-    refuses a `throws:` reference to an error no code can yet produce). Until then, the rule below
-    is UNCHANGED IN BEHAVIOUR: the server is the only price authority on the write path — order
-    line totals, the order total and the payment-intent amount are recomputed AT HEAD from the live
-    catalog (Offer prices, Option prices) TODAY, while the write door is CLOSED; once the door
-    opens, the CHARGE SOURCE becomes the fold `as_of(catalogId, V)` AT THE COORDINATE the quote
-    names (never `at_head`, D-F) instead — no client-supplied amount is ever trusted, in either
-    arm. A client-submitted `expectedTotal` is a confirmation only, checked for equality (divergence
-    rejects with `PriceMismatch`), and a cart line whose price cannot be resolved from the live
-    catalog rejects the checkout fail-closed (`PriceUnresolvable`) — never a fallback to the
-    client's number. LEGAL DISPLAY GUARANTEE (Code de la consommation L112-1/L221-5 posture,
-    narrowed so it overstates neither arm): the amount charged never exceeds the CTA total the
-    consumer agreed to — today (CLOSED arm) that is enforced as exact equality against the server's
-    live HEAD recomputation, drift rejected and re-confirmed rather than charged. That equality
-    check on `expectedTotal` is LIVE IN CODE and DEAD ON THE SHIPPED CLIENT: no shipped client sets
-    `expected_total` outside a test fixture (`crates/web/src/checkout.rs:610`), so today every
-    order is charged AT HEAD, UNVERIFIED against anything the customer was actually shown — #816
-    stands open until the quote is verified server-side. D-E — `totalCents` scope: the token signs
-    the catalog-lines total, never the full CTA number; the displayed CTA total = lines (bound by
-    the token) + live fees (recomputed at verify time); the write side REFUSES when the two
-    disagree, and never charges a delta. F4 exact: a HEAD price that has since moved LOWER than the
-    quoted lines-total still charges the QUOTED total — verify is a veto, never a re-source (D-F),
-    so a pass charges exactly the token's own amount.
+    The server is the ONLY price authority on the write path (ADR-20260906-192007 D-A/D-D/D-F,
+    PROP-20260831-134539 slice 3b + the command change). CLOSED — the write door
+    (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`), default everywhere: order line
+    totals, the order total and the payment-intent amount are recomputed AT HEAD from the live
+    catalog PROJECTION (Offer prices, Option prices); `expectedTotal` is DEPRECATED (superseded by
+    the signed `quote`, D-A/D-J) and ignored by the server — no shipped client sends it outside a
+    test fixture (`crates/web/src/checkout.rs:610`), and nothing checks it. `quote` is accepted on
+    the command, structurally, and NEVER READ. OPEN — once the write door is open: an absent
+    `quote` refuses at the handler with `errors.yaml#/QuoteRequired` (typed, never an SDL non-null
+    violation, so requiredness can flip with no SDL edit); a present `quote` is VERIFIED
+    (`application::quote::verify_quote`) — signature under the live key set, `keyId` in that set,
+    mintedAt within the 30-minute `QUOTE-STALENESS` backstop, cartId/restaurantId/catalog identity
+    matching the command's live state, and the cart's priceable content unchanged since the quote
+    was minted — against `as_of(catalogId, V)` AT THE COORDINATE the quote names (never `at_head`,
+    D-F): the CHARGE SOURCE becomes that fold's `price_cart_at` recompute, never the HEAD
+    projection and never the client-echoed `totalCents` (which the token carries for observability
+    only). The fold may only VETO a price the catalog can no longer support or refuse a
+    stale/tampered/foreign quote, NEVER ADD a price, a tax rate or an acceptance the fold itself
+    did not produce (the same "projection is a veto, never a source" posture ADR-20260906-154419
+    D2 states for the read side). D-E — `totalCents` scope: the token signs the catalog-lines
+    total, never the full CTA number; the displayed CTA total = lines (bound by the token) + live
+    fees; the write side never charges a delta. F4 exact: a HEAD price that has since moved LOWER
+    than the quoted lines-total still charges the QUOTED total — verify is a veto, never a
+    re-source, so a pass always charges exactly the fold's own recompute at the token's coordinate
+    (which, by construction, is the total the customer was shown).
 
-    **What this deliverable adds, additive-only in this phase, inert until the quote is verified
-    server-side**:
-    `expectedTotal` is now DEPRECATED (superseded by the signed `quote`, D-A/D-J) — retired by the
-    quote: today no shipped client sends it and the check is dead in production; still checked
-    exactly as above for whatever DOES send it, kept nullable for expand/contract, its own deletion
-    a later, separate step. `quote` is accepted on the command, structurally, and NEVER READ while
-    the write door (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`) is CLOSED (default,
-    everywhere) — the behaviour above is exactly today's, unconditionally. Once the quote is
-    verified server-side and the write door opens: an absent `quote` refuses at the handler (typed, never an SDL non-null violation); a
-    present `quote` is verified against `as_of(catalogId, V)` AT THE COORDINATE it names (never
-    `at_head` — D-F) — the fold-derived projection may only VETO a price the catalog can no longer
-    support or refuse a stale/tampered/foreign quote, NEVER ADD a price, a tax rate or an
-    acceptance the fold itself did not produce (the same "projection is a veto, never a source"
-    posture ADR-20260906-154419 D2 states for the read side, restated here for the write side); the
-    `expectedTotal` equality check and `errors.yaml#/PriceMismatch` are retired TOGETHER with that
-    same change, replaced by `errors.yaml#/QuoteNoLongerHonoured` (the ONE business refusal for a
-    cart edited after minting or an expired quote) plus the ADR-20260810-112836 §6 technical path
-    for every structural cause (forged signature, a foreign cart's quote, a retired key, a
-    coordinate beyond the stream's own head) — the customer sees ONE cause-neutral screen for the
-    whole set, D-D.
+    Refusals (D-D): `errors.yaml#/QuoteRequired` (absent quote); `errors.yaml#/QuoteNoLongerHonoured`
+    (the ONE business refusal — a cart edited after minting, or an expired quote);
+    `errors.yaml#/QuoteVerificationFailed` (the ADR-20260810-112836 §6 technical path for every
+    structural cause — forged signature, a foreign cart's quote, a retired key, a coordinate
+    beyond the stream's own head, a fold read failure). The customer sees ONE cause-neutral screen
+    for the whole set. LEGAL DISPLAY GUARANTEE (Code de la consommation L112-1/L221-5 posture): the
+    amount charged never exceeds the CTA total the consumer agreed to, in either door state.
+    `errors.yaml#/PriceMismatch` is RETIRED (deleted) — repurposing it was refused (evans): its
+    copy ("Prices have changed…") is false for the structural refusal causes the new set
+    enumerates. `errors.yaml#/PriceUnresolvable` is unchanged, either arm: a cart line whose price
+    cannot be resolved from the live catalog rejects the checkout fail-closed — never a fallback
+    to the client's number.
 
 CheckoutPricesCartCreatesPaymentIntent:
   description: >

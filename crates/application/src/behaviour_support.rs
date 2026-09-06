@@ -110,6 +110,52 @@ pub fn actor_as(user_type: &str) -> Actor {
     }
 }
 
+/// The CLOSED-door `QuoteGuard` every generated `place_order` dispatch threads by default
+/// (D-F/D-G): most `tests.yaml` scenarios run the write door CLOSED, so `crate::quote::verify_quote`
+/// returns `Ok(None)` before touching the fold authority at all (ADR-20260906-192007 D-F).
+/// `crate::quote::QuoteGuard::closed_for_tests` IS the shared `for_tests` shape (#510 precedent)
+/// every OTHER crate's test harness reaches too.
+pub fn quote_guard_closed() -> crate::quote::QuoteGuard {
+    crate::quote::QuoteGuard::closed_for_tests()
+}
+
+/// The `when.gates`-driven `QuoteGuard` a PlaceOrder scenario opening
+/// `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`/`RUN_FOLD_PRICED_CART_READ` threads (BT_GATE_CONSUMING).
+/// `TestPlaceOrderRejectsQuoteRequired` is the ONE scenario that opens both today — its `quote`
+/// stays absent, refusing before the fold authority is ever touched, so the panic-on-call stub is
+/// the honest value here (the SAME `UncalledFoldAuthority` shape `quote_guard_closed` uses
+/// internally via `closed_for_tests`), never a real Postgres-backed one this in-memory suite has
+/// no pool for.
+pub fn quote_guard_for(run_quote_required_on_place_order: bool, run_fold_priced_cart_read: bool) -> crate::quote::QuoteGuard {
+    struct UncalledFoldAuthority;
+    #[async_trait]
+    impl crate::ports::AsOfPriceAuthority for UncalledFoldAuthority {
+        async fn as_of(
+            &self,
+            _catalog_id: CatalogId,
+            _version: domain::catalog_as_of::CatalogVersion,
+        ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+            panic!("quote_guard_for -- this generated scenario's `quote` is absent, the fold authority must never be called");
+        }
+        async fn at_head(
+            &self,
+            _catalog_id: CatalogId,
+            _correlation_id: uuid::Uuid,
+        ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+            panic!("quote_guard_for -- this generated scenario's `quote` is absent, the fold authority must never be called");
+        }
+    }
+    crate::quote::QuoteGuard::resolve_at_boot(
+        run_quote_required_on_place_order,
+        run_fold_priced_cart_read,
+        false,
+        crate::quote::SigningKey::from_resolved_secret("test", ""),
+        None,
+        std::sync::Arc::new(UncalledFoldAuthority),
+    )
+    .expect("TestPlaceOrderRejectsQuoteRequired opens both gates together -- the interlock cannot refuse")
+}
+
 // ------------------------------------------------------------------------------------------------
 // The bed: event store + PM state doubles + read-model/service doubles
 // ------------------------------------------------------------------------------------------------

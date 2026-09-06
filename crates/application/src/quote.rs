@@ -369,13 +369,49 @@ impl QuoteGuard {
     pub fn is_open(&self) -> bool {
         self.door.is_some()
     }
+
+    /// The CLOSED-door guard every OTHER crate's test harness needs (#510's `for_tests` shape,
+    /// `queries::MailboxRequeueAccess::for_tests` precedent): both doors false, so
+    /// `resolve_at_boot` can never refuse, over a fold authority that panics if ever called (the
+    /// door stays CLOSED). Compiled only under `test-fixtures`, which only `[dev-dependencies]`
+    /// may enable (`test_fixtures_feature_never_reaches_a_release_artifact`).
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn closed_for_tests() -> Self {
+        struct UncalledFoldAuthority;
+        #[async_trait::async_trait]
+        impl AsOfPriceAuthority for UncalledFoldAuthority {
+            async fn as_of(
+                &self,
+                _catalog_id: CatalogId,
+                _version: CatalogVersion,
+            ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+                panic!("QuoteGuard::closed_for_tests -- the door is CLOSED, this must never be called");
+            }
+            async fn at_head(
+                &self,
+                _catalog_id: CatalogId,
+                _correlation_id: uuid::Uuid,
+            ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+                panic!("QuoteGuard::closed_for_tests -- the door is CLOSED, this must never be called");
+            }
+        }
+        Self::resolve_at_boot(
+            false,
+            false,
+            false,
+            SigningKey::from_resolved_secret("test", ""),
+            None,
+            Arc::new(UncalledFoldAuthority),
+        )
+        .expect("both doors closed can never refuse at boot")
+    }
 }
 
 /// The write-side verify guard (D-F), called from `application::commands::place_order`'s
 /// pre-payment block. CLOSED (`guard.is_open()` false): returns `Ok(None)` immediately — the
 /// caller keeps charging `price_cart`'s HEAD-projection total, exactly today's behaviour, and
 /// `quote`/`catalogs`/`lines` are not even inspected. OPEN: an absent `quote` refuses with
-/// `QuoteRequired`; every other check maps through [`QuoteRefusal::into_domain_error`]. On success,
+/// `QuoteVerificationFailed`; every other check maps through [`QuoteRefusal::into_domain_error`]. On success,
 /// returns `Some(total)` — the FRESH [`price_cart_at`] recompute at the token's own coordinate,
 /// which the caller charges INSTEAD OF the HEAD-projection total (never the token's own
 /// `totalCents`, which is carried for observability only — see the module doc).
@@ -392,7 +428,7 @@ pub async fn verify_quote(
         return Ok(None);
     }
     let Some(token) = quote else {
-        return Err(DomainError::rejected("QuoteRequired", json!({ "cartId": cart_id })));
+        return Err(DomainError::rejected("QuoteVerificationFailed", json!({ "cartId": cart_id })));
     };
     let payload = guard
         .verifier

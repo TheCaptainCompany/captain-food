@@ -152,7 +152,8 @@ fn deps(auth: Arc<dyn IdentityService>) -> CommandDeps {
         run_platform_access_grant: false,
         platform_members: Arc::new(PgPlatformMemberRepository::new(unused.clone())),
         run_admin_sign_in_door: true,
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 async fn request(deps: &CommandDeps, email: &str) -> InboxOutcome {

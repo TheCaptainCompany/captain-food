@@ -162,6 +162,12 @@ pub struct CommandDeps {
     /// default) refuses BOTH `requestAdminSignInLink` and `confirmAdminSignIn` with the typed
     /// `AdminSignInDoorClosed` BEFORE the identity provider is touched at all.
     pub run_admin_sign_in_door: bool,
+    /// ADR-20260904-081527 §8 seventh carve-out condition (c): everything `place_order`'s
+    /// write-side signed-quote verify guard needs (D-F), bundled into this ONE field
+    /// (`application::quote::QuoteGuard` -- the interlock witness, the verifier, the fold-priced
+    /// read authority), resolved ONCE at the composition root under the D-B interlock + D-H boot
+    /// refusal, the `run_admin_sign_in_door` precedent above.
+    pub quote_guard: std::sync::Arc<application::quote::QuoteGuard>,
 }
 
 

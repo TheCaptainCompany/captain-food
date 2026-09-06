@@ -283,6 +283,13 @@ pub(crate) const BT_DEFAULT_WHEN_AT: &str = "2026-01-06T12:00:00Z";
 /// invisible" defect class, the same posture as `when.at`).
 pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     ("PlaceOrder", "ENFORCE_SERVICE_HOURS_GUARD", "enforce_service_hours_guard"),
+    // ADR-20260906-192007 D-F/D-G: the signed-quote write door's own interlocked pair -- both
+    // must be named in the SAME test's `when.gates` to open the guard (D-B's interlock), so a
+    // scenario names both or neither. `TestPlaceOrderRejectsQuoteRequired` is the one scenario
+    // that opens both; every other PlaceOrder test gets `false` for both (the spec defaults),
+    // exactly `quote_guard_closed()`'s own posture.
+    ("PlaceOrder", "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", "run_quote_required_on_place_order"),
+    ("PlaceOrder", "RUN_FOLD_PRICED_CART_READ", "run_fold_priced_cart_read_for_quote_guard"),
     // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's release gate, read
     // at the WRITE door only — `reinstateRider` never consumes it (ReinstateRider is absent here
     // on purpose).
@@ -330,7 +337,7 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         _ => bt_fn_name(cmd),
     };
     match cmd {
-        "PlaceOrder" => "crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await".to_string(),
+        "PlaceOrder" => "crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await".to_string(),
         // The Art. 11 log's decidedAt/effectiveAt are BOTH server-set (ADR-20260904-081527 §5) —
         // "now is a parameter" (RSO-1), never a system-clock read inside the handler.
         "RestrictRider" => "crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at, run_rider_restriction_door).await".to_string(),
