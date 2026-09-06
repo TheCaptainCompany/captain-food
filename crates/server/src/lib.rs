@@ -150,6 +150,14 @@ pub use graphql::schema as graphql_schema;
 // guarantee the parallel in-crate harness cannot give. These three are that test's entry points.
 pub use hosts::{host_root, TenantLookup};
 pub use web_ssr::SsrExec;
+/// #639 part C step 6-iii RESUME (R-1): the session-cookie transport routes (`POST
+/// /auth/{session,refresh,logout}`), re-exported so the ADMIN sign-in DB-gated walk
+/// (`platform_admin_walk.rs`) can mount the SAME `/auth/session` the browser calls -- the
+/// established convention in `admin_sign_in_door.rs`/`member_sign_in_door.rs`/`rider_sign_in_door.rs`
+/// stopped short of this (asserting `sessions.parked()` only) because the module was private; this
+/// re-export widens nothing behavioural, only what a test can build against, following the exact
+/// `pub use graphql::routes::graphql_routes` precedent above for a private module.
+pub use auth_routes::{auth_routes, AuthRoutesState};
 
 /// Minimal health/edge-proof: lets the `desktop` (Tauri) shell embed the server in-process and proves the
 /// server → shared_types edge (ADR-0035). The real DI graph is built in `router()`.
