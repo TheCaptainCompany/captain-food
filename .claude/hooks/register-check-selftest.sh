@@ -335,6 +335,16 @@ EOF
 # (review round 1, F1). One fixture per era, so a regression to the single-glob form reds here.
 : > "$FIX/docs/adr/0032-fixture-legacy-era.md"
 : > "$FIX/docs/adr/20260720-233000-fixture-prefixless-era.md"
+# A NON-EMPTY 0-hit fixture (#926 item 4): the fully EMPTY fixture above only ever reaches
+# malformedness via a line PAST EOF (RF4b shares RF7's own branch), so no case exercised "the line
+# EXISTS and carries no token" at 0 hits specifically -- a real gap, since that is a DIFFERENT
+# failure mode from "no such line". Three prose lines, none of them carrying a Rule 1 token; RF12
+# pins its own entry to line 2 by number.
+cat > "$FIX/docs/adr/ADR-20260906-060000-fixture-zerohit.md" <<'EOF'
+# Fixture: a zero-hit record for the sharper 0-hit cases (RF12/RF13/RF14, #926 item 4)
+Nothing on this second line carries a marker either -- RF12 pins its own entry here.
+Nor does this third and final line of the fixture.
+EOF
 # Agent fixtures for the shapes that used to fail OPEN (review round 1, F2). Each one is a
 # `tools:` declaration the old `awk /^tools:/{print}` reduced to the literal `tools:` -- non-empty,
 # so the fail-closed branch never ran and a write-capable agent was declared advisory.
@@ -524,15 +534,22 @@ expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LA
 expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
 # ── Lane D: the dispatch card (Agent surface, ADR-20260831-141500) ──────────────────────────────
-expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd]
-  local case="$1" want="$2" payload="$3" want_reason="${4:-}" cwd="${5:-}" got reason log="$FIX/case.log"
-  : > "$log"
+expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd] [want-stderr-fragment]
+  # want-stderr-fragment (#926 item 4) asserts the hook's ACTUAL STDERR text (`block()`'s
+  # `rf_msg`/message body, fed back to the caller) contains a literal fragment -- a DIFFERENT
+  # thing from `want-reason` above, which only checks the log's short reason CODE. No existing
+  # case's own redirection changes: stdout still goes nowhere and every prior case still passes
+  # with only 5 args: stderr is now captured to a per-case file instead of being merged and
+  # discarded, and only read back when a 6th arg is actually given.
+  local case="$1" want="$2" payload="$3" want_reason="${4:-}" cwd="${5:-}" want_stderr="${6:-}" \
+        got reason log="$FIX/case.log" errlog="$FIX/case.err"
+  : > "$log"; : > "$errlog"
   if [ -n "$cwd" ]; then
     ( cd "$cwd" && printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
-      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1 )
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>"$errlog" )
   else
     printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
-      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>"$errlog"
   fi
   got=$?
   if [ "$got" -ne "$want" ]; then
@@ -543,6 +560,12 @@ expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd]
     reason="$(tail -1 "$log" 2>/dev/null | cut -f3)"
     if [ "$reason" != "$want_reason" ]; then
       echo "register-check selftest: case $case FAILED (want reason '$want_reason', got '${reason:-none}')" >&2
+      fail=1
+    fi
+  fi
+  if [ -n "$want_stderr" ]; then
+    if ! grep -qF "$want_stderr" "$errlog" 2>/dev/null; then
+      echo "register-check selftest: case $case FAILED (want stderr containing '$want_stderr', got: $(cat "$errlog" 2>/dev/null))" >&2
       fail=1
     fi
   fi
@@ -669,8 +692,9 @@ expect_d RF9-redfirst-missing-test-path 2 "{\"tool_name\":\"Agent\",\"tool_input
 # be CITED IN THIS TRAIL (tested by resolved path against `rf_files`, never by id string). Anything
 # else beginning with `none` is not the declared form and falls through to the ordinary shape
 # parse, blocking with the SAME `dispatch-redfirst-shape` a malformed positive entry already gets.
-# RF10 BLOCK: "nonesuch garbage" at 0 hits -- the exact incident shape, on the 0-hit fixture.
-expect_d RF10-none-prefix-glob-refused 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: nonesuch garbage\"}}" dispatch-redfirst-shape
+# RF10 BLOCK: "nonesuch garbage" at 0 hits -- the exact incident shape, on the 0-hit fixture. Also
+#    asserts the hook's actual STDERR text carries the shape message (#926 item 4's new argument).
+expect_d RF10-none-prefix-glob-refused 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: nonesuch garbage\"}}" dispatch-redfirst-shape "" "no entry matches the required shape"
 # RF11a BLOCK: the declared none form's OWN record id must resolve -- an invented id inside
 #    `none — <record> names no test` is not a free pass either.
 expect_d RF11a-none-unresolvable-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260101-000000 names no test\"}}" dispatch-redfirst-shape
@@ -679,6 +703,26 @@ expect_d RF11a-none-unresolvable-record 2 "{\"tool_name\":\"Agent\",\"tool_input
 #    redfirst fixture) but this trail (`$DTRAIL`) cites only ADR-20260821-095957 -- the negative may
 #    not borrow a citation the trail never made.
 expect_d RF11b-none-uncited-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-shape
+
+# RF12 BLOCK: a POSITIVE entry pinned to LINE 2 of the NEW non-empty 0-hit fixture -- the line
+#    EXISTS and carries no token, a DIFFERENT failure mode from "no such line" (RF4b/RF7, both
+#    past-EOF). Also asserts stderr. Mutant: gate the token check behind `rf_hit_count -gt 0` --
+#    at 0 hits that would skip the check entirely and wrongly ALLOW.
+DTRAIL_ZH='Register check: ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture, silent on Y'
+expect_d RF12-zero-hit-line-without-token 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_ZH\\nRed-first: NEW::test_x — ADR-20260906-060000:2 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "" "no entry matches the required shape"
+# RF13 BLOCK: an EXISTING on-disk test path with NO `::` separator at >0 hits (`$DTRAIL_RF`) --
+#    `$TPATH_HOOK` alone, so `testref` never contains `::` and the entry is skipped as malformed.
+#    Mutant: delete the `case "$testref" in *'::'*) ...` guard -- without it `tpath`/`tname` both
+#    collapse to the whole (existing, non-empty) path and the entry flips to ALLOW.
+expect_d RF13-missing-double-colon-on-existing-path 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: $TPATH_HOOK — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "$FIX"
+# RF14 BLOCK: a trail citing the ZERO-hit fixture FIRST and the redfirst fixture SECOND (citation
+#    ORDER pinned here on purpose), with the full declared none form naming the FIRST (0-hit)
+#    record. `rf_hit_count` is summed over the WHOLE trail's cited records (0 + 2 = 2), so the
+#    negative is still refused as a false negative even though the record IT NAMES has 0 hits --
+#    "the negative speaks for the whole trail, not per-record" (workflow.md). Mutant: sum hits over
+#    the FIRST cited record only -- that would read 0 and wrongly ALLOW.
+DTRAIL_ZH_THEN_RF='Register check: ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture, and ADR-20260906-050000 (2026-09-06, open) -- covers the redfirst fixture too'
+expect_d RF14-none-over-two-records-one-hitting 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_ZH_THEN_RF\\nRed-first: none — ADR-20260906-060000 names no test\"}}" dispatch-redfirst-false-negative
 # RF15 BLOCK: the SAME malformed text as RF10 ("nonesuch garbage"), but on a record that DOES have
 #    hits (`$DTRAIL_RF`) -- PRECEDENCE. This must resolve to `dispatch-redfirst-shape`, never to the
 #    false negative RF5 pins: the OLD prefix glob read "nonesuch" as the negative (it starts with
