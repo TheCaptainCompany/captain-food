@@ -975,6 +975,16 @@ is itself the argument: **a list that grows has no business stating its own leng
   warning list under a failing verdict, and `| grep` makes `$?` grep's rather than make's — both
   reported success over a failing gate this week.
 
+## 19i. A docs-only push to `main` bypasses CI — run `python3 tools/link-check.py` before it, every time (2026-09-06)
+
+A record commit pushed straight to `main` (ADR-20260906-024838) carried two GUESSED ADR filenames. Nothing on
+`main` said so: docs-only pushes bypass the required checks by design, and `make generate` + `make validate`
+(§19h) do not check links. The red surfaced on the NEXT code PR's `gate-scripts` job (#909), forty minutes later,
+as a failure that looked like the PR's. Rule, sharpening §19a: **a docs-only push runs `python3 tools/link-check.py`
+first, whenever the diff writes a relative link** — it takes seconds — and a filename is never typed from memory:
+`ls docs/adr | grep <id>` is the source. A PR turning red on `gate-scripts` right after a docs push to `main` is
+the docs push, not the PR: check `main` first.
+
 ## 19c. Test-bed and gate findings from #854 and the 2026-09-04 records pass
 
 - **The loop-budget timer's 240-minute staleness bound fires on a legitimate long run under the same
