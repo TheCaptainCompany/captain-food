@@ -967,6 +967,130 @@ keys:
         }
     }
 
+    // ─── #917 round 2 (decision by consent — farley/evans/beck): `runKind: door | worker` ────────
+    //
+    // Round 1's honest `decisionRow:` bind on `RUN_SIRENE_WORKER` falsified `run_flag_parity`'s own
+    // proxy (`decision_row.is_some()` for "is a door") — a worker CAN carry a row. The fix is a
+    // declared, closed-set attribute, required on every `RUN_*` bool key, never inferred from the
+    // name or the section it lives under.
+    mod run_kind_declared {
+        use super::*;
+
+        fn config_model(key_yaml: &str) -> Model {
+            let spec = format!("keys:\n  RUN_TEST_KEY:\n{key_yaml}");
+            Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(&spec).expect("parses"),
+                )]),
+                ..Default::default()
+            }
+        }
+
+        fn hits(model: &Model) -> Vec<Issue> {
+            let mut issues = Vec::new();
+            validate_configuration(model, &mut issues);
+            issues
+        }
+
+        /// The named gap: a `RUN_*` key of `type: bool` with no `runKind:` at all.
+        #[test]
+        fn a_run_bool_key_with_no_run_kind_is_an_error() {
+            let model = config_model("    type: bool\n    default: false\n    gates: \"Some toggle.\"\n");
+            let found = hits(&model);
+            assert!(
+                found.iter().any(|i| i.rule == "config-run-kind-missing"),
+                "expected config-run-kind-missing; got {:?}",
+                found.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        /// Either member of the closed set is accepted and produces neither finding.
+        #[test]
+        fn door_and_worker_are_both_legal() {
+            for kind in ["door", "worker"] {
+                let model = config_model(&format!(
+                    "    type: bool\n    default: false\n    runKind: {kind}\n    gates: \"Some toggle.\"\n"
+                ));
+                let found = hits(&model);
+                assert!(
+                    !found.iter().any(|i| i.rule == "config-run-kind-missing" || i.rule == "config-run-kind-unknown"),
+                    "runKind: {kind} must be legal; got {:?}",
+                    found.iter().map(|i| i.rule).collect::<Vec<_>>()
+                );
+            }
+        }
+
+        /// A third value is `config-run-kind-unknown`, not silently treated as absent.
+        #[test]
+        fn a_third_value_is_unknown_not_missing() {
+            let model = config_model(
+                "    type: bool\n    default: false\n    runKind: gateway\n    gates: \"Some toggle.\"\n",
+            );
+            let found = hits(&model);
+            assert!(
+                found.iter().any(|i| i.rule == "config-run-kind-unknown"),
+                "expected config-run-kind-unknown; got {:?}",
+                found.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+            assert!(
+                !found.iter().any(|i| i.rule == "config-run-kind-missing"),
+                "an unrecognised value is not the SAME finding as an absent one; got {:?}",
+                found.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        /// A non-`RUN_*` bool key, or a `RUN_*` key of a non-bool type, is untouched by
+        /// `config-run-kind-missing` — the rule's subject is exactly the fleet-parity gate's own
+        /// population.
+        #[test]
+        fn only_run_bool_keys_are_required_to_declare_it() {
+            let non_run = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(
+                        "keys:\n  ORDINARY_FLAG:\n    type: bool\n    default: false\n    gates: \"x\"\n",
+                    )
+                    .expect("parses"),
+                )]),
+                ..Default::default()
+            };
+            assert!(!hits(&non_run).iter().any(|i| i.rule == "config-run-kind-missing"));
+
+            let non_bool = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(
+                        "keys:\n  RUN_TIMEOUT_SECONDS:\n    type: int\n    default: 5\n    gates: \"x\"\n",
+                    )
+                    .expect("parses"),
+                )]),
+                ..Default::default()
+            };
+            assert!(!hits(&non_bool).iter().any(|i| i.rule == "config-run-kind-missing"));
+        }
+
+        /// THE MOTIVATING CASE. Every `RUN_*` bool key in the REAL corpus must declare `runKind:` —
+        /// RED before D5 (every such key is unannotated, so this lists all sixteen by name); GREEN
+        /// after D5 (each key is classified from its own `gates:` prose).
+        #[test]
+        fn every_run_bool_key_declares_run_kind() {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+            let model = load_model(&root.join("specs")).expect("load real specs");
+            let mut issues = Vec::new();
+            validate_configuration(&model, &mut issues);
+            let bad: Vec<&str> = issues
+                .iter()
+                .filter(|i| i.rule == "config-run-kind-missing" || i.rule == "config-run-kind-unknown")
+                .map(|i| i.location.as_str())
+                .collect();
+            assert!(
+                bad.is_empty(),
+                "every RUN_* bool key in the real corpus must declare a legal runKind: {bad:?}"
+            );
+        }
+    }
+
     /// `when.at` (RSO-1): the accepted grammar is a Z-NORMALIZED RFC3339 instant and nothing
     /// else — offsets, bare dates, spaces and out-of-range components are all refused, because
     /// the field exists precisely to remove clock ambiguity from clock-consuming tests.
@@ -9184,6 +9308,7 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
             BTreeMap::new()
         },
         decision_row: None,
+        run_kind_raw: None,
     };
     let keys = vec![
         key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source
@@ -11224,6 +11349,115 @@ mod decision_row_gated_config_keys {
         let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut Vec::new());
         let found = hits(&model, &dec_rows);
         assert!(found.is_empty(), "the real corpus must be clean: {:?}", found.iter().map(|i| format!("{}: {}", i.rule, i.message)).collect::<Vec<_>>());
+    }
+}
+
+// ─── #917 (ADR-20260904-152807 §7) — config-prose-says-stopped-without-row ─────────────────────
+//
+// `decision_row_gated_config_keys` above can only see a key that ALREADY carries `decisionRow:` —
+// it was silent about `RUN_SIRENE_WORKER`, which carried none at all: prose said "STOPPED since
+// 2026-07-28" while `deploy.production` said `"true"`, unreconciled, because there was no
+// `decisionRow:` for that rule to bind to in the first place (#917). This module tests the rule
+// that closes that gap one level up.
+mod config_prose_says_stopped_without_row {
+    use crate::*;
+
+    fn config_model(key_yaml: &str) -> Model {
+        let spec = format!("keys:\n  TEST_KEY:\n{key_yaml}");
+        Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("parses"),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    fn hits(model: &Model) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_config_prose_says_stopped_without_row(model, &mut issues);
+        issues
+    }
+
+    /// The named case: `STOPPED` in prose, no `decisionRow:` at all — an error on its own, with no
+    /// dependency on the deploy value (unlike the row-bound rule above).
+    #[test]
+    fn a_key_whose_prose_says_stopped_without_a_decision_row_is_an_error() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"STOPPED since 2026-07-28, nobody restarted it.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "expected exactly one finding: {:?}", found.iter().map(|i| i.rule).collect::<Vec<_>>());
+        assert_eq!(found[0].rule, "config-prose-says-stopped-without-row");
+    }
+
+    /// The word `PAUSED` trips the same rule.
+    #[test]
+    fn paused_trips_the_same_rule() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"PAUSED with the sweep, issue #220.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rule, "config-prose-says-stopped-without-row");
+    }
+
+    /// A `decisionRow:`-bound key is untouched by THIS rule even if its prose says STOPPED — that
+    /// case is `decision-row-open-key-must-be-off`'s job, checked against the row's actual status.
+    #[test]
+    fn a_key_with_a_decision_row_is_untouched() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"STOPPED since 2026-07-28.\"\n    deploy:\n      production: \"false\"\n",
+        );
+        assert!(hits(&model).is_empty());
+    }
+
+    /// Word-boundary, not substring: a word glued to other letters on either side ("STOPPEDLY",
+    /// "UNPAUSED") must not false-trip — only the standalone word does.
+    #[test]
+    fn a_substring_match_does_not_trip_the_rule() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"This worker is STOPPEDLY unstoppable and never UNPAUSED.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model);
+        assert!(found.is_empty(), "a substring hit must not trip the rule: {:?}", found.iter().map(|i| i.rule).collect::<Vec<_>>());
+    }
+
+    /// SCOPED TO `type: bool` — a non-toggle key whose prose happens to use the word in an
+    /// unrelated, ordinary sense (a sweep "stopping" cleanly, a "paused" pipeline cited as an
+    /// example) must not trip this rule; it makes no sense to bind such a key to a decision row.
+    #[test]
+    fn a_non_bool_key_is_untouched_even_with_the_word_present() {
+        let model = config_model(
+            "    type: string\n    default: \"\"\n    gates: \"the run resumes where it stopped on the next invocation.\"\n    deploy:\n      production: \"x\"\n",
+        );
+        assert!(hits(&model).is_empty());
+    }
+
+    /// Ordinary prose with neither word, no `decisionRow:` — silent, as most keys are today.
+    #[test]
+    fn ordinary_prose_is_silent() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"Enables the feature.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        assert!(hits(&model).is_empty());
+    }
+
+    /// THE MOTIVATING CASE. The real corpus, run through this rule directly: `RUN_SIRENE_WORKER`
+    /// must be clean, i.e. it must carry `decisionRow:` — exactly what #917's D2 (bind + reconcile)
+    /// supplies. RED before D2 (the SIRENE key trips it — no `decisionRow:`, prose says STOPPED);
+    /// GREEN after D2 (the key gains `decisionRow: SIRENE-RESTART`, so this rule is silent about it
+    /// and `decision-row-open-key-must-be-off` takes over).
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let found = hits(&model);
+        assert!(
+            found.is_empty(),
+            "the real corpus must be clean: {:?}",
+            found.iter().map(|i| format!("{}: {} ({})", i.rule, i.message, i.location)).collect::<Vec<_>>()
+        );
     }
 }
 
@@ -19873,6 +20107,14 @@ mod graphql_role_limits_gate {
     // `crates/infrastructure/src/mailbox/standalone.rs`), with the SAME default, or a rolling
     // deploy in which one process's resolved value disagrees with another's is invisible to
     // `runtime_flag_state`. Derived from the MODEL, never a hand-kept key list.
+    //
+    // #917 round 2: this gate used to filter its door population on `decisionRow.is_some()` as a
+    // PROXY for "is a per-request door" -- a proxy round 1's own honest bind on `RUN_SIRENE_WORKER`
+    // falsified (a resident WORKER can carry a release-gate row too). The population is now the
+    // DECLARED `runKind:` attribute (`config.rs::RunKind`, closed set `door | worker`, required on
+    // every `RUN_*` bool key) -- never a hand-kept name list here; the classification lives at each
+    // key's own spec declaration (`specs/**/configuration.yaml`), derivable and re-derived from the
+    // MODEL, not restated in this doc comment.
     mod run_flag_parity {
         use super::*;
 
@@ -19885,23 +20127,25 @@ mod graphql_role_limits_gate {
                 .unwrap_or_else(|e| panic!("read {rel}: {e}"))
         }
 
-        /// Every `RUN_*` boolean key configuration.yaml declares AS A SUPERVISABLE BUSINESS DOOR
-        /// -- filtered on `decisionRow:` (spec-derivable, never a hand-kept name list): the class
-        /// `declare_flag`'s fleet-parity discipline targets is "a per-request/connection
-        /// enforcement gate bound to a preconditions record" (RUN_MEMBER_ACCESS_GRANT,
-        /// RUN_MEMBER_SIGN_IN_DOOR, RUN_RESTAURANT_INVITATION, RUN_RIDER_RESTRICTION_DOOR,
-        /// RUN_RIDER_RESTRICTION_SOCKET_CLOSE, RUN_PLATFORM_ACCESS_GRANT all carry one), never a
-        /// process-topology toggle deciding whether a WHOLE SUBSYSTEM runs in this pod at all
-        /// (RUN_MAILBOX_WORKERS, RUN_PROJECTOR, RUN_PROCESS_MANAGERS, RUN_EVENT_PUSH,
-        /// RUN_MAILBOX_PUSH, RUN_DELETION_ENGINE, RUN_RETENTION_SWEEP,
-        /// RUN_DELIVERY_OFFER_TIMEOUT, RUN_SIRENE_WORKER -- none carries a `decisionRow:` and none
-        /// is a candidate for a rolling-deploy behaviour SPLIT the way a per-request door is,
-        /// verified against the real corpus below rather than assumed).
-        fn declared_run_flags() -> Vec<(String, bool)> {
+        fn real_run_keys() -> Vec<ConfigKey> {
             let model = load_model(&repo_root().join("specs")).expect("load real specs");
             parse_config_keys(&model)
                 .into_iter()
-                .filter(|k| k.name.starts_with("RUN_") && k.ty == "bool" && k.decision_row.is_some())
+                .filter(|k| k.name.starts_with("RUN_") && k.ty == "bool")
+                .collect()
+        }
+
+        /// Every `RUN_*` boolean key configuration.yaml declares AS A SUPERVISABLE BUSINESS DOOR --
+        /// filtered on `runKind: door` (declared, spec-derivable, never a hand-kept name list): the
+        /// class `declare_flag`'s fleet-parity discipline targets is "a per-request/connection
+        /// enforcement gate bound to a preconditions record", never a process-topology toggle
+        /// deciding whether a WHOLE SUBSYSTEM runs in this pod at all (`runKind: worker`) -- the
+        /// door/worker split itself is `config-run-kind-missing`/`config-run-kind-unknown`-enforced
+        /// at every key, so this test never needs to re-verify it is reading a complete population.
+        fn declared_run_flags() -> Vec<(String, bool)> {
+            real_run_keys()
+                .into_iter()
+                .filter(|k| k.run_kind() == Some(RunKind::Door))
                 .map(|k| (k.name.clone(), k.default.as_deref() == Some("true")))
                 .collect()
         }
@@ -19910,6 +20154,15 @@ mod graphql_role_limits_gate {
         fn every_run_key_is_declared_unconditionally_at_both_composition_roots() {
             let flags = declared_run_flags();
             assert!(!flags.is_empty(), "the RUN_* corpus is empty -- this scan is reading nothing");
+            // #917 round 2: a mass-misclassification (every door mistakenly written as `worker`,
+            // which would empty `flags` above WITHOUT tripping the non-empty assert on IT, because
+            // that assert only guards against reading nothing at all) must be LOUD too -- assert the
+            // worker population is also non-empty, from the SAME real-corpus read.
+            let workers = real_run_keys()
+                .into_iter()
+                .filter(|k| k.run_kind() == Some(RunKind::Worker))
+                .count();
+            assert!(workers > 0, "the RUN_* worker population is empty -- a mass-misclassification?");
 
             let lib_rs = read("crates/server/src/lib.rs");
             let standalone_rs = read("crates/infrastructure/src/mailbox/standalone.rs");
@@ -19972,6 +20225,41 @@ mod graphql_role_limits_gate {
                 "the standalone root's env_flag(..) literal default disagrees with the spec's \
                  declared default: {}",
                 wrong_standalone_default.join("; ")
+            );
+        }
+
+        /// #917 round 2 (beck): the CONVERSE of the test above, derived from the SAME two
+        /// composition roots the gate already reads, never a hand-kept list. A `RUN_*` key
+        /// `declare_flag`'d at BOTH roots is, by construction, exactly the class
+        /// `declare_flag`/`run_flag_parity` exist for -- a per-request door whose fleet-wide
+        /// agreement matters. If such a key were classified `worker` in the spec, `runKind:` would
+        /// contradict the code that already implements it as a door, and nothing would catch the
+        /// mismatch (the test above only reads FORWARD, spec -> code; this one reads BACKWARD,
+        /// code -> spec).
+        #[test]
+        fn every_declare_flagged_key_is_declared_a_door() {
+            let lib_rs = read("crates/server/src/lib.rs");
+            let standalone_rs = read("crates/infrastructure/src/mailbox/standalone.rs");
+            let keys = real_run_keys();
+
+            let mut misclassified = Vec::new();
+            for k in &keys {
+                let declare_re = regex::Regex::new(&format!(
+                    r#"declare_flag\(\s*"{}""#,
+                    regex::escape(&k.name)
+                ))
+                .expect("valid regex");
+                let declared_at_both = declare_re.is_match(&lib_rs) && declare_re.is_match(&standalone_rs);
+                if declared_at_both && k.run_kind() != Some(RunKind::Door) {
+                    misclassified.push(k.name.clone());
+                }
+            }
+            assert!(
+                misclassified.is_empty(),
+                "declared `declare_flag(\"KEY\", ...)` at BOTH composition roots but classified \
+                 worker (or unclassified) in the spec, contradicting the code that already \
+                 implements it as a door: {}",
+                misclassified.join(", ")
             );
         }
 

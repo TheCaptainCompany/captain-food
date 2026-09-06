@@ -44,6 +44,45 @@ pub(crate) struct ConfigKey {
     /// (`validate/decisions.rs`): while the named row's `status` is `open`, this key's
     /// `deploy.production` value must be exactly `"false"`.
     pub(crate) decision_row: Option<String>,
+    /// `runKind:` (#917 round 2, decision by consent -- farley/evans/beck) AS WRITTEN in the spec,
+    /// unvalidated: `None` if the key omits it entirely. Required on every `RUN_*` key of
+    /// `type: bool` -- closed set `door | worker` -- because the fleet-parity gate
+    /// (`run_flag_parity`, ADR-20260905-223957 §5) needs a DECLARED population, never the
+    /// `decisionRow:` proxy #917's own honest bind falsified (`RUN_SIRENE_WORKER` is a `worker`
+    /// that also carries a row). Kept as the raw string rather than pre-parsed into `RunKind` so
+    /// `config-run-kind-missing` ("absent") and `config-run-kind-unknown` ("present but not in the
+    /// closed set") stay two distinguishable findings without re-reading the YAML node. A closed
+    /// set closed in the loader stays a bare token (ADR-20260811-014129) -- no `RunKind` scalar in
+    /// `specs/**/scalars.yaml`.
+    pub(crate) run_kind_raw: Option<String>,
+}
+
+/// The closed set `runKind:` may declare -- see `ConfigKey::run_kind_raw`. A per-request/connection
+/// enforcement gate bound to a preconditions record is `Door`; a resident process-lifetime toggle
+/// that pauses a pipeline or a transport is `Worker`. Never a third value (#917 round 2 STOP
+/// condition).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunKind {
+    Door,
+    Worker,
+}
+
+impl RunKind {
+    fn parse(raw: &str) -> Option<RunKind> {
+        match raw {
+            "door" => Some(RunKind::Door),
+            "worker" => Some(RunKind::Worker),
+            _ => None,
+        }
+    }
+}
+
+impl ConfigKey {
+    /// The typed `runKind:`, or `None` if it is absent OR unrecognised -- callers that need to
+    /// distinguish the two read `run_kind_raw` directly (that is what the two validation rules do).
+    pub(crate) fn run_kind(&self) -> Option<RunKind> {
+        self.run_kind_raw.as_deref().and_then(RunKind::parse)
+    }
 }
 
 /// The profiles a key may be required in — also the `APP_PROFILE` enum.
@@ -127,6 +166,7 @@ pub(crate) fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
                     .map(str::to_string)
             }),
             decision_row: str_at("decisionRow"),
+            run_kind_raw: str_at("runKind"),
         });
     }
     out
@@ -162,6 +202,42 @@ pub(crate) fn validate_configuration(model: &Model, issues: &mut Vec<Issue>) {
                 "no `gates`: the fail-fast report prints it, so a key without one is unactionable"
                     .into(),
             ));
+        }
+        // #917 round 2 (decision by consent -- farley/evans/beck): every `RUN_*` key of
+        // `type: bool` must declare, in the DSL itself, whether it is a per-request/connection
+        // enforcement DOOR or a resident process-lifetime WORKER -- a declared, closed-set
+        // attribute, never inferred from the name suffix or the section heading (compiler-first,
+        // ADR-20260803-234035: a new RUN_ key cannot be added unclassified). `decisionRow:` is NOT
+        // a substitute: it names a release-gate row, orthogonal to the door/worker split
+        // (`RUN_SIRENE_WORKER` is a worker that also carries one).
+        if k.name.starts_with("RUN_") && k.ty == "bool" && k.run_kind_raw.is_none() {
+            issues.push(err(
+                "config-run-kind-missing",
+                at.clone(),
+                format!(
+                    "`{}` is a `RUN_*` key of `type: bool` with no `runKind:` -- declare `runKind: \
+                     door` (a per-request/connection enforcement gate) or `runKind: worker` (a \
+                     resident process-lifetime toggle) so the fleet-parity gate (`run_flag_parity`, \
+                     ADR-20260905-223957 §5) can tell which population it targets without a proxy.",
+                    k.name
+                ),
+            ));
+        }
+        // The closed set is `door | worker` ONLY (#917 round 2 STOP condition: no third value) --
+        // checked whenever `runKind:` is present at all, regardless of the key's name, so a typo
+        // is caught the moment it is written rather than silently parsing to `None` and then
+        // tripping `config-run-kind-missing` with a confusing "absent" message.
+        if let Some(raw) = &k.run_kind_raw {
+            if RunKind::parse(raw).is_none() {
+                issues.push(err(
+                    "config-run-kind-unknown",
+                    at.clone(),
+                    format!(
+                        "`{}`'s `runKind: {raw}` is not one of the closed set `door | worker`.",
+                        k.name
+                    ),
+                ));
+            }
         }
         // A bool key's default is EMITTED into the generated doc comment from `default:` (see
         // `emit_config`), so restating the polarity in `gates:` prose creates a second source —

@@ -1,0 +1,29 @@
+key: SIRENE-RESTART
+status: open
+question: 'What must exist before `RUN_SIRENE_WORKER` is turned back on in production (#800 "The
+  SIRENE ingestion chain has been off for a month behind a blocker that closed the same day it was
+  paused")? Two guards named in the key''s own prose, neither landed: an owner-declared restaurant
+  must share the SIRET idempotency key so the crawl cannot manufacture duplicate restaurants; and a
+  self-declared listing must not enter the prospect funnel. The restart decision itself -- flipping
+  `deploy.production`/`deploy.staging` off `"false"` -- is the recorded decision that closes this
+  row, and #800 is where that decision is made.'
+owner: team
+opened: '2026-09-06'
+capacity: team
+register: docs/adr/ADR-20260904-152807-the-admin-s-hands-one-custody-truth-read-at-query-time-a-door-that-refuses-until-the-notice-exists-and-two-slices.md
+evidence: 'ADR-20260904-152807 §7 (`decision-row-open-key-must-be-off`): "the RUN_SIRENE_WORKER
+  lesson (PUBLISH-PRECONDITIONS): its prose said the worker was STOPPED while deploy.production said
+  `"true"`, and nothing executable ever compared the two." specs/network/configuration.yaml''s own
+  `RUN_SIRENE_WORKER` prose: "Restarting is NOT a flag flip -- an owner-declared restaurant carries
+  no SIRET, which is the crawl''s idempotency key, so un-pausing before that door shares the key
+  manufactures duplicate restaurants; and a self-declared listing currently enters the prospect
+  funnel. Both guards, and the decision itself, are issue #800."'
+note: 'This row creates the key `RUN_SIRENE_WORKER` binds to via `decisionRow:` (#917) -- it does
+  NOT decide the restart and does NOT touch #800''s substance (the two guards and the restart
+  decision stay #800''s to land and take). `PUBLISH-PRECONDITIONS` (open, owner: counsel) is an
+  upstream row: even once both guards land and this row closes, `PUBLISH-PRECONDITIONS` separately
+  gates whether a crawled listing may be shown PUBLICLY -- closing SIRENE-RESTART only re-permits
+  the crawl to run, it does not re-permit publication. Until this row closes,
+  `decision-row-open-key-must-be-off` (ADR-20260904-152807 §7) pins `RUN_SIRENE_WORKER`''s
+  `deploy.production` to exactly `"false"` mechanically, so the prose-vs-deploy divergence #917
+  found cannot recur silently.'
