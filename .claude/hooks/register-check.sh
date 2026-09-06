@@ -485,9 +485,15 @@ EOF
           rrecord="${recline%:*}"
           [ -z "$rrecord" ] && continue
           printf '%s' "$rline_no" | grep -qE '^[0-9]+$' || continue
+          [ "$rline_no" -ge 1 ] || continue
           resolve_record "$rrecord" || continue
-          rtotal="$(wc -l < "$RESOLVED_PATH" 2>/dev/null || echo 0)"
-          [ "$rline_no" -ge 1 ] && [ "$rline_no" -le "$rtotal" ] || continue
+          # No separate line-count/range check: `sed -n Np` on a line past EOF prints nothing, and
+          # an empty string cannot match the token regex either -- so "the line exists AND carries
+          # a token" is exactly what this one grep already proves, with no `wc -l` needed. Fewer
+          # moving parts than counting lines first matters here: `wc -l` counts NEWLINE BYTES, so a
+          # file whose last line lacks a trailing newline would undercount by one and reject that
+          # file's own final line even when `sed` prints it correctly (found while fixing #910's
+          # own corpus test, tools/codegen-rs/src/tests.rs).
           sed -n "${rline_no}p" "$RESOLVED_PATH" | grep -qiE "$REDFIRST_TOKENS" || continue
           rf_entry_ok=yes
         done <<EOF2
