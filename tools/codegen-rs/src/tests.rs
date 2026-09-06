@@ -2091,15 +2091,24 @@ keys:
             };
         // Declared-required spans whose constructor is KNOWN to have no production call site yet
         // -- the explicit, reviewable "deliberately not yet" (the UNWIRED_MUTATIONS pattern).
-        // Both predate this check and were surfaced BY it: the place-order prepare phase runs
-        // `require_cart` and `price_cart` inside the SDK-free application handler, so their spans
-        // need a framework-boundary seam that does not exist yet (follow-up owed from the #180
-        // Phase 4 report; the write path's cart/pricing steps are currently visible only through
-        // the read-side `cart.price` twin). An entry that GAINS a call site fails below until the
-        // exemption is removed -- a stale exemption is a gate failure, never a quiet allowance
-        // (the warning-ratchet discipline).
-        const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] =
-            &[("place-order", "cart.read"), ("place-order", "pricing.compute")];
+        // `cart.read`/`pricing.compute` predate this check and were surfaced BY it: the
+        // place-order prepare phase runs `require_cart` and `price_cart` inside the SDK-free
+        // application handler, so their spans need a framework-boundary seam that does not exist
+        // yet (follow-up owed from the #180 Phase 4 report; the write path's cart/pricing steps
+        // are currently visible only through the read-side `cart.price` twin). `quote.verify`
+        // (#933 B'.10, PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-F) joins them for a
+        // DIFFERENT, narrower reason: it is named in place-order's success-rule alternation
+        // (`{ any_of: ["quote.verify", "command.validate"] }`) ahead of its own call site
+        // (gate-then-stabilize) -- the guard it will wrap is licensed only once the write door
+        // opens (ADR-20260904-081527 §8's seventh carve-out), so no production call site may exist
+        // before then. An entry that GAINS a call site fails below until the exemption is removed
+        // -- a stale exemption is a gate failure, never a quiet allowance (the warning-ratchet
+        // discipline).
+        const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] = &[
+            ("place-order", "cart.read"),
+            ("place-order", "pricing.compute"),
+            ("place-order", "quote.verify"),
+        ];
 
         let mut missing: Vec<String> = Vec::new();
         // `read-authorization` joined the list with #469: its counters are now demonstrably emitted
