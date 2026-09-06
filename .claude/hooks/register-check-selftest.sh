@@ -630,6 +630,12 @@ expect_d RF4b-redfirst-positive-malformed-on-zero-hit-record 2 "{\"tool_name\":\
 #    (an honest over-declaration, farley) -- the entry stands on its own citation, never on the
 #    trail's own hit count, so this must still ALLOW.
 expect_d RF4c-redfirst-positive-founded-elsewhere-on-zero-hit-record 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::test_x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-trail-ok
+# RF4d BLOCK: pins the KNOWN VERDICT CHANGE A-prime introduces (beck, checkpoint D5b -- "a change
+#    never seen red is an unverified claim"). At 0 hits, prose that merely MENTIONS `Red-first:`
+#    with no valid entry and no `none` (verified live: `Red-first: see the section below`) now
+#    blocks with `dispatch-redfirst-shape` -- the SAME verdict the >0-hit path already gave that
+#    shape. The remedy is the same explicit negative.
+expect_d RF4d-redfirst-mentioned-not-entered-on-zero-hits 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: see the section below\"}}" dispatch-redfirst-shape
 # RF5 BLOCK: the SAME explicit-negative text, but on a record that DOES name a test -- the
 #    negative claims the opposite of what the citation shows and is refused.
 expect_d RF5-redfirst-false-negative 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-false-negative
