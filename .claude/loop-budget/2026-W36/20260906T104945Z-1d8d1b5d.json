@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1370,
+  "recordedAt": "2026-09-06T10:49:45.694Z",
+  "branch": "904-silent-refresh-next",
+  "note": "start on '904-silent-refresh-next', stop on '917-sirene-restart-row'"
+}
