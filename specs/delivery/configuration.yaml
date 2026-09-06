@@ -60,6 +60,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    runKind: door
     decisionRow: RIDER-RESTRICTION-PRECONDITIONS
     gates: >
       The restrict door (#639 part C step 4-iii-A, ADR-20260904-152807 §7). ON, `restrictRider`
@@ -86,6 +87,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
+    runKind: worker
     gates: >
       Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on
       a rider who is not coming.

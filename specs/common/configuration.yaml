@@ -429,6 +429,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    runKind: door
     decisionRow: ADMIN-DOOR-PRECONDITIONS
     gates: >
       The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON,
@@ -460,6 +461,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    runKind: door
     decisionRow: ADMIN-DOOR-PRECONDITIONS
     gates: >
       The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825). ON, both
@@ -508,6 +510,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    runKind: worker
     # `consumer` keeps this key OUT of the server Config: only the adapter binaries read it
     # (their own env parse in infrastructure::mailbox::standalone), and a resolved-but-ignored
     # monolith field would imply an authority the monolith does not have.
@@ -608,6 +611,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
+    runKind: worker
     gates: >
       In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data
       indefinitely. Readiness at GET /projector.
@@ -621,6 +625,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
+    runKind: worker
     gates: >
       In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires.
       Readiness at GET /saga.
@@ -634,6 +639,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
+    runKind: worker
     gates: >
       Push wake for the drain loops (ADR-20260802-200416): one dedicated LISTEN connection turns
       each committed append's pg_notify into an immediate drain of the projector AND the saga
@@ -646,11 +652,17 @@ keys:
       staging: "true"
 
 
+  # `runKind: door`, not `worker`, despite living under the "Worker toggles" heading above (#917
+  # round 2): the name suffix and the section heading are never the classifier -- this key's OWN
+  # prose describes a per-connection enforcement gate (a `connection_init` watcher that closes ONE
+  # socket the moment its own restriction fact lands), which is exactly `run_flag_parity`'s door
+  # population, not a resident process toggle.
   RUN_RIDER_RESTRICTION_SOCKET_CLOSE:
     type: bool
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    runKind: door
     decisionRow: RIDER-RESTRICTION-PRECONDITIONS
     gates: >
       The restriction fact terminates the rider's socket (#639 part C step 5,
@@ -674,6 +686,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
+    runKind: worker
     gates: >
       Push wake for the actor mailbox (PROP-20260802-223522 D1/D2, ADR-20260802-224532): the
       PgMailbox door raises pg_notify('inbound_messages', actor_type) inside every enqueue
@@ -719,6 +732,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    runKind: worker
     gates: >
       The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys
       (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block.
@@ -740,6 +754,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
+    runKind: worker
     gates: >
       Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without
       bound.
