@@ -241,8 +241,9 @@ pub trait Refresher: MaybeSync {
 /// SAME document + variables once; every subsequent 401 of the same load (whether the refresh
 /// itself failed, or a second request 401s after a successful refresh — a provider outage doesn't
 /// get re-tried per request) returns straight through untouched. **Only a bare HTTP 401 arms it —
-/// a 403 NEVER does** (ADR-20260904-081527 §4/`auth.rs:562`: a rotated token carries the exact same
-/// role, so a `RoleGuard` refusal would loop forever if it re-armed a refresh). GraphQL `errors`,
+/// a 403 NEVER does** (ADR-20260904-081527 §4/`server/src/auth.rs`'s `AuthError::Forbidden` arm: a
+/// rotated token carries the exact same role, so a `RoleGuard` refusal would loop forever if it
+/// re-armed a refresh). GraphQL `errors`,
 /// network failures and every other status pass through unexamined — refreshing a cookie can never
 /// fix a malformed document or a role a fresh cookie still lacks.
 ///
