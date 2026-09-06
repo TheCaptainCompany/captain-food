@@ -31,7 +31,7 @@ evidence: 'Today `crates/server/src/auth.rs:~308` mints `Identity::Admin { sub }
   is suspended (ADR-20260817-105844).'
 note: 'External items are the founder''s (controller entity, the Art. 30 register, the labour posture, the first
   admin''s identifier held as a secret); no lens output is legal advice or clearance. Items (1)-(2) and (5) LANDED
-  with 6-v (PR #905, DRAFT, ADR-20260905-223957): (1) the one-shot `bootstrap-platform-admin` dispatches
+  with 6-v (PR #907, DRAFT, ADR-20260905-223957): (1) the one-shot `bootstrap-platform-admin` dispatches
   `GrantPlatformAccess` through the ordinary mailbox, subject from the declared secret
   `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` (never the repo), deterministic id (idempotent), inside the OTLP-wired
   server process, logging the Art. 5(2) artifact; (2) `crates/server/src/auth.rs`''s ADMIN seam
