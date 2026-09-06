@@ -289,6 +289,33 @@ cart id, offer ids, prices, versions, rates. **No contact data.** Chosen later i
 4. **A modal, not a toast**, carrying `role=alert` (DSA Art. 25 + EAA / RGAA).
 5. **The quote pins the TAX RATE, not only the price.**
 
+### (e) NEW AT SLICE 2 ROUND 2 — CQ-1 … CQ-4 (the tax-rate leg)
+
+Named at the slice 2 round 2 presentation pass (`legal`, [PR #920](https://github.com/TheCaptainCompany/captain-food/pull/920)): `AsOfCatalog`/`OfferPrice` pins whichever `TaxRate`
+object the coordinate froze (F2/D3), but which rate that IS, on which order, is not decided anywhere
+in the code — only carried as an open note (`PROP-20260831-134539` §6 D3). Four questions on that
+leg, not answered here:
+
+- **CQ-1 — mode selection.** Which of `TaxRate.delivery` / `.collection` / `.eatIn` applies to a given
+  order is undecided (PROP §6 D3 note 1). Is the applicable mode the SERVICE MODE at order time, or
+  at coordinate time — and is that a legal question at all, or purely an implementation choice?
+- **CQ-2 — the null-mode `defaultTaxRate` fallback lives on ANOTHER stream.** When `collection`/`eatIn`
+  is absent, a downstream `unwrap_or(delivery)` — or a fallback to the restaurant's `defaultTaxRate`
+  (`specs/network/entities.yaml:103`) — reads a DIFFERENT aggregate's CURRENT state, which this
+  coordinate does not pin. Is a rate resolved partly from a frozen coordinate and partly from live
+  state at sale time defensible as "the rate that applied", or does the fallback need its own freeze?
+- **CQ-3 — option-level rates.** Only `Product` carries `taxRate`; `ProductItemOption` does not, so an
+  alcohol option inherits its parent product's food rate under this design (PROP §6 D3 note 2). Is
+  "one rate per priced line" a requirement in French VAT practice for a composite line (a pizza plus a
+  wine option), or is the parent-product rate an acceptable simplification?
+- **CQ-4 — a statutory rate change between the coordinate and the sale.** If the LEGAL rate itself
+  changes (a VAT-rate law, not a menu edit) between when a quote is minted and when the order is
+  placed, does the frozen-at-coordinate rate remain compliant, or must a statutory change always
+  override a pinned quote regardless of the display-guarantee mechanism this design builds?
+
+Questions, not answers — none of the four is resolved by this round; they extend the packet's
+funds/rate-leg gap already named above rather than opening a new one.
+
 ---
 
 ## 8. Sequencing — and this is the practical output of QT-8 / QT-9
