@@ -997,6 +997,15 @@ if [ "$st1b_rc" -ne 0 ]; then
   echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- WARN changed the exit code (got $st1b_rc, want 0)" >&2
   fail=1
 fi
+# Round-2 confirmation finding (same class the checkpoint caught twice): a mutant dropping the
+# elapsed reading from the PASS-path message (`"all cases pass."` with no `(${elapsed}s)`) reds
+# nothing above -- item 1's "reading on EVERY run" was pinned only on the failing half (ST1c). ST1b
+# now also captures stdout SEPARATELY (stderr discarded) and asserts the pass-path reading is there.
+st1b_out="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 0 2>/dev/null)"
+if ! printf '%s' "$st1b_out" | grep -qF '5s'; then
+  echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- no elapsed reading on the passing path (got stdout: $st1b_out)" >&2
+  fail=1
+fi
 # ST1c also guards against the two checkpoint survivors (beck/reviewer): an unconditional WARN
 # (`if true` in place of the `-gt` test) and a DEFAULT ceiling moved negative both fire a TRIPWIRE
 # here even though nothing was configured to cross it -- an always-firing tripwire in an every-turn

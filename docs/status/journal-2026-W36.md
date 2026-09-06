@@ -46,6 +46,14 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > path's reading staying on stderr. Demonstrated once on a scratch copy (not committed): a
 > deliberately broken case still prints the elapsed reading before `FAILED`, exit 2.
 >
+> **Round 2 (confirmation pass, non-blocking)**: a seventh in-function mutant survived —
+> dropping the elapsed reading from the PASS-path message (`"all cases pass."` with no
+> `(${elapsed}s)`) — because item 1's "the reading on EVERY run" was pinned only on the failing
+> half (`ST1c`). `ST1b` now ALSO captures stdout separately and asserts the pass-path reading is
+> there, alongside its existing stderr TRIPWIRE assertion; the mutant reds
+> (`"no elapsed reading on the passing path (got stdout: ... all cases pass.)"`) and was reverted.
+> The pass-path reading is now pinned, closing the declared residual this entry did not originally
+> list.
 > **Consent decisions (reviewer, beck, farley)**: the one-line call site over re-invoking the whole
 > suite as a child (beck's recorded alternative) — rejected: +4.7s per turn forever, and it inherits
 > every unrelated failure in the suite. No `REGISTER_CHECK_SELFTEST_FORCE_FAIL`-style knob — no
