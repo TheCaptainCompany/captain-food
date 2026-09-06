@@ -969,29 +969,41 @@ fi
 selftest_finish() { # selftest_finish <elapsed> <fail>
   local elapsed="$1" fail="$2"
   local ceiling="${REGISTER_CHECK_SELFTEST_CEILING_SECONDS:-120}"
-  echo "register-check selftest: elapsed ${elapsed}s." >&2
   if [ "$elapsed" -gt "$ceiling" ]; then
     echo "register-check selftest: WARN -- elapsed ${elapsed}s past REGISTER_CHECK_SELFTEST_CEILING_SECONDS=${ceiling}s (TRIPWIRE, UNVERIFIED ceiling: a run past it is a regression signal, not a hang bound -- CI bounds hangs at the job level, timeout-minutes: 10 -- and not a meter, #923 §4 owns that)" >&2
   fi
   if [ "$fail" -ne 0 ]; then
-    echo "register-check selftest: FAILED (see cases above)" >&2
+    # #928 D2b (farley/checkpoint): the reading and the FAILED verdict fold into ONE line here --
+    # a separate unconditional "elapsed Xs." line above this branch made the PASS path print the
+    # reading TWICE (once unconditionally, once inside "all cases pass"); this is the single place
+    # the failing path's reading lives now.
+    echo "register-check selftest: FAILED (see cases above) -- elapsed ${elapsed}s." >&2
     return 2
   fi
   echo "register-check selftest: all cases pass (${elapsed}s)."
   return 0
 }
-# ST1b/ST1c/ST1d call the function in a subshell (command substitution) with SYNTHETIC elapsed/fail
-# values, so no case depends on the suite's own actual runtime or on forcing a real failure.
-st1b_out="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 0 2>&1)"; st1b_rc=$?
-if ! printf '%s' "$st1b_out" | grep -qF 'TRIPWIRE'; then
-  echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- no TRIPWIRE line with the ceiling at minus one (got: $st1b_out)" >&2
+# ST1b/ST1c/ST1d call the function with SYNTHETIC elapsed/fail values, so no case depends on the
+# suite's own actual runtime or on forcing a real failure. ST1b and ST1d capture stderr SEPARATELY
+# from stdout (`2>&1 >/dev/null`: stderr goes to the substitution, stdout is discarded) so the
+# WARN's STREAM stays pinned -- checkpoint finding (reviewer): merging both into one capture left a
+# mutant that printed TRIPWIRE to stdout instead of stderr undetected.
+st1b_err="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 0 2>&1 >/dev/null)"; st1b_rc=$?
+if ! printf '%s' "$st1b_err" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- no TRIPWIRE line on stderr with the ceiling at minus one (got stderr: $st1b_err)" >&2
   fail=1
 fi
 if [ "$st1b_rc" -ne 0 ]; then
   echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- WARN changed the exit code (got $st1b_rc, want 0)" >&2
   fail=1
 fi
-st1c_out="$(selftest_finish 5 1 2>&1)"; st1c_rc=$?
+# ST1c also guards against the two checkpoint survivors (beck/reviewer): an unconditional WARN
+# (`if true` in place of the `-gt` test) and a DEFAULT ceiling moved negative both fire a TRIPWIRE
+# here even though nothing was configured to cross it -- an always-firing tripwire in an every-turn
+# gate is exactly the noise the design fears. The subshell UNSETS the env var so this case stays
+# green even under an ambient REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 already set in the caller's
+# shell (beck).
+st1c_out="$( (unset REGISTER_CHECK_SELFTEST_CEILING_SECONDS; selftest_finish 5 1) 2>&1 )"; st1c_rc=$?
 if ! printf '%s' "$st1c_out" | grep -qF 'elapsed 5s'; then
   echo "register-check selftest: case ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2 FAILED -- no elapsed reading on the failing path (got: $st1c_out)" >&2
   fail=1
@@ -1000,9 +1012,13 @@ if [ "$st1c_rc" -ne 2 ]; then
   echo "register-check selftest: case ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2 FAILED -- wrong exit code (got $st1c_rc, want 2)" >&2
   fail=1
 fi
-st1d_out="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 1 2>&1)"; st1d_rc=$?
-if ! printf '%s' "$st1d_out" | grep -qF 'TRIPWIRE'; then
-  echo "register-check selftest: case ST1d-the-warn-never-changes-the-exit FAILED -- no TRIPWIRE line with the ceiling at minus one (got: $st1d_out)" >&2
+if printf '%s' "$st1c_out" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2 FAILED -- a TRIPWIRE fired under the DEFAULT ceiling with the env var unset (an unconditional WARN, or a negative default ceiling, would make every run noisy) (got: $st1c_out)" >&2
+  fail=1
+fi
+st1d_err="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 1 2>&1 >/dev/null)"; st1d_rc=$?
+if ! printf '%s' "$st1d_err" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1d-the-warn-never-changes-the-exit FAILED -- no TRIPWIRE line on stderr with the ceiling at minus one (got stderr: $st1d_err)" >&2
   fail=1
 fi
 if [ "$st1d_rc" -ne 2 ]; then
