@@ -13,7 +13,7 @@ CartLineId:
 CartQuote:
   type: string
   pattern: '^[A-Za-z0-9_-]+$'
-  maxLength: 4096
+  maxLength: 4096  # UNVERIFIED: no antecedent sizes this bound against an actual encoded-token length
   description: >
     An OPAQUE, server-signed token binding a cart's priced read to the exact catalog coordinate
     that produced it (PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-A/D-J) — base64url, no

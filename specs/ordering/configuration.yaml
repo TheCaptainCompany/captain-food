@@ -259,12 +259,19 @@ keys:
   QUOTE_SIGNING_KEY_HMAC_SECRET:
     type: string
     secret: true
-    required: [staging, production]
+    required: []
     gates: >
       The signed quote's CURRENT signing key (ADR-20260906-192007 D-H), copying
-      `specs/common/configuration.yaml#/EMAIL_QUOTA_KEY_HMAC_SECRET` key-for-key: `secret: true`,
-      `required: [staging, production]`, NO default -- a defaulted signing key is a forgeable
-      price (dba). Unset in development/test, a fixed `DEV_ONLY` value is used
+      `specs/common/configuration.yaml#/EMAIL_QUOTA_KEY_HMAC_SECRET` key-for-key EXCEPT its
+      `required:` posture, which is DEFERRED, not adopted, until the boot-refusal test lands: today
+      no code path reads this key at all (the write door stays dark until the quote is verified
+      server-side), so `required: [staging, production]` would block every deploy on a secret
+      nothing consumes yet.
+      `required: []` here declares it deploy-optional NOW (round 3, ADR-20260815-015422); the
+      promotion to `required: [staging, production]` lands in the phase that adds the write door's
+      boot-time refusal when the resolved key is the dev value (gate-then-stabilize) -- that phase
+      also amends ADR-20260906-192007 D-H to record the two-step rollout. NO default -- a defaulted
+      signing key is a forgeable price (dba). Unset in development/test, a fixed `DEV_ONLY` value is used
       (`application::email_guard::DEV_ONLY_HMAC_KEY`'s own precedent), and the write door REFUSES
       TO OPEN AT BOOT when the resolved key is that dev value and the door is open in
       staging/production -- never a per-request check. `application::quote::SigningKey` (a later
@@ -284,16 +291,21 @@ keys:
     type: string
     secret: true
     nullable: true
+    required: []
     gates: >
-      The signed quote's RETIRED-BUT-STILL-ACCEPTED key (ADR-20260906-192007 D-H) -- OPTIONAL,
-      unlike its `QUOTE_SIGNING_KEY_HMAC_SECRET` current-key sibling: absent whenever no rotation
+      The signed quote's RETIRED-BUT-STILL-ACCEPTED key (ADR-20260906-192007 D-H) -- explicitly
+      `required: []` PERMANENTLY (round 3, ADR-20260815-015422), never promoted the way its
+      `QUOTE_SIGNING_KEY_HMAC_SECRET` current-key sibling is: absent whenever no rotation
       is in flight. `QuoteVerifier` (a later phase of this PR) holds a key SET built from both
       values (plural -- it must accept a quote signed under a key that has since been retired but
       is still inside the overlap window), a DIFFERENT type from `QuoteMinter`'s single current
       key, so a verifier cannot accidentally mint. A two-key overlap of 60 minutes (`N` + skew, `N`
       = the existing 30-minute `QUOTE-STALENESS` backstop) is a PRECONDITION of this deliverable,
       not of a later rotation: without it, a hard key-rotation cutover rejects every quote minted
-      in the preceding 30 minutes platform-wide.
+      in the preceding 30 minutes platform-wide. UNVERIFIED: the 60-minute figure implies a
+      30-minute `skew` term (`N` + skew = 60), but no source names 30 minutes of clock skew as the
+      operative bound -- the `skew` value itself has no recorded antecedent and needs one before
+      this figure is treated as load-bearing.
     deploy:
       from_secret:
         production: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
