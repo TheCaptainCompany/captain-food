@@ -63,7 +63,8 @@ What the team records from them, consulted for completeness (block below), never
    cannot check that a test is real, that it was ever red, or that the extraction is complete — those stay a lens read
    and a reviewer read, and the hook's header says so (beck, farley, holub). It is proven red-first in
    `register-check-selftest.sh` before it counts (beck). The term *red-first card step* is declared ONCE, in the card
-   template of `docs/claude/sessions/workflow.md`, and cited from the hook and from this ADR (evans). Named instances
+   template of [`docs/claude/sessions/workflow.md`](../claude/sessions/workflow.md#the-red-first-card-step--canonical-format-declared-once-here),
+   and cited from the hook and from this ADR (evans). Named instances
    the lenses owe to cards in their areas: the rebuild-recipe TWIN — TRUNCATE-replay **and** mid-drain resolution, since
    the first passes under either recipe (dba); per-control renderer-arm coverage where a dead control is the expected
    red (ux); `obs-metric-no-emitter` and the gauge-liveness emission-order test (observability); a per-role generated-SDL

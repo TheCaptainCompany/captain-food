@@ -780,6 +780,46 @@ Ask only what is genuinely his: a real option space, an external or legal action
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
 required, and always end with a free-text question.
 
+### The red-first card step — canonical format, declared once, HERE
+
+**Founder decision 2026-09-06** ([ADR-20260906-024838](../../adr/ADR-20260906-024838-the-lower-tier-stays-for-every-class-and-the-two-failure-shapes-become-structural.md)
+rule 1, tracking issue [#910](https://github.com/TheCaptainCompany/captain-food/issues/910)): a
+**red-first card step** is a dispatch-card entry proving that a change described by the card's own
+*cited record* — the trail block above — was seen FAILING before the change that makes it pass.
+When the record a dispatch cites names a test, a belt or a mutant (any line matching one of the
+tokens `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`), the card carries a
+`Red-first:` section, one entry per hit — this section rides ALONGSIDE the `Register check:`/
+`Decision row:` line, never instead of it:
+
+```
+Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
+```
+
+or, when none of the cited record's lines actually name a test, the explicit negative — which
+speaks for the WHOLE trail, not per-record: a card citing two records, one of which names a test,
+may not say `none`:
+
+```
+Red-first: none — <record> names no test
+```
+
+**The entry's shape, each clause load-bearing**: `<test path>` exists on disk or is the literal
+token `NEW` (the test does not exist yet — this card is what creates it); `<record>:<line>`
+resolves to a real file and a real line NUMBER in it, and that line itself carries one of the
+tokens above (never a paraphrase — the citation must be checkable without reading the whole file).
+`mutant:` names the planted change that should turn the test red; `expected red:` names the
+message fragment that proves it did.
+
+**Gated at dispatch by Lane D of `.claude/hooks/register-check.sh`** (Rule 1, riding after the
+trail check), proven red-first itself — the selftest cases in `register-check-selftest.sh` were
+committed FAILING before the rule existed, then turned green by it (beck, farley). **What the gate
+checks and what it does not**, the same honesty limit Lane D already states about itself:
+CHECKABLE — presence of the section, resolution of `<record>:<line>`, and shape of the entry.
+NOT CHECKABLE — that the named test is real, that it was EVER actually seen red, or that the
+extraction from the cited record is COMPLETE (every line that "names a test" is a judgement call
+at the margins); those stay a lens read at the mob briefing and the independent reviewer's read
+over the full diff, exactly like every other honesty limit this file states for a gate.
+
 ### A gate that classifies members of a corpus is tested against the CORPUS, not against fixtures
 
 **Fixtures prove the branches; only the corpus proves the classification.**
