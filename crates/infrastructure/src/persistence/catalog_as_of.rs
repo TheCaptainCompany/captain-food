@@ -122,52 +122,60 @@ impl PgAsOfCatalogRepository {
         Ok(events)
     }
 
-    /// Both legs, instrumented at this adapter seam (never in `pricing.rs`/`crates/domain` — obs
-    /// consent): the span covers the read END TO END — SQL + decode + the fold's own inputs are
-    /// prepared here — so `catalog.as_of.fold`'s name is true (round 2 correction: round 1's span was
-    /// dropped before `AsOfCatalog::from_stream` ever ran). Fails CLOSED (round 2, vernon B1/young
-    /// B1/obs B6): if the highest version [`fetch_rows`] returned (technical rows included) is not
-    /// exactly the requested coordinate, the coordinate is absent or beyond head, and this returns
-    /// `Err` rather than silently answering with whatever the range happened to contain.
+    /// The SQL + decode legs, PLUS the fail-closed coordinate check — never the span itself (round 3:
+    /// the span now brackets this AND the fold, built by [`AsOfPriceAuthority::as_of`], because a
+    /// span this function owned and closed before returning could never cover work its caller does
+    /// after it returns). Fails CLOSED (round 2, vernon B1/young B1/obs B6): if the highest version
+    /// [`fetch_rows`] returned (technical rows included) is not exactly the requested coordinate, the
+    /// coordinate is absent or beyond head, and this returns `Err` rather than silently answering
+    /// with whatever the range happened to contain.
     async fn load_range(
         &self,
-        catalog_id: CatalogId,
+        stream: &str,
         version: CatalogVersion,
-    ) -> Result<Vec<(CatalogVersion, DomainEvent)>, DomainError> {
-        let stream = domain::catalog::stream(catalog_id);
-        let span = telemetry::spans::catalog_as_of_fold(&catalog_id.0.to_string(), version.get());
-        let span_for_record = span.clone();
-        async move {
-            let rows = self.fetch_rows(&stream, version).await?;
-            let stream_length = rows.len();
-            let highest = rows.iter().map(|(v, _, _)| *v).max();
-            if highest != Some(version.get()) {
-                return Err(db_err(format!(
-                    "coordinate {} is absent or beyond head on stream {stream} (highest available \
-                     version: {highest:?})",
-                    version.get()
-                )));
-            }
-            let events = Self::decode_rows(rows)?;
-            telemetry::spans::record_catalog_as_of_fold(&span_for_record, stream_length, events.len());
-            Ok(events)
+    ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize), DomainError> {
+        let rows = self.fetch_rows(stream, version).await?;
+        let stream_length = rows.len();
+        let highest = rows.iter().map(|(v, _, _)| *v).max();
+        if highest != Some(version.get()) {
+            return Err(db_err(format!(
+                "coordinate {} is absent or beyond head on stream {stream} (highest available \
+                 version: {highest:?})",
+                version.get()
+            )));
         }
-        .instrument(span)
-        .await
+        let events = Self::decode_rows(rows)?;
+        Ok((events, stream_length))
     }
 }
 
 #[async_trait]
 impl AsOfPriceAuthority for PgAsOfCatalogRepository {
+    /// Both legs AND the fold, instrumented at this adapter seam (never in `pricing.rs`/
+    /// `crates/domain` — obs consent): the span covers the read END TO END — SQL + decode + the
+    /// fail-closed check + [`AsOfCatalog::from_stream`]'s own fold — so `catalog.as_of.fold`'s name
+    /// is true (round 3 correction: round 1's span was dropped before the fold ever ran; round 2's
+    /// span covered SQL+decode but still closed before the fold, which runs in this method, one
+    /// level up from where round 2's `.instrument` sat).
     async fn as_of(
         &self,
         catalog_id: CatalogId,
         version: CatalogVersion,
     ) -> Result<AsOfCatalog, DomainError> {
-        let events = self.load_range(catalog_id, version).await?;
-        // `load_range` already fails closed when the range is short of `version`, so every event
-        // here has its own version <= `version` by construction; `from_stream`'s own per-event-
-        // version filter is still applied (defence in depth, never dead code at this call site).
-        Ok(AsOfCatalog::from_stream(&events, version))
+        let stream = domain::catalog::stream(catalog_id);
+        let span = telemetry::spans::catalog_as_of_fold(&catalog_id.0.to_string(), version.get());
+        let span_for_record = span.clone();
+        async move {
+            let (events, stream_length) = self.load_range(&stream, version).await?;
+            // `load_range` already fails closed when the range is short of `version`, so every
+            // event here has its own version <= `version` by construction; `from_stream`'s own
+            // per-event-version filter is still applied (defence in depth, never dead code at this
+            // call site).
+            let catalog = AsOfCatalog::from_stream(&events, version);
+            telemetry::spans::record_catalog_as_of_fold(&span_for_record, stream_length, events.len());
+            Ok(catalog)
+        }
+        .instrument(span)
+        .await
     }
 }

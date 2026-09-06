@@ -684,10 +684,14 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
     }
 }
 
-/// `catalog.as_of.fold` (INTERNAL) — the as-of price-fold READ, end to end: SQL + decode + fold
-/// (PROP-20260831-134539 slice 2 of "the priced quote token", DARK — no production caller yet, no
-/// `specs/observability.yaml` contract row: it lands with slice 4 once a caller supplies a real
-/// correlation id, per the round-2 card's deliberate deviation from the round-1 shape).
+/// `catalog.as_of.fold` (INTERNAL) — the as-of price-fold READ, end to end: SQL + decode + the
+/// fail-closed coordinate check + fold (PROP-20260831-134539 slice 2 of "the priced quote token",
+/// DARK — no production caller yet, no `specs/observability.yaml` contract row: it lands with slice
+/// 4 once a caller supplies a real correlation id, per the round-2 card's deliberate deviation from
+/// the round-1 shape). **True end to end as of round 3**: the constructor lives at the call site
+/// that owns the WHOLE body — `AsOfPriceAuthority::as_of` — and `.instrument`s SQL + decode + the
+/// fold together; round 1's span closed before the fold ran at all, round 2's still closed before
+/// it (the fold ran one level up, outside the `.instrument`ed block).
 ///
 /// `business.version` is the requested coordinate, known at construction. `business.stream_length`
 /// (rows returned, technical rows included) and `business.events_applied` (business events the fold
