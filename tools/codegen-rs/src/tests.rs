@@ -8299,7 +8299,7 @@ fn deploy_tree_is_complete_both_ways() {
         erasure.contains("name: DATABASE_URL") && erasure.contains("name: HONEYCOMB_API_KEY"),
         "worker-erasure keeps the DB + telemetry floor"
     );
-    for (key, _, _, _) in production_secret_keys(&model) {
+    for (key, _, _, _, _) in production_secret_keys(&model) {
         if key != "DATABASE_URL" && key != "HONEYCOMB_API_KEY" {
             assert!(
                 !erasure.contains(&format!("name: {key}")),
@@ -8369,7 +8369,7 @@ fn the_deployed_monolith_has_a_generated_manifest() {
     );
     // Its pod env is the FULL `server`-consumer secret set: this one process is every scope.
     // Checked against the catalog, so a new server-consumed secret cannot be forgotten here.
-    for (key, _, consumer, _) in production_secret_keys(&model) {
+    for (key, _, consumer, _, _) in production_secret_keys(&model) {
         if consumer == "server" {
             assert!(
                 workload.contains(&format!("name: {key}")),
