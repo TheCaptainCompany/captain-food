@@ -480,6 +480,24 @@ MERGED is the coordinator's too**, since it owns the flip that starts it — but
 push has ALREADY turned red, while you are still in the run, is yours to fix
 (`GET /commits/{sha}/check-runs`, read each `conclusion`); never end at "pushed, CI failing".
 
+**A CHILD container (the second concurrent chunk of
+[ADR-20260906-152024](../../adr/ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md)
+§3) is in the EXECUTOR's position here, not the parent coordinator's — it cannot perform the flip
+either**, confirmed 2026-09-06 on
+[#924](https://github.com/TheCaptainCompany/captain-food/pull/924): its GraphQL endpoint carries
+the same pin (`markPullRequestReadyForReview` and `enablePullRequestAutoMerge` both refused), it
+holds no `mcp__github__*` tools and no `gh`, REST `PUT /pulls/{n}/merge` answers 405 "Pull Request
+is still a draft", and `ListAgents`/`SendMessage` cannot reach the parent session from a child. The
+channel that worked: an Ask posted on the OTHER chunk's claimed issue
+([#816](https://github.com/TheCaptainCompany/captain-food/issues/816)), AND a one-shot Routine
+(`create_trigger` with `persistent_session_id` set to the parent, `run_once_at`) delivering the same
+Ask into the parent session — which flipped and armed within a minute of firing. So a Lane B
+chunk's closing step is **an Ask to the parent, by construction**, until a child container is
+given the GitHub MCP tools — stated here as the open remedy, no decision taken. Cost that earned
+it: two refused mutations, one refused REST merge, one unresolvable `SendMessage`, ~30 minutes of a
+green PR ([#914](https://github.com/TheCaptainCompany/captain-food/issues/914) items 2-6) waiting
+in draft.
+
 Unchanged by this, because it never depended on the executor's access: **a dispatch names an issue
 with its number AND its title verbatim** (the CLAUDE.md naming rule). It is one line to write and it
 survives a session that has no lookup path; the cost of skipping it was an unresolvable issue link
@@ -789,7 +807,11 @@ rule 1, tracking issue [#910](https://github.com/TheCaptainCompany/captain-food/
 When the record a dispatch cites names a test, a belt or a mutant (any line matching one of the
 tokens `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`), the card carries a
 `Red-first:` section, one entry per hit — this section rides ALONGSIDE the `Register check:`/
-`Decision row:` line, never instead of it:
+`Decision row:` line, never instead of it. **A PRESENT `Red-first:` section is ALWAYS
+shape-validated (#914), whatever the hit count is**: the count decides only two refusals — a
+MISSING section is refused only when a cited record actually has a hit, and the explicit negative
+below is refused as a false negative only then too. A present section with no valid entry and no
+`none` is refused for its shape at ANY hit count, including zero.
 
 ```
 Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
@@ -811,9 +833,16 @@ tokens above (never a paraphrase — the citation must be checkable without read
 message fragment that proves it did.
 
 **Gated at dispatch by Lane D of `.claude/hooks/register-check.sh`** (Rule 1, riding after the
-trail check), proven red-first itself — the selftest cases in `register-check-selftest.sh` were
-committed FAILING before the rule existed, then turned green by it (beck, farley). **What the gate
-checks and what it does not**, the same honesty limit Lane D already states about itself:
+trail check), proven red-first itself — most of the selftest cases in `register-check-selftest.sh`
+were committed FAILING before the rule existed, then turned green by it (beck, farley). **Not
+true of every case at every stage**: RF4 (`Red-first: none` at 0 hits) was GREEN from day one, but
+for the wrong reason — the rule never fired at 0 hits, so `none` was accepted by the rule's absence,
+never by being read and found true. [#914](https://github.com/TheCaptainCompany/captain-food/issues/914)
+made the 0-hit arm actually validated and re-proved RF4 red-first against the shipped shape
+(mutant: delete the `[Nn]one*` ALLOW arm — RF4's own real mutant; re-gating the parse behind
+`rf_hit_count -gt 0` is a DIFFERENT mutant, and reds RF4b/RF4d, never RF4, since it only disables
+the validation the 0-hit arm needed, not the ALLOW arm itself). **What the gate checks and what it
+does not**, the same honesty limit Lane D already states about itself:
 CHECKABLE — presence of the section, resolution of `<record>:<line>`, and shape of the entry.
 NOT CHECKABLE — that the named test is real, that it was EVER actually seen red, or that the
 extraction from the cited record is COMPLETE (every line that "names a test" is a judgement call
