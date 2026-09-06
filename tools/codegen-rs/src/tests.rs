@@ -11464,6 +11464,78 @@ mod config_prose_says_stopped_without_row {
 mod record_resolution {
     use crate::*;
 
+    /// Rule 1's own token set (ADR-20260906-024838 / #910), READ FROM THE HOOK FILE at test time
+    /// (#926 item 3) rather than hand-copied here a second time: `tests.rs:11626` used to carry
+    /// `let tokens = [...]` beside `register-check.sh`'s own `REDFIRST_TOKENS='...'` declaration,
+    /// and nothing reds if the two drift apart. FAIL CLOSED on an empty extraction, naming the
+    /// variable it failed to find -- an empty split would otherwise make every caller of this
+    /// function vacuously true (no line ever "has no hit"). Split on the pipe, the SAME separator
+    /// `register-check.sh` itself splits on inside `grep -iE`; every alternative is asserted to
+    /// carry no regex metacharacter, because `str::contains` and `grep -E` diverge the moment one
+    /// does, and this mirror's whole claim to correctness depends on them staying substrings.
+    fn redfirst_tokens_from_hook(root: &std::path::Path) -> Vec<String> {
+        let hook = root.join(".claude/hooks/register-check.sh");
+        let content = std::fs::read_to_string(&hook)
+            .unwrap_or_else(|e| panic!("cannot read {}: {}", hook.display(), e));
+        let raw = content
+            .lines()
+            .find_map(|l| l.strip_prefix("REDFIRST_TOKENS='").and_then(|r| r.strip_suffix('\'')))
+            .unwrap_or_else(|| {
+                panic!(
+                    "REDFIRST_TOKENS='...' not found in {} -- the extraction is empty, meaning \
+                     this mirror is reading a wrong or renamed variable from the hook",
+                    hook.display()
+                )
+            });
+        let tokens: Vec<String> = raw.split('|').map(|s| s.to_string()).collect();
+        assert!(!tokens.is_empty(), "REDFIRST_TOKENS in {} extracted to zero alternatives", hook.display());
+        for t in &tokens {
+            assert!(
+                t.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-'),
+                "REDFIRST_TOKENS alternative {:?} in {} carries a regex metacharacter -- \
+                 `str::contains` and `grep -E` would diverge on it, and this mirror assumes they agree",
+                t,
+                hook.display()
+            );
+        }
+        tokens
+    }
+
+    /// Pins the extraction itself (#926 item 3): the alternative COUNT must equal the hook's own
+    /// pipe-split -- never a bare number written down here, which is exactly the drift a hand
+    /// copy invites -- and each alternative must actually match a crafted line carrying it.
+    /// STRUCTURE IS THE BEHAVIOUR HERE: there is no independent oracle for "these are the right
+    /// tokens" other than the hook's own declaration, so the test asserts the READING is faithful
+    /// rather than asserting a value.
+    #[test]
+    fn redfirst_tokens_are_read_from_the_hook() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hook = root.join(".claude/hooks/register-check.sh");
+        let content = std::fs::read_to_string(&hook).expect("read register-check.sh");
+        let declared: Vec<&str> = content
+            .lines()
+            .find_map(|l| l.strip_prefix("REDFIRST_TOKENS='").and_then(|r| r.strip_suffix('\'')))
+            .expect("REDFIRST_TOKENS='...' not found in register-check.sh")
+            .split('|')
+            .collect();
+        let tokens = redfirst_tokens_from_hook(&root);
+        assert_eq!(
+            tokens.len(),
+            declared.len(),
+            "the extraction's alternative count must equal register-check.sh's own \
+             REDFIRST_TOKENS pipe-split, never a hand-written number"
+        );
+        for (t, d) in tokens.iter().zip(declared.iter()) {
+            assert_eq!(t, d, "extracted alternative does not match the hook's own declaration in order");
+            let line = format!("this fixture line carries the token {} inside prose", d);
+            assert!(
+                line.to_lowercase().contains(&t.to_lowercase()),
+                "alternative {:?} did not match a crafted line carrying it",
+                d
+            );
+        }
+    }
+
     #[test]
     fn full_form_ids_resolve_against_prefixless_middle_era_filenames() {
         // 104 of the 241 files under docs/adr/ carry NO `ADR-` prefix (`20260720-233000-claim-
@@ -11618,16 +11690,16 @@ mod record_resolution {
         // A corpus that silently became empty would make every assertion below vacuous.
         assert!(records.len() > 300, "only {} records enumerated — the corpus walk is broken, and an              empty corpus passes this test vacuously", records.len());
 
-        // Rule 1's own token set (ADR-20260906-024838 / #910), mirrored here for the SAME reason
-        // `record_resolves` mirrors the shell resolver above it: a second implementation that
-        // drifted would silently stop proving what this test claims to prove. Returns the 1-based
-        // line number of a file's OWN first hit, if any.
-        fn first_redfirst_hit_line(path: &std::path::Path) -> Option<usize> {
-            let tokens = ["test", "belt", "mutant", "red-first", "red first", "assert"];
+        // Rule 1's own token set (ADR-20260906-024838 / #910), READ FROM THE HOOK FILE (#926 item
+        // 3, `redfirst_tokens_from_hook` above) rather than a second hand-copied literal that
+        // could silently drift from register-check.sh's own `REDFIRST_TOKENS`. Returns the
+        // 1-based line number of a file's OWN first hit, if any.
+        let redfirst_tokens = redfirst_tokens_from_hook(&root);
+        fn first_redfirst_hit_line(path: &std::path::Path, tokens: &[String]) -> Option<usize> {
             let content = std::fs::read_to_string(path).ok()?;
             for (i, line) in content.lines().enumerate() {
                 let lower = line.to_lowercase();
-                if tokens.iter().any(|t| lower.contains(t)) {
+                if tokens.iter().any(|t| lower.contains(t.as_str())) {
                     return Some(i + 1);
                 }
             }
@@ -11674,7 +11746,7 @@ mod record_resolution {
         let mut refused: Vec<String> = Vec::new();
         for (id, path) in &records {
             let hit_path = canonical_resolved_path(&root, id).unwrap_or_else(|| root.join(path));
-            let redfirst = match first_redfirst_hit_line(&hit_path) {
+            let redfirst = match first_redfirst_hit_line(&hit_path, &redfirst_tokens) {
                 Some(line) => format!(
                     "\\nRed-first: NEW::corpus_redfirst_check — {}:{} — mutant: delete the corpus's own text — expected red: register-check corpus test refuses",
                     id, line),
