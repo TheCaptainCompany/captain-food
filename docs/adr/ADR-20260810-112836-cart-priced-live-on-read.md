@@ -13,9 +13,18 @@ clause** — *"the legal display guarantee … is carried by the `expectedTotal`
 [#816 "Display/charge divergence is undetected: the expectedTotal equality check never runs in
 production"](https://github.com/TheCaptainCompany/captain-food/issues/816)). Design:
 [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md).
-**§§1, 3, 4, 5 and 6 stand unchanged** — the pure money-free Cart fold, `cart.current`, the IDOR
-retirement, the ADR-0028 §5 correction and the `cart-price` contract are all still current, and so
-is the one-pricer property that makes the replacement small. The original text below is untouched.
+**§§4, 5 and 6 stand unchanged.** **§1/§3 AMENDED IN PART, 2026-09-06, by
+[ADR-20260906-154419](ADR-20260906-154419-the-priced-read-is-served-from-the-fold-and-carries-its-coordinate-behind-a-door.md)
+(PROP-20260831-134539 slice 3a):** "the cart is priced LIVE, on every read, from the catalog
+PROJECTION" now holds unconditionally only with `RUN_FOLD_PRICED_CART_READ` CLOSED (the default
+everywhere today); with the door OPEN, the same read prices LIVE from the EVENT-STREAM FOLD to head
+instead (one range read of `Catalog-{id}`, never the projection), returning the price and the
+coordinate it was bounded at as one value — still fresh, still request-time, still never a
+cached/frozen read-side price; only the AUTHORITATIVE SOURCE the door selects changes. §6
+(unresolvable-at-read is `technical_error`, never `business_rejected`) is unchanged and is reused,
+not re-decided, by the fold's own refusal path. The pure money-free Cart fold, `cart.current`'s IDOR
+retirement and the `cart-price` contract are all still current, and so is the one-pricer property
+that makes the replacement small. The original text below is untouched.
 
 Accepted (product-owner decision 2026-08-10, recorded in
 [PROP-20260810-231500 "cart.current: the authenticated customer's PRICED cart"](../proposals/PROP-20260810-231500-cart-current-priced.md)

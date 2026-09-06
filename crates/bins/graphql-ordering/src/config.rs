@@ -302,6 +302,8 @@ pub struct Config {
     pub enforce_acceptance_timeout: bool,
     /// DEFAULT `3650`. The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
+    /// DEFAULT `false`. The priced-read mint (PROP-20260831-134539 slice 3a, D2/D4): ON, `cart.current`/`cart`/`carts` price the cart from `AsOfPriceAuthority::at_head` — ONE unbounded range read of the `Catalog-<id>` stream, returning `(AsOfCatalog, CatalogVersion)` as ONE value, never a second read and never a caller-supplied expectation to check against. The coordinate is server-carried only in this slice: it travels inside the read and is DROPPED at the reply boundary — no `catalogVersion` field, no input, no entities.yaml property (D3; the published `quote` word is slice 3b's). OFF is NOT a fallback of a failed fold: it is TODAY'S read, stated explicitly as the closed arm — `CatalogSnapshot::load` + `price_cart` against the live catalog PROJECTION, exactly as it has always run, carrying no coordinate. A fold failure with the door OPEN (the coordinate absent, the stream unreadable, or over the request deadline) is `technical_error` through the EXISTING unresolvable-at-read path (`errors.yaml#/PriceUnresolvable`'s sibling classification, ADR-20260810-112836 §6) — NEVER a HEAD/projection fallback, and never presented as a price change. `decisionRow` binds this key to `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open): the phase-0 latency budget, the observability contract rows (incl. `payload_bytes`), the walk drill, 3b's signed quote, and dba's preconditions (content-hash import suppression landed, the buffer-cache instrument named) all gate the flip. `declare_flag` at BOTH composition roots (`crates/server/src/lib.rs`, `crates/infrastructure/src/mailbox/standalone.rs`) is the fleet-parity evidence (ADR-20260905-223957 §5, ADR-20260906-113444) — the standalone root's line is the PRE-RECORDED carve-out of ADR-20260904-081527 §8's standing clause, since this key is a `runKind: door` newly introduced.
+    pub run_fold_priced_cart_read: bool,
 }
 
 impl Config {
@@ -490,6 +492,10 @@ impl Config {
             .map(|v| parse_bool("ENFORCE_ACCEPTANCE_TIMEOUT", &v, false))
             .unwrap_or(false);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
+        let run_fold_priced_cart_read = raw("RUN_FOLD_PRICED_CART_READ")
+            .or_else(|| baked("RUN_FOLD_PRICED_CART_READ", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_FOLD_PRICED_CART_READ", &v, false))
+            .unwrap_or(false);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -593,6 +599,7 @@ impl Config {
                 order_acceptance_timeout_seconds,
                 enforce_acceptance_timeout,
                 order_retention_window_days,
+                run_fold_priced_cart_read,
             },
             problems,
         )
@@ -676,12 +683,13 @@ impl Config {
         out.push_str(&format!("  ORDER_ACCEPTANCE_TIMEOUT_SECONDS = {}\n", self.order_acceptance_timeout_seconds));
         out.push_str(&format!("  ENFORCE_ACCEPTANCE_TIMEOUT = {}\n", self.enforce_acceptance_timeout));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
+        out.push_str(&format!("  RUN_FOLD_PRICED_CART_READ  = {}\n", self.run_fold_priced_cart_read));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 60;
+pub const KEY_COUNT: usize = 61;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -746,6 +754,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ORDER_ACCEPTANCE_TIMEOUT_SECONDS",
     "ENFORCE_ACCEPTANCE_TIMEOUT",
     "ORDER_RETENTION_WINDOW_DAYS",
+    "RUN_FOLD_PRICED_CART_READ",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
@@ -783,4 +792,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
+    ("RUN_FOLD_PRICED_CART_READ", "production", "false"),
+    ("RUN_FOLD_PRICED_CART_READ", "staging", "false"),
 ];

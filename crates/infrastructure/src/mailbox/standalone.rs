@@ -322,6 +322,15 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         "RUN_RIDER_RESTRICTION_SOCKET_CLOSE",
         env_flag("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", false),
     );
+    // PROP-20260831-134539 slice 3a (ADR-20260904-081527 §8 fifth carve-out, consent farley +
+    // vernon): ONE additive `declare_flag` line, byte-parallel to the monolith root's, for the
+    // priced-read mint door -- this standalone fleet never serves GraphQL and never opens this
+    // door in practice, but the fleet-parity EVIDENCE (what value did THIS process resolve) is
+    // what `runtime_flag_state` needs to prove no process anywhere carries a stale value.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_FOLD_PRICED_CART_READ",
+        env_flag("RUN_FOLD_PRICED_CART_READ", false),
+    );
     deps
 }
 

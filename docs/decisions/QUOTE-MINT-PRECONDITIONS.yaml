@@ -1,0 +1,60 @@
+key: QUOTE-MINT-PRECONDITIONS
+status: open
+question: 'What must exist before `RUN_FOLD_PRICED_CART_READ` is flipped in production, now that
+  slice 3a lands the fold-priced `cart.current`/`cart`/`carts` read behind it (PROP-20260831-134539
+  §11 slice 3a, D4)? Named at the 2026-09-06 briefing (twelve lenses): (1) the phase-0 latency
+  budget as a DESIGN TARGET with its antecedents named, never a guessed number recorded as decided
+  (D6) -- the as-of leg is a headroom carve inside `cart-price`''s existing p95 300 / p99 600
+  (specs/observability.yaml, INITIAL): leg <= 150 ms p95, <= 250 ms p99 (150 = the #920 escalate
+  line, ALL UNVERIFIED input -- lab, one container, peak-unverified; production is suspended so no
+  distribution exists to compare against, ADR-20260817-105844); (2) the observability contract
+  rows live: `catalog.as_of.fold` inside `cart-price.spans`, `catalog_as_of_fold_ms` inside its
+  `metrics`, `catalog_as_of_stream_length` and `catalog_as_of_payload_bytes` histograms
+  (`attributes: []` -- no bounded population exists for catalog/tenant), the dead-man counter
+  `catalog_as_of_reads_total{outcome}` (applied|refused) so a HEAD-fallback regression cannot hide
+  as silence, `business.correlation_id` recorded (not left Empty); (3) the walk drill -- farley:
+  point the cart-paint leg of `tools/walk/` at the gated read with the door ON, once, before any
+  production flip; (4) slice 3b''s signed quote token exists and is live -- a coordinate nobody is
+  held to is inventory (holub): a fold-priced `cart.current` with no downstream commitment mechanism
+  is display-only work, not the money-path fix #816 needs; (5) dba''s preconditions on the
+  read-path -> write-database crossing (b) introduces (STO-7/STO-8 cited in the ADR, the door is the
+  containment): [#921 "Priced quote token slice 2 follow-ups"](https://github.com/TheCaptainCompany/captain-food/issues/921)
+  item 2 (content-hash suppression of an unchanged `CatalogImported`) LANDED before the door opens
+  on the `/cart` render (one 500-product resync payload is ~200 KB, 26% of the payload in 0.05% of
+  L -- unsuppressed resyncs cost the buffer cache real memory at scale); the buffer-cache instrument
+  named (`pg_statio_user_tables` hit ratio on `domain_events`); (6) dba''s option (a) (a projected
+  `catalog.version` column + a two-folds-agree gate) stays on the record as the alternative,
+  re-weighed at 3b/4 on MEASURED cost if the fold-priced read''s wall crossing proves too dear.'
+owner: team
+opened: '2026-09-06'
+capacity: team
+register: docs/adr/ADR-20260906-154419-the-priced-read-is-served-from-the-fold-and-carries-its-coordinate-behind-a-door.md
+evidence: 'The write path already reads the Catalog projection at every add-to-cart/checkout (STO-7,
+  open); slice 3a introduces a SECOND read path -- the event-stream range read to head -- behind
+  this door, so a rolling deploy in which half the fleet folds and half projects is a fleet-parity
+  hazard the door''s own `declare_flag` at both composition roots (ADR-20260905-223957 §5,
+  ADR-20260906-113444) makes observable rather than invisible. Production is suspended
+  (ADR-20260817-105844) and the rider/customer population is zero; nothing in this row is urgent by
+  a calendar clock, but the door stays pinned `false` until the items above are discharged in a
+  recorded decision (gate-then-stabilize, ADR-20260808-144738).'
+note: 'The key is consumed at the READ door only, never a write: `cart.current`/`cart`/`carts`
+  (`crates/server/src/graphql/cart_read.rs::priced`) resolve OFF as the closed arm (today''s
+  projection-priced read, unchanged) and ON as the fold-priced open arm
+  (`AsOfPriceAuthority::at_head` + `application::pricing::price_cart_at`). Nothing else reads this
+  key. `RUN_FOLD_PRICED_CART_READ` is declared at BOTH composition roots
+  (`crates/server/src/lib.rs`, `crates/infrastructure/src/mailbox/standalone.rs`) per the recorded
+  fifth carve-out of ADR-20260904-081527 §8''s standing clause -- the standalone declaration is
+  fleet-parity EVIDENCE only; the standalone fleet never serves GraphQL and never opens this door in
+  practice. Closing this row: (1)-(2) land WITH the code in this same PR (slice 3a, PR #922); (3)
+  is a one-time drill run before any production flip; (4) is slice 3b, the very next card in the
+  same lane (holub''s WIP-one condition, journal 2026-09-06); (5) is #921 item 2, a named
+  precondition of the flip, not of this door existing dark. Consulted at the 2026-09-06 briefing:
+  business (the budget as headroom, the cheapest-lever order), young (the rebuild-window rejection
+  of option (a)), vernon (one read, no mixed authority, nothing durable in 3a), holub (the
+  WIP-one-lane condition and "a quote nobody is held to is inventory"), dba (the (a)/(b) split, the
+  bytes-not-length cost, the buffer-cache instrument, the wall-crossing name), observability (the
+  contract rows, the dead-man counter), farley (the walk drill, the gate form, the rollback shape),
+  legal (3a discharges nothing, B1 stays open, the telemetry hygiene fence), evans (the envelope
+  placement, `processmanager.yaml:68`''s rewrite), graphql (the response-only/nullable shape), ux
+  (the premise correction: `cart.current` is exactly two screens'' data_requirement, never the ETA
+  or menu surface), beck (the red-first suite and the ceiling-as-multiple-of-target discipline).'
