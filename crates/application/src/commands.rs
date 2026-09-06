@@ -5454,3 +5454,463 @@ pub async fn cancel_customer_erasure(
 ) -> Result<(), DomainError> {
     Err(reject("ErasureNotRequested", json!({})))
 }
+
+// ================================================================================================
+// Tests — the signed-quote write-side verify guard (ADR-20260906-192007 D-D/D-F, beck's list).
+// These are the NAMED Rust unit tests errors.yaml#/QuoteNoLongerHonoured and
+// errors.yaml#/QuoteVerificationFailed cite as their real thrown: coverage, since neither cause
+// reachable only through them (a real HMAC signature over a specific cart/catalog state) can be
+// expressed as a static tests.yaml fixture.
+// ================================================================================================
+#[cfg(test)]
+mod quote_guard_tests {
+    use super::place_order;
+    use crate::behaviour_support::{actor, eur, TestBed};
+    use crate::ports::AsOfPriceAuthority;
+    use crate::queries::{CatalogReadRepository, CatalogRow, OfferView};
+    use crate::quote::{QuoteGuard, QuoteMinter, SigningKey};
+    use async_trait::async_trait;
+    use domain::catalog_as_of::{AsOfCatalog, CatalogVersion};
+    use domain::generated::commands::PlaceOrder;
+    use domain::generated::entities::{
+        Address, CartLineItem as Line, CustomerContact, Offer, Product, TaxRate,
+    };
+    use domain::generated::events::{
+        CartLineAdded, CartStarted, CatalogCreated, DomainEvent, ProductAdded, RestaurantActivated,
+        RestaurantRegistered,
+    };
+    use domain::generated::scalars::{
+        AddressLine, CartId, CartLineId, CatalogId, CatalogItemAvailability, CatalogName, CityName,
+        CountryCode, CustomerDisplayName, CustomerId, OfferId, OfferName, OrderId, PhoneNumber,
+        PostalCode, ProductId, ProductName, RestaurantDisplayName, RestaurantId,
+        RestaurantListingStatus, ServiceType, SessionId, StockStatus,
+    };
+    use domain::shared::errors::DomainError;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    fn resto() -> RestaurantId {
+        RestaurantId(uuid::Uuid::from_u128(0xA001))
+    }
+    fn catalog() -> CatalogId {
+        CatalogId(uuid::Uuid::from_u128(0xA002))
+    }
+    fn cart() -> CartId {
+        CartId(uuid::Uuid::from_u128(0xA003))
+    }
+    fn offer() -> OfferId {
+        OfferId(uuid::Uuid::from_u128(0xA004))
+    }
+    fn order(n: u128) -> OrderId {
+        OrderId(uuid::Uuid::from_u128(0xA100 + n))
+    }
+    fn address() -> Address {
+        Address {
+            line1: AddressLine("9 Rue Colbert".into()),
+            line2: None,
+            postal_code: PostalCode("37000".into()),
+            city: CityName("Tours".into()),
+            country: CountryCode("FR".into()),
+        }
+    }
+    fn line() -> Line {
+        Line { cart_line_id: CartLineId(uuid::Uuid::from_u128(0xA005)), offer_id: offer(), quantity: 1, selected_option_ids: vec![] }
+    }
+    fn contact() -> CustomerContact {
+        CustomerContact { display_name: CustomerDisplayName("Jo".into()), email: None, phone: PhoneNumber("+33612345678".into()) }
+    }
+    fn cid() -> CustomerId {
+        CustomerId(uuid::Uuid::from_u128(0xA006))
+    }
+
+    /// A catalog double whose `by_restaurant` answers a REAL row (unlike
+    /// `behaviour_support::SpecCatalogs`, which always answers `None` — nothing before this guard
+    /// needed `CatalogSnapshot::load` to resolve anything) -- `verify_quote`'s catalog-identity
+    /// check needs a real `catalog_id` to compare the token against.
+    #[derive(Default)]
+    struct TestCatalogs {
+        offers: Mutex<Vec<(RestaurantId, OfferView)>>,
+    }
+    impl TestCatalogs {
+        fn add(&self, restaurant_id: RestaurantId, view: OfferView) {
+            self.offers.lock().unwrap().push((restaurant_id, view));
+        }
+    }
+    #[async_trait]
+    impl CatalogReadRepository for TestCatalogs {
+        async fn by_restaurant(&self, restaurant_id: RestaurantId) -> Result<Option<CatalogRow>, DomainError> {
+            if restaurant_id != resto() {
+                return Ok(None);
+            }
+            Ok(Some(CatalogRow {
+                catalog_id: catalog(),
+                restaurant_id,
+                slug: None,
+                name: CatalogName("Menu".into()),
+                tree: serde_json::json!({}),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            }))
+        }
+        async fn offer_by_id(&self, restaurant_id: RestaurantId, offer_id: OfferId) -> Result<Option<OfferView>, DomainError> {
+            Ok(self.offers.lock().unwrap().iter().find(|(r, o)| *r == restaurant_id && o.offer_id == offer_id).map(|(_, o)| o.clone()))
+        }
+    }
+
+    /// The as-of fold authority, over an in-memory `Catalog-<id>` event log this test controls
+    /// directly (never behind `TestBed`'s doubles, which predate this door) -- `at_head` folds
+    /// EVERY event pushed; `as_of` truncates at the requested coordinate, both via the SAME
+    /// `AsOfCatalog::from_stream` the real Postgres adapter uses (the one-pricer property).
+    #[derive(Default)]
+    struct TestFold {
+        events: Mutex<Vec<DomainEvent>>,
+    }
+    impl TestFold {
+        fn push(&self, event: DomainEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+        fn versioned(&self) -> Vec<(CatalogVersion, DomainEvent)> {
+            self.events.lock().unwrap().iter().cloned().enumerate().map(|(i, e)| (CatalogVersion::try_new(i as i64 + 1).unwrap(), e)).collect()
+        }
+    }
+    #[async_trait]
+    impl AsOfPriceAuthority for TestFold {
+        async fn as_of(&self, _catalog_id: CatalogId, version: CatalogVersion) -> Result<AsOfCatalog, DomainError> {
+            let events = self.versioned();
+            if version.get() > events.len() as i64 {
+                return Err(DomainError::Repository("coordinate beyond head".into()));
+            }
+            Ok(AsOfCatalog::from_stream(&events, version))
+        }
+        async fn at_head(&self, _catalog_id: CatalogId, _correlation_id: uuid::Uuid) -> Result<AsOfCatalog, DomainError> {
+            let events = self.versioned();
+            let head = CatalogVersion::try_new(events.len() as i64).expect("at least one event seeded");
+            Ok(AsOfCatalog::from_stream(&events, head))
+        }
+    }
+
+    /// Counts `request` calls -- the zero-intent pin
+    /// (`a_failed_quote_verify_refuses_before_any_payment_intent_is_created`) needs to see the
+    /// gateway was NEVER reached, not merely that `place_order` returned `Err`.
+    #[derive(Default)]
+    struct CountingGateway {
+        requests: AtomicUsize,
+    }
+    #[async_trait]
+    impl crate::generated::services::PaymentService for CountingGateway {
+        async fn request(
+            &self,
+            _input: crate::generated::services::PaymentRequestInput,
+            _meta: &crate::generated::services::ServiceCallMeta,
+        ) -> Result<crate::generated::services::PaymentRequestOutput, DomainError> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::generated::services::PaymentRequestOutput {
+                payment_intent_id: domain::generated::scalars::PaymentIntentId("pi_quote_test".into()),
+                client_secret: "pi_quote_test_secret".into(),
+            })
+        }
+        async fn capture(&self, _i: crate::generated::services::PaymentCaptureInput, _m: &crate::generated::services::ServiceCallMeta) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn release(&self, _i: crate::generated::services::PaymentReleaseInput, _m: &crate::generated::services::ServiceCallMeta) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn refund(&self, _i: crate::generated::services::PaymentRefundInput, _m: &crate::generated::services::ServiceCallMeta) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
+    const KEY_ID: &str = "test-current";
+    fn signing_key() -> SigningKey {
+        SigningKey::from_resolved_secret(KEY_ID, "test-signing-secret")
+    }
+    fn minter() -> QuoteMinter {
+        QuoteMinter::new(signing_key())
+    }
+    fn open_guard(fold: Arc<TestFold>) -> QuoteGuard {
+        QuoteGuard::resolve_at_boot(true, true, false, signing_key(), None, fold)
+            .expect("both doors open together can never refuse")
+    }
+
+    /// Seed an ACTIVE restaurant, a catalog with offer() @ `price_cents`, and an OPEN cart with one
+    /// line for that offer. Returns the bed plus a `TestFold` seeded with the SAME two catalog
+    /// events, and `TestCatalogs` seeded with the SAME price (so the projection and the fold AGREE
+    /// unless a test deliberately diverges them, e.g. `the_charged_total_comes_from_the_fold_when_
+    /// the_projection_disagrees`).
+    async fn world(price_cents: i64) -> (TestBed, Arc<TestCatalogs>, Arc<TestFold>) {
+        let bed = TestBed::new();
+        bed.seed(
+            &format!("Restaurant-{}", resto().0),
+            vec![
+                DomainEvent::RestaurantRegistered(RestaurantRegistered {
+                    mode: None, restaurant_id: resto(), account_id: None,
+                    listing_status: RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None,
+                    external_identifiers: Vec::new(), display_name: RestaurantDisplayName("Resto".into()),
+                    contact: None, website: None, tags: Vec::new(), margin_rate: None,
+                    cuisine_category: None, uber_prices_opt_in: None, address: address(),
+                    location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new(),
+                }),
+                DomainEvent::RestaurantActivated(RestaurantActivated { restaurant_id: resto(), reason: None }),
+            ],
+        )
+        .await;
+        bed.seed(
+            &format!("Cart-{}", cart().0),
+            vec![
+                DomainEvent::CartStarted(CartStarted { cart_id: cart(), restaurant_id: resto(), session_id: SessionId(uuid::Uuid::from_u128(0xA007)), customer_id: None }),
+                DomainEvent::CartLineAdded(CartLineAdded { cart_id: cart(), line: line() }),
+            ],
+        )
+        .await;
+
+        let catalogs = Arc::new(TestCatalogs::default());
+        catalogs.add(resto(), OfferView {
+            offer_id: offer(), product_id: ProductId(uuid::Uuid::from_u128(0xA008)),
+            product_name: ProductName("Burger".into()), offer_name: OfferName("Solo".into()),
+            price: eur(price_cents), availability: CatalogItemAvailability::AVAILABLE,
+            stock_status: StockStatus::IN_STOCK, stock_quantity: None, option_lists: Vec::new(),
+        });
+
+        let fold = Arc::new(TestFold::default());
+        fold.push(DomainEvent::CatalogCreated(CatalogCreated { catalog_id: catalog(), r#ref: None, restaurant_id: resto(), name: CatalogName("Menu".into()) }));
+        fold.push(DomainEvent::ProductAdded(ProductAdded {
+            catalog_id: catalog(), restaurant_id: resto(),
+            product: Product {
+                id: ProductId(uuid::Uuid::from_u128(0xA008)), r#ref: None, catalog_id: catalog(),
+                restaurant_id: resto(), category_ref: None, name: ProductName("Burger".into()),
+                description: None, tags: Vec::new(), image_ids: Vec::new(),
+                tax_rate: TaxRate { delivery: domain::generated::scalars::TaxRatePercent(10.0), collection: None, eat_in: None },
+                offers: vec![Offer {
+                    id: offer(), r#ref: None, product_id: ProductId(uuid::Uuid::from_u128(0xA008)),
+                    name: OfferName("Solo".into()), price: eur(price_cents),
+                    availability: CatalogItemAvailability::AVAILABLE, stock: None, option_list_ids: Vec::new(),
+                }],
+            },
+        }));
+        (bed, catalogs, fold)
+    }
+
+    fn cmd(quote: Option<domain::generated::scalars::CartQuote>) -> PlaceOrder {
+        PlaceOrder {
+            mode: None, order_id: order(1), restaurant_id: resto(), cart_id: cart(), customer_id: cid(),
+            customer_contact: contact(), service_type: ServiceType::COLLECTION, delivery_address: None,
+            note: None, payment_method_id: "pm_123".into(), expected_total: None, quote,
+        }
+    }
+
+    /// beck (iv), FIRST: the cart-edited refusal -- quoted at V (offer 1500), a SECOND line added
+    /// AFTER the mint moves the cart's lines-digest, PlaceOrder with the STALE quote refuses
+    /// `QuoteNoLongerHonoured{cartId}` with NO other context field.
+    #[tokio::test]
+    async fn a_cart_edited_after_the_mint_is_refused_with_quote_no_longer_honoured() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let lines_at_mint = vec![line()];
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &lines_at_mint, &eur(1500), chrono::Utc::now());
+        // The cart is edited AFTER the mint: a second line lands on the SAME cart stream.
+        bed.seed(&format!("Cart-{}", cart().0), vec![DomainEvent::CartLineAdded(CartLineAdded {
+            cart_id: cart(),
+            line: Line { cart_line_id: CartLineId(uuid::Uuid::from_u128(0xA009)), offer_id: offer(), quantity: 1, selected_option_ids: vec![] },
+        })]).await;
+
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("a cart edited after mint must refuse");
+        match err {
+            DomainError::Rejected { code, context } => {
+                assert_eq!(code, "QuoteNoLongerHonoured");
+                assert_eq!(context, serde_json::json!({ "cartId": cart() }), "context is EXACTLY {{ cartId }} -- no amount, no delta, no currency");
+            }
+            other => panic!("expected DomainError::Rejected, got {other:?}"),
+        }
+    }
+
+    /// beck (iv): a quote older than the 30-minute QUOTE-STALENESS backstop refuses
+    /// `QuoteNoLongerHonoured` too (the sibling cause).
+    #[tokio::test]
+    async fn a_quote_past_the_staleness_backstop_is_refused_with_quote_no_longer_honoured() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let old_mint = chrono::Utc::now() - chrono::Duration::minutes(31);
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), old_mint);
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("an expired quote must refuse");
+        assert_eq!(err.code(), Some("QuoteNoLongerHonoured"));
+    }
+
+    /// beck (iv): a single flipped byte in the token (a forged/tampered signature) refuses the ONE
+    /// structural `QuoteVerificationFailed` -- never a price-mismatch-flavoured code.
+    #[tokio::test]
+    async fn a_forged_signature_refuses_with_quote_verification_failed() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        use base64::Engine as _;
+        let mut raw = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&token.0).unwrap();
+        let mid = raw.len() / 2;
+        raw[mid] ^= 0x01;
+        let tampered = domain::generated::scalars::CartQuote(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw));
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(tampered)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("a forged token must refuse");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+    }
+
+    /// beck (iv): a quote naming a DIFFERENT cart than the command's refuses `QuoteVerificationFailed`
+    /// (the foreign-cart structural cause, D-D i) -- never the business error.
+    #[tokio::test]
+    async fn a_quote_naming_a_foreign_cart_refuses_with_quote_verification_failed() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let foreign_cart = CartId(uuid::Uuid::from_u128(0xBAD));
+        let token = minter().mint(foreign_cart, resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("a foreign cart's quote must refuse");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+    }
+
+    /// beck (iv): a quote signed under a keyId the verifier does not hold at all (never rotated
+    /// in) refuses `QuoteVerificationFailed` -- distinct from the previous-key overlap case
+    /// (`application::quote::tests::a_quote_under_the_previous_key_verifies_inside_the_overlap_set`).
+    #[tokio::test]
+    async fn a_quote_under_a_retired_key_refuses_with_quote_verification_failed() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let retired = QuoteMinter::new(SigningKey::from_resolved_secret("retired-long-ago", "some-other-secret"));
+        let token = retired.mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("an unknown keyId must refuse");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+    }
+
+    /// beck (iv): a coordinate beyond the live stream head (the token names V=99, the fold has 2
+    /// events) refuses `QuoteVerificationFailed` -- NEVER clamped to head (vernon/young CATCH).
+    #[tokio::test]
+    async fn a_coordinate_beyond_head_refuses_with_quote_verification_failed() {
+        let (bed, catalogs, fold) = world(1500).await;
+        // Sign a token whose payload NAMES V=99 -- minted directly (never through `at_head`, which
+        // could not produce this coordinate honestly) to pin the verifier's OWN bounds check.
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(99).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("a coordinate beyond head must refuse, never clamp");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+    }
+
+    /// beck: the FIRST guard-swap pin -- a failed verify refuses BEFORE any payment authorization.
+    /// Vernon's placement claim, proved by a spy: the gateway's `request` must be called ZERO
+    /// times when the quote refuses.
+    #[tokio::test]
+    async fn a_failed_quote_verify_refuses_before_any_payment_intent_is_created() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let gateway = CountingGateway::default();
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(None), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("an absent quote with the door open must refuse");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+        let _ = token; // minted for symmetry with the sibling tests; this test's cause is absence.
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "the fake recorded an intent where 0 were expected");
+    }
+
+    /// young's red-first (ADR-20260906-192007:452): the fold at V=1900 and the read-side
+    /// projection at 1500 DISAGREE -- the charge must be the FOLD's 1900, never the projection's
+    /// 1500. Mutant: verify recomputes via `price_cart` (the projection) instead of `price_cart_at`
+    /// (the fold) -- expected red: charged 1500 where 1900 was quoted.
+    #[tokio::test]
+    async fn the_charged_total_comes_from_the_fold_when_the_projection_disagrees() {
+        // The PROJECTION (TestCatalogs) prices offer at 1500; the FOLD's stream prices it at 1900
+        // -- a price update landed on the log that the projection never replayed.
+        let (bed, catalogs, fold) = world(1500).await;
+        fold.push(DomainEvent::ProductAdded(ProductAdded {
+            catalog_id: catalog(), restaurant_id: resto(),
+            product: Product {
+                id: ProductId(uuid::Uuid::from_u128(0xA008)), r#ref: None, catalog_id: catalog(),
+                restaurant_id: resto(), category_ref: None, name: ProductName("Burger".into()),
+                description: None, tags: Vec::new(), image_ids: Vec::new(),
+                tax_rate: TaxRate { delivery: domain::generated::scalars::TaxRatePercent(10.0), collection: None, eat_in: None },
+                offers: vec![Offer {
+                    id: offer(), r#ref: None, product_id: ProductId(uuid::Uuid::from_u128(0xA008)),
+                    name: OfferName("Solo".into()), price: eur(1900),
+                    availability: CatalogItemAvailability::AVAILABLE, stock: None, option_list_ids: Vec::new(),
+                }],
+            },
+        })); // fold coordinate 3
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(3).unwrap(), &vec![line()], &eur(1900), chrono::Utc::now());
+        let gateway = CountingGateway::default();
+        let guard = open_guard(fold);
+        let outcome = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect("a valid quote at the fold's own coordinate must accept");
+        let _ = outcome;
+        let stream = bed.store.stream(&format!("Payment-{}", "pi_quote_test"));
+        let intent_amount = stream.iter().find_map(|e| match e {
+            DomainEvent::PaymentIntentCreated(p) => Some(p.checkout.total_amount.amount_cents.0),
+            _ => None,
+        });
+        assert_eq!(intent_amount, Some(1900), "rebuilding the projection changes no assertion -- the charge must come from the fold (1900), not the stale projection (1500)");
+    }
+
+    /// business's F4: a HEAD price that has since moved LOWER than the quoted total still charges
+    /// the QUOTED (fold-at-V) total -- a downward move never refuses.
+    #[tokio::test]
+    async fn a_downward_price_move_places_the_order_at_the_quoted_total() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        // HEAD moves DOWN after the mint -- the projection now shows 900. The quote's own
+        // coordinate (V=2) is untouched by this: `verify_quote` reprices AT V, not at head.
+        catalogs.add(resto(), OfferView {
+            offer_id: offer(), product_id: ProductId(uuid::Uuid::from_u128(0xA008)),
+            product_name: ProductName("Burger".into()), offer_name: OfferName("Solo".into()),
+            price: eur(900), availability: CatalogItemAvailability::AVAILABLE,
+            stock_status: StockStatus::IN_STOCK, stock_quantity: None, option_lists: Vec::new(),
+        });
+        let gateway = CountingGateway::default();
+        let guard = open_guard(fold);
+        place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect("a downward price move must never refuse");
+        let stream = bed.store.stream(&format!("Payment-{}", "pi_quote_test"));
+        let intent_amount = stream.iter().find_map(|e| match e {
+            DomainEvent::PaymentIntentCreated(p) => Some(p.checkout.total_amount.amount_cents.0),
+            _ => None,
+        });
+        assert_eq!(intent_amount, Some(1500), "a lower HEAD still charges the QUOTED total, never the new lower one");
+    }
+
+    /// The product's own outcome sentence (CLAUDE.md), pinned directly: the customer is charged
+    /// the price they were SHOWN (1500), never whatever HEAD has since moved to (1900) -- the
+    /// UPWARD mirror of the downward-move test above, and the headline #816 was opened for.
+    /// Mutant: `main` today (no guard at all, `verify_quote` never called) charges whatever
+    /// `price_cart` computes from the LIVE projection at request time -- expected red: charged
+    /// 1900 where 1500 was shown.
+    #[tokio::test]
+    async fn the_customer_is_charged_the_price_they_were_shown() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        // HEAD moves UP after the mint (a price rise between showing the recap and paying) -- the
+        // live projection now shows 1900. The quote's own coordinate (V=2) is untouched.
+        catalogs.add(resto(), OfferView {
+            offer_id: offer(), product_id: ProductId(uuid::Uuid::from_u128(0xA008)),
+            product_name: ProductName("Burger".into()), offer_name: OfferName("Solo".into()),
+            price: eur(1900), availability: CatalogItemAvailability::AVAILABLE,
+            stock_status: StockStatus::IN_STOCK, stock_quantity: None, option_lists: Vec::new(),
+        });
+        let gateway = CountingGateway::default();
+        let guard = open_guard(fold);
+        place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect("a price rise after the quote must never refuse -- the quote is what was shown");
+        let stream = bed.store.stream(&format!("Payment-{}", "pi_quote_test"));
+        let intent_amount = stream.iter().find_map(|e| match e {
+            DomainEvent::PaymentIntentCreated(p) => Some(p.checkout.total_amount.amount_cents.0),
+            _ => None,
+        });
+        assert_eq!(intent_amount, Some(1500), "the customer is charged the price they were shown (1500), never HEAD's new 1900");
+    }
+}
