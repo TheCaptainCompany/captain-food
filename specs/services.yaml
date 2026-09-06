@@ -234,6 +234,19 @@ identity:
         email: { $ref: 'scalars.yaml#/EmailAddress' }
         locale: { $ref: 'scalars.yaml#/Locale', nullable: true, description: "The customer's STORED locale, absent when none is stored yet." }
       errors: []
+    send_admin_sign_in_link:
+      description: >
+        Email a magic link for the ADMIN sign-in door (#639 part C step 6-iii round 2 R2-3, ADR-20260906-023825):
+        the SAME provider call `send_email_magic_link` makes, addressed at its OWN call site so the shared
+        send-abuse wall (`EmailSendAuthorizer`) can attribute this request to the `admin-sign-in` contract's own
+        `admin_sign_in_link_requested_total`/`admin_sign_in_refused_total` counters rather than
+        `member_sign_in_*`'s (ADR-20260818-101500: one send per door, hardcoded, selected at compile time --
+        never a door parameter on the shared method). `requestAdminSignInLink`'s ONLY caller; the member/customer
+        magic-link paths keep calling `send_email_magic_link`, unchanged.
+      input:
+        email: { $ref: 'scalars.yaml#/EmailAddress' }
+        locale: { $ref: 'scalars.yaml#/Locale', nullable: true, description: "The admin's STORED locale, absent when none is stored yet." }
+      errors: []
     verify_email_token:
       description: "Verify a returned magic-link token server-side with the provider; reports WHICH email the token proves."
       input:

@@ -14,11 +14,11 @@
 
 use application::commands::canonical_phone;
 use application::generated::services::{
-    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
-    IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityStampCustomerClaimInput,
-    IdentityStampAdminClaimInput, IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
-    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
+    IdentitySendAdminSignInLinkInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
+    IdentityService, IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput,
+    IdentityVerifyPhoneOtpInput, IdentityRefreshSessionInput, IdentityRefreshSessionOutput,
+    IdentityStampCustomerClaimInput, IdentityStampAdminClaimInput, IdentityStampMemberClaimInput,
+    IdentityStampRiderClaimInput, IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
 use domain::generated::scalars::{AuthSubject, CustomerId, EmailAddress};
@@ -104,6 +104,15 @@ impl IdentityService for FailClosedIdentityService {
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         // TODO(integration): Supabase Auth magic-link email delivery.
+        Err(not_configured("email magic link"))
+    }
+
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // TODO(integration): Supabase Auth magic-link email delivery (admin door).
         Err(not_configured("email magic link"))
     }
 
@@ -1058,8 +1067,27 @@ impl IdentityService for SupabaseIdentityService {
         // Round 2 R2-V1: UNCONDITIONAL — `email_guard` is never absent (compiler-first), so there
         // is no "unguarded" branch left to fall through to; a database-less deployment still
         // enforces its own process-local (in-memory) window, degraded but never bypassed.
+        // Round 2 R2-3: this call site is the MEMBER/customer path, hardcoded
+        // `SignInDoor::Member` -- `send_admin_sign_in_link` below is the admin door's own.
         self.email_guard
-            .authorize(&input.email)
+            .authorize(crate::email_authorization::SignInDoor::Member, &input.email)
+            .await
+            .map_err(|refusal| refusal.into_domain_error())?;
+        self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())
+    }
+
+    /// `identity.send_admin_sign_in_link` (#639 part C step 6-iii round 2 R2-3, ADR-20260906-023825):
+    /// the SAME provider call `send_email_magic_link` makes, at its OWN call site so the wall
+    /// attributes this send to the `admin-sign-in` contract's own counters
+    /// (ADR-20260818-101500: one send per door, hardcoded, never a door parameter).
+    /// `requestAdminSignInLink`'s ONLY caller.
+    async fn send_admin_sign_in_link(
+        &self,
+        input: IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        self.email_guard
+            .authorize(crate::email_authorization::SignInDoor::Admin, &input.email)
             .await
             .map_err(|refusal| refusal.into_domain_error())?;
         self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())

@@ -31,11 +31,11 @@ use std::sync::{Arc, Mutex};
 use application::auth_sessions::mem::MemAuthSessionStore;
 use application::generated::inboxes::ActorInbox;
 use application::generated::services::{
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendEmailMagicLinkInput,
-    IdentitySendPhoneOtpInput, IdentityService, IdentityStampCustomerClaimInput,
-    IdentityStampMemberClaimInput, IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput,
-    IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
-    ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendAdminSignInLinkInput,
+    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
+    IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
+    IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
+    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use application::ports::{Actor, EventStore};
 use application::queries::MemberIdentityRepository;
@@ -158,6 +158,10 @@ impl IdentityService for ScriptedIdentity {
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         self.sent.lock().expect("scripted identity").push(input.email.0);
         Ok(())
+    }
+    // Round 2 R2-3: the member door never reaches the ADMIN-only send call site.
+    async fn send_admin_sign_in_link(&self, _input: IdentitySendAdminSignInLinkInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        panic!("the member sign-in door never calls send_admin_sign_in_link")
     }
     async fn verify_email_token(
         &self,

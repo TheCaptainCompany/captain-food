@@ -99,6 +99,9 @@ impl IdentityService for ScriptedIdentity {
     async fn send_email_magic_link(&self, _i: IdentitySendEmailMagicLinkInput, _m: &ServiceCallMeta) -> Result<(), DomainError> {
         Ok(())
     }
+    async fn send_admin_sign_in_link(&self, _i: application::generated::services::IdentitySendAdminSignInLinkInput, _m: &ServiceCallMeta) -> Result<(), DomainError> {
+        Ok(())
+    }
     async fn verify_email_token(
         &self,
         input: IdentityVerifyEmailTokenInput,

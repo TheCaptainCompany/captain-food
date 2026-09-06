@@ -191,6 +191,14 @@ pub struct IdentitySendEmailMagicLinkInput {
     pub locale: Option<Locale>,
 }
 
+/// Input of `identity.send_admin_sign_in_link`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentitySendAdminSignInLinkInput {
+    pub email: EmailAddress,
+    pub locale: Option<Locale>,
+}
+
 /// Input of `identity.verify_email_token`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -244,6 +252,9 @@ pub trait IdentityService: Send + Sync {
     /// Email a magic link to verify/link this address, localized by the stored locale.
     /// Anticipated rejections: none declared.
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
+    /// Email a magic link for the ADMIN sign-in door (#639 part C step 6-iii round 2 R2-3, ADR-20260906-023825): the SAME provider call `send_email_magic_link` makes, addressed at its OWN call site so the shared send-abuse wall (`EmailSendAuthorizer`) can attribute this request to the `admin-sign-in` contract's own `admin_sign_in_link_requested_total`/`admin_sign_in_refused_total` counters rather than `member_sign_in_*`'s (ADR-20260818-101500: one send per door, hardcoded, selected at compile time -- never a door parameter on the shared method). `requestAdminSignInLink`'s ONLY caller; the member/customer magic-link paths keep calling `send_email_magic_link`, unchanged.
+    /// Anticipated rejections: none declared.
+    async fn send_admin_sign_in_link(&self, input: IdentitySendAdminSignInLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
     /// Verify a returned magic-link token server-side with the provider; reports WHICH email the token proves.
     /// Anticipated rejections: `errors.yaml#/InvalidVerificationToken`, `errors.yaml#/VerificationCodeExpired`.
     async fn verify_email_token(&self, input: IdentityVerifyEmailTokenInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyEmailTokenOutput, DomainError>;

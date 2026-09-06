@@ -84,6 +84,14 @@ impl IdentityService for AlwaysVerifiedAuth {
         Ok(())
     }
 
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: application::generated::services::IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
+
     async fn verify_email_token(
         &self,
         _input: IdentityVerifyEmailTokenInput,

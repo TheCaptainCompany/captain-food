@@ -38,10 +38,11 @@ use application::auth_sessions::mem::MemAuthSessionStore;
 use application::auth_sessions::AuthSessionStore;
 use application::generated::inboxes::ActorInbox;
 use application::generated::services::{
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendEmailMagicLinkInput,
-    IdentitySendPhoneOtpInput, IdentityService, IdentityStampCustomerClaimInput,
-    IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput,
-    IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendAdminSignInLinkInput,
+    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
+    IdentityStampCustomerClaimInput, IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput,
+    IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
+    ServiceCallMeta,
 };
 use application::ports::{Actor, EventStore};
 use application::queries::RiderIdentityRepository;
@@ -205,6 +206,13 @@ impl IdentityService for ScriptedIdentity {
     async fn send_email_magic_link(
         &self,
         _input: IdentitySendEmailMagicLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        panic!("the rider door never sends email")
+    }
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: IdentitySendAdminSignInLinkInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         panic!("the rider door never sends email")

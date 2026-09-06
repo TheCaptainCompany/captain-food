@@ -503,7 +503,17 @@ impl application::generated::services::IdentityService for WalkScriptedIdentity 
     }
     async fn send_email_magic_link(
         &self,
-        input: application::generated::services::IdentitySendEmailMagicLinkInput,
+        _input: application::generated::services::IdentitySendEmailMagicLinkInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never calls the MEMBER/customer magic-link send -- round 2 R2-3 gave requestAdminSignInLink its own send_admin_sign_in_link call site")
+    }
+    // Round 2 R2-3 (obs/reviewer): `requestAdminSignInLink` now calls its OWN `send_admin_sign_in_link`
+    // (the `EmailSendAuthorizer`'s `SignInDoor::Admin` arm), never the shared `send_email_magic_link`
+    // the member/customer paths keep using -- so admin traffic can never land on member's counters.
+    async fn send_admin_sign_in_link(
+        &self,
+        input: application::generated::services::IdentitySendAdminSignInLinkInput,
         _meta: &application::generated::services::ServiceCallMeta,
     ) -> Result<(), domain::shared::errors::DomainError> {
         self.sent.lock().expect("walk scripted identity").push(input.email.0);

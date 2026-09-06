@@ -159,11 +159,11 @@ use domain::generated::commands::{ConsumeCustomerCredit, GrantCustomerCredit};
 use domain::generated::events::{CustomerCreditConsumed, CustomerCreditGranted};
 
 use crate::generated::services::{
-    IdentityRefreshSessionInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
-    IdentityService, IdentityStampAdminClaimInput, IdentityStampCustomerClaimInput,
-    IdentityStampMemberClaimInput, IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput,
-    IdentityVerifyPhoneOtpInput, PaymentRequestInput, PaymentRequestOutput, PaymentService,
-    ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentitySendAdminSignInLinkInput, IdentitySendEmailMagicLinkInput,
+    IdentitySendPhoneOtpInput, IdentityService, IdentityStampAdminClaimInput,
+    IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
+    IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
+    PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use crate::queries::{CatalogReadRepository, MemberIdentityRepository, OfferView};
@@ -4561,8 +4561,11 @@ pub async fn request_admin_sign_in_link(
     if !run_admin_sign_in_door {
         return Err(reject("AdminSignInDoorClosed", json!({})));
     }
-    auth.send_email_magic_link(
-        IdentitySendEmailMagicLinkInput { email: cmd.email, locale: cmd.locale },
+    // Round 2 R2-3: its OWN call site (`identity.send_admin_sign_in_link`), never the shared
+    // member/customer `send_email_magic_link` -- so the send-abuse wall can attribute this
+    // request to the `admin-sign-in` contract's own counters (ADR-20260818-101500 precedent).
+    auth.send_admin_sign_in_link(
+        IdentitySendAdminSignInLinkInput { email: cmd.email, locale: cmd.locale },
         &ServiceCallMeta::new(actor.correlation_id),
     )
     .await

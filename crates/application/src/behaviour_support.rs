@@ -27,8 +27,8 @@ use domain::generated::scalars::*;
 use domain::shared::errors::DomainError;
 
 use crate::generated::services::{
-    DeliveryOfferJobInput, DeliveryService, IdentitySendEmailMagicLinkInput,
-    IdentityStampRiderClaimInput,
+    DeliveryOfferJobInput, DeliveryService, IdentitySendAdminSignInLinkInput,
+    IdentitySendEmailMagicLinkInput, IdentityStampRiderClaimInput,
     IdentitySendPhoneOtpInput, IdentityService, IdentityVerifyEmailTokenInput,
     IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
     PaymentRefundInput, PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
@@ -1511,6 +1511,13 @@ impl IdentityService for FakeIdentity {
     async fn send_email_magic_link(
         &self,
         _input: IdentitySendEmailMagicLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: IdentitySendAdminSignInLinkInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         Ok(())

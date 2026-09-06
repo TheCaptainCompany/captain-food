@@ -37,11 +37,11 @@ use std::sync::{Arc, Mutex};
 use application::auth_sessions::mem::MemAuthSessionStore;
 use application::generated::inboxes::ActorInbox;
 use application::generated::services::{
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendEmailMagicLinkInput,
-    IdentitySendPhoneOtpInput, IdentityService, IdentityStampCustomerClaimInput,
-    IdentityStampMemberClaimInput, IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput,
-    IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
-    ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendAdminSignInLinkInput,
+    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
+    IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
+    IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
+    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use application::ports::{Actor, EventStore};
 use application::queries::{MemberIdentityRepository, PlatformMemberRepository};
@@ -164,7 +164,12 @@ impl IdentityService for ScriptedIdentity {
     async fn stamp_member_claim(&self, input: IdentityStampMemberClaimInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         panic!("the admin door reached the MEMBER stamper for {} -- the stampers are selected at compile time and must never cross", input.auth_ref.0);
     }
-    async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+    async fn send_email_magic_link(&self, _input: IdentitySendEmailMagicLinkInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        panic!("the admin door never calls the shared member/customer send_email_magic_link -- round 2 R2-3 gave it its own send_admin_sign_in_link call site")
+    }
+    // Round 2 R2-3: `requestAdminSignInLink` -> `send_admin_sign_in_link` (its OWN call site into
+    // the `EmailSendAuthorizer`'s `SignInDoor::Admin` arm), never the shared member/customer port.
+    async fn send_admin_sign_in_link(&self, input: IdentitySendAdminSignInLinkInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         self.sent.lock().expect("scripted identity").push(input.email.0);
         Ok(())
     }
