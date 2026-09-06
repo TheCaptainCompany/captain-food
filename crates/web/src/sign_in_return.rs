@@ -215,10 +215,13 @@ mod tests {
         assert_eq!(resolve_return_target(host, Some("/route/does/not/exist")), "/");
     }
 
-    /// A valid captured `next` (a `requires_auth` screen of the SAME surface) is honored.
+    /// A valid captured `next` (a `requires_auth` screen of the SAME surface) is honored — asserted
+    /// against a NON-fallback destination (`/deliveries`, a real `requires_auth` screen of the
+    /// restaurant-backoffice surface, decoded once from `/%64eliveries`) so a mutant that makes
+    /// `resolve_return_target` always return `"/"` cannot pass this test byte-identically to the
+    /// fallback case above (ADR-20260906-024838 rule 1 / R2-1).
     #[test]
     fn a_valid_captured_next_is_honored() {
-        let host = "riders.captain.food";
-        assert_eq!(resolve_return_target(host, Some("/")), "/");
+        assert_eq!(resolve_return_target("restos.captain.food", Some("/%64eliveries")), "/deliveries");
     }
 }
