@@ -105,6 +105,28 @@
 #   answered; on a dispatch CARD, citing a decided record is exactly the behaviour being enforced.
 #   Refusing a card for citing its own controlling record would invert the gate.
 #
+# RULE 1 — THE RED-FIRST CARD STEP (ADR-20260906-024838, #910), riding INSIDE Lane D, after the
+# trail above has already resolved. Every RESOLVED cited record (the file the trail actually named
+# and that `resolve_record` found — never the live corpus at large) is grepped for a line naming a
+# test, a belt or a mutant (tokens: `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`).
+# A hit obliges a `Red-first:` section in the SAME dispatch: one entry per the shape
+#   Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
+# (the test path exists on disk or is marked `NEW`; `<record>:<line>` itself resolves to a file and
+# a line, and that line carries one of the tokens above) — or the explicit negative
+#   Red-first: none — <record> names no test
+# which is refused if ANY cited record actually has a hit (the negative speaks for the whole
+# trail, not per-record — a card citing two records, one with a hit, cannot say `none`). CHECKABLE,
+# same honesty limit as the rest of Lane D: presence, resolution, shape. NOT CHECKABLE: that the
+# named test is real, that it was EVER actually seen red, or that the extraction from the cited
+# record is COMPLETE — those stay a lens read and the independent reviewer's read, exactly like
+# Lane D's own limit above (beck, farley, holub). The term *red-first card step* and this entry
+# shape are declared ONCE, in the card template of docs/claude/sessions/workflow.md, and cited
+# from here rather than re-spelled. NAMED RESIDUAL, same shape as Lane D's own: the entry parser is
+# a fixed-separator string split (` — mutant: `, ` — expected red: `, the first ` — ` inside the
+# leading field, the first `::`), not a grammar — a field whose own text happens to repeat one of
+# those literal separators is misparsed rather than rejected outright, and no enumeration here may
+# be taken as proof that no such case exists.
+#
 # WHAT IT PROVES — AND WHAT IT DOES NOT. It verifies envelope/trail presence and shape and row
 # STATUS on the AskUserQuestion transport; it cannot prove a search happened, cannot classify a
 # prose question that omits the envelope (the honest hole: misclassifying a decision question as
@@ -176,6 +198,12 @@ DOCS_DIR="${REGISTER_CHECK_DOCS:-$ROOT/docs}"
 # -- the alternatives extract the SAME span, and `resolve_record`'s case order decides the kind.
 DISPATCH_RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|BRIEF-[0-9]{8}|journal-[0-9]{4}-W[0-9]{2}|DECISIONS|[A-Z][A-Z0-9-]{2,63}'
 
+# Rule 1 (ADR-20260906-024838 / #910): the tokens a cited record's line is grepped for, and the
+# marker introducing a card's proof that it was seen red first. Declared once alongside the entry
+# shape in docs/claude/sessions/workflow.md ("the red-first card step"), cited from here.
+REDFIRST_MARKER='Red-first:'
+REDFIRST_TOKENS='test|belt|mutant|red-first|red first|assert'
+
 payload="$(cat 2>/dev/null || true)"
 session="$(printf '%s' "$payload" | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
 
@@ -241,8 +269,11 @@ fi
 # `ADR-2026` from matching the 54 prefixless files, a token the grammar cannot produce, so it is
 # defence in depth kept for parity with the Rust side rather than a live guard. The stamp era must
 # try BOTH the prefixed and the prefixless filename; that part is load-bearing.
-resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id
+resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id; sets
+                    # RESOLVED_PATH to it on success (Rule 1, #910 -- the trail loop below only
+                    # needed 0/1, the red-first check also needs WHICH file to grep).
   _id="$1"
+  RESOLVED_PATH=""
   case "$_id" in
     ADR-*)
       _rest="${_id#ADR-}"
@@ -270,7 +301,7 @@ resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries 
   # `PROP-20260809-003000--D1..D7`, which enter through the `PROP-*` arm, glob no proposal FILE
   # (the `--D1` suffix is not part of any filename) and would otherwise be refused; and any future
   # row whose key begins with another kind's prefix.
-  for _p in "$@" "$DOCS_DIR/decisions/$_id.yaml"; do [ -e "$_p" ] && return 0; done
+  for _p in "$@" "$DOCS_DIR/decisions/$_id.yaml"; do [ -e "$_p" ] && { RESOLVED_PATH="$_p"; return 0; }; done
   return 1
 }
 
@@ -378,8 +409,128 @@ $(printf '%s' "$payload" | grep -oE "${MARKER}[^\"\\\\]*")
 EOF
 
   if [ "$trail_ok" = yes ]; then
-    note ALLOW "dispatch-trail-ok" "-"
-    exit 0
+    # ── Rule 1: the red-first card step (ADR-20260906-024838 / #910) ──────────────────────────
+    # Gather every RESOLVED record actually cited across the WHOLE trail -- not just the first
+    # match the loop above stopped at, because a card can cite several and each resolved one is
+    # in scope -- then grep each CITED FILE (never the live corpus) for a test/belt/mutant line.
+    rf_files=""
+    while IFS= read -r dline; do
+      [ -n "$dline" ] || continue
+      printf '%s' "$dline" | grep -qE "$NO_RECORD" && continue
+      for did in $(printf '%s' "$dline" | grep -oE "$DISPATCH_RECORD_ID" || true); do
+        resolve_record "$did" || continue
+        case " $rf_files " in
+          *" $RESOLVED_PATH "*) : ;;
+          *) rf_files="${rf_files:+$rf_files }$RESOLVED_PATH" ;;
+        esac
+      done
+    done <<EOF
+$(printf '%s' "$payload" | grep -oE "${MARKER}[^\"\\\\]*")
+EOF
+
+    rf_hit_count=0
+    for rf in $rf_files; do
+      n="$(grep -ciE "$REDFIRST_TOKENS" "$rf" 2>/dev/null || true)"
+      rf_hit_count=$((rf_hit_count + ${n:-0}))
+    done
+
+    rf_ok=yes
+    rf_reason=""
+    rf_msg=""
+    if [ "$rf_hit_count" -gt 0 ]; then
+      rf_lines="$(printf '%s' "$payload" | grep -oE "${REDFIRST_MARKER}[^\"\\\\]*" || true)"
+      if [ -z "$rf_lines" ]; then
+        rf_ok=no
+        rf_reason="dispatch-redfirst-missing"
+        rf_msg="register-check: a cited record names a test ($rf_hit_count matching line(s) across the cited record file(s)) and this dispatch carries no \`Red-first:\` section. Add one entry per hit, or the explicit negative if none of the hits actually name a test."
+      else
+        rf_saw_none=no
+        rf_entry_ok=no
+        while IFS= read -r rline; do
+          [ -n "$rline" ] || continue
+          entry="$(printf '%s' "$rline" | sed -E "s/^${REDFIRST_MARKER}[[:space:]]*//")"
+          case "$entry" in
+            [Nn]one*) rf_saw_none=yes; continue ;;
+          esac
+          # Fixed-separator parse (named residual, header comment): split at the FIRST occurrence
+          # of each literal separator, in order. A field that happens to repeat one of these
+          # literal strings is misparsed rather than rejected -- stated, not hidden.
+          case "$entry" in
+            *' — mutant: '*' — expected red: '*)
+              ab="${entry%% — mutant: *}"
+              rest="${entry#* — mutant: }"
+              mutant_text="${rest%% — expected red: *}"
+              expected_text="${rest#* — expected red: }"
+              ;;
+            *) ab=""; mutant_text=""; expected_text="" ;;
+          esac
+          [ -z "$mutant_text" ] && continue
+          [ -z "$expected_text" ] && continue
+          case "$ab" in
+            *' — '*) : ;;
+            *) continue ;;
+          esac
+          testref="${ab%% — *}"
+          recline="${ab#* — }"
+          case "$testref" in
+            *'::'*) : ;;
+            *) continue ;;
+          esac
+          tpath="${testref%%::*}"
+          tname="${testref#*::}"
+          [ -z "$tpath" ] && continue
+          [ -z "$tname" ] && continue
+          if [ "$tpath" != NEW ] && [ ! -e "$ROOT/$tpath" ] && [ ! -e "$tpath" ]; then continue; fi
+          rline_no="${recline##*:}"
+          rrecord="${recline%:*}"
+          [ -z "$rrecord" ] && continue
+          printf '%s' "$rline_no" | grep -qE '^[0-9]+$' || continue
+          [ "$rline_no" -ge 1 ] || continue
+          resolve_record "$rrecord" || continue
+          # No separate line-count/range check: `sed -n Np` on a line past EOF prints nothing, and
+          # an empty string cannot match the token regex either -- so "the line exists AND carries
+          # a token" is exactly what this one grep already proves, with no `wc -l` needed. Fewer
+          # moving parts than counting lines first matters here: `wc -l` counts NEWLINE BYTES, so a
+          # file whose last line lacks a trailing newline would undercount by one and reject that
+          # file's own final line even when `sed` prints it correctly (found while fixing #910's
+          # own corpus test, tools/codegen-rs/src/tests.rs).
+          sed -n "${rline_no}p" "$RESOLVED_PATH" | grep -qiE "$REDFIRST_TOKENS" || continue
+          rf_entry_ok=yes
+        done <<EOF2
+$rf_lines
+EOF2
+        if [ "$rf_saw_none" = yes ]; then
+          rf_ok=no
+          rf_reason="dispatch-redfirst-false-negative"
+          rf_msg="register-check: the trail says \`Red-first: none\`, but the cited record(s) DO name a test ($rf_hit_count matching line(s)) -- the explicit negative claims the opposite of what the citation shows. Name the actual test/belt/mutant lines instead."
+        elif [ "$rf_entry_ok" != yes ]; then
+          rf_ok=no
+          rf_reason="dispatch-redfirst-shape"
+          rf_msg="register-check: this dispatch carries a \`Red-first:\` section but no entry matches the required shape \`<test path>::<name> -- <record>:<line> -- mutant: <planted change> -- expected red: <message fragment>\` (the test path exists or is \`NEW\`; \`<record>:<line>\` resolves to a file and line, and that line carries a test/belt/mutant token)."
+        fi
+      fi
+    fi
+
+    if [ "$rf_ok" = yes ]; then
+      note ALLOW "dispatch-trail-ok" "-"
+      exit 0
+    fi
+    block "$rf_reason" "$rf_msg"
+    note BLOCK "$reasons" "-"
+    printf '%s' "$block_msgs" >&2
+    cat >&2 <<'RFEOF'
+
+WHY THIS FIRED (Rule 1, ADR-20260906-024838 / #910). A dispatch that cites a record naming a test,
+a belt or a mutant carries a `Red-first:` entry proving the change was seen failing first:
+
+  Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
+  Red-first: none — <record> names no test
+
+This checks presence, resolution and shape ONLY -- never that the test is real, that it was ever
+actually red, or that the extraction is complete; those stay a lens read and a reviewer read.
+Declared once: docs/claude/sessions/workflow.md, "the red-first card step".
+RFEOF
+    exit 2
   fi
 
   if [ "$saw_marker" = no ]; then

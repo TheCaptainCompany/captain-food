@@ -63,7 +63,8 @@ What the team records from them, consulted for completeness (block below), never
    cannot check that a test is real, that it was ever red, or that the extraction is complete — those stay a lens read
    and a reviewer read, and the hook's header says so (beck, farley, holub). It is proven red-first in
    `register-check-selftest.sh` before it counts (beck). The term *red-first card step* is declared ONCE, in the card
-   template of `docs/claude/sessions/workflow.md`, and cited from the hook and from this ADR (evans). Named instances
+   template of [`docs/claude/sessions/workflow.md`](../claude/sessions/workflow.md#the-red-first-card-step--canonical-format-declared-once-here),
+   and cited from the hook and from this ADR (evans). Named instances
    the lenses owe to cards in their areas: the rebuild-recipe TWIN — TRUNCATE-replay **and** mid-drain resolution, since
    the first passes under either recipe (dba); per-control renderer-arm coverage where a dead control is the expected
    red (ux); `obs-metric-no-emitter` and the gauge-liveness emission-order test (observability); a per-role generated-SDL
@@ -125,9 +126,12 @@ What the team records from them, consulted for completeness (block below), never
 - Non-additive GraphQL changes stay on the lower tier with no additivity validator yet (graphql-architect).
 
 ### Follow-up actions
-- [ ] [#910](https://github.com/TheCaptainCompany/captain-food/issues/910): Lane D `Red-first:` rule + selftest cases seen red first; the
+- [x] [#910](https://github.com/TheCaptainCompany/captain-food/issues/910): Lane D `Red-first:` rule + selftest cases seen red first; the
       card-template declaration in `docs/claude/sessions/workflow.md`; the mandatory hand-back line in
-      `.claude/agents/executor.md` and the reviewer checklist; the loader key inventory under drift (or its own issue).
+      `.claude/agents/executor.md` and the reviewer checklist ([PR #913](https://github.com/TheCaptainCompany/captain-food/pull/913)).
+- [ ] The loader key inventory under drift (farley/young), NOT part of #910: a GENERATED inventory of
+      the loader's declared key set under the existing drift gate, so an invented spec key is unspellable
+      without a regenerate diff the reviewer sees — left open, own issue or a later card.
 - [ ] Architect rows: the per-role generated-SDL additivity rule (graphql-architect); per-control renderer-arm
       coverage as a validator or renderer test (ux); cost per merged PR by tier, meter and antecedents (business).
 - [ ] The journal keeps the per-PR wide row from #907 onward; the next window line names the fraction with its PR list.

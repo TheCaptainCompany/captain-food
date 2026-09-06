@@ -11306,6 +11306,16 @@ mod record_resolution {
     /// tracked in #818 with the other unpinned alternatives; this test's corpus is the four kinds
     /// the round-1 review specified. It is therefore a completeness claim about FOUR KINDS, not
     /// about every citable record.
+    ///
+    /// SINCE #910 (ADR-20260906-024838 Rule 1), a bare citation is no longer sufficient BY ITSELF:
+    /// a record that itself names a test/belt/mutant obliges a `Red-first:` entry too, and most of
+    /// this corpus does (295 of 447 on the run that caught this). So this test's payload is no
+    /// longer just the `Register check:` line -- it also supplies a real `Red-first:` entry pinned
+    /// to the record's OWN first hit line when one exists (found in Rust, by the SAME token set
+    /// Rule 1 greps for), proving the SAME two things Lane D itself proves for that citation:
+    /// resolution (unchanged) AND, now, that Rule 1's requirement is satisfiable for every record
+    /// that trips it -- a record this test could not satisfy would be a record no real coordinator
+    /// could cite either, which is exactly the class of bug this test exists to catch.
     #[test]
     fn every_record_in_the_corpus_is_citable_through_lane_d() {
         use std::io::Write;
@@ -11374,12 +11384,72 @@ mod record_resolution {
         // A corpus that silently became empty would make every assertion below vacuous.
         assert!(records.len() > 300, "only {} records enumerated — the corpus walk is broken, and an              empty corpus passes this test vacuously", records.len());
 
+        // Rule 1's own token set (ADR-20260906-024838 / #910), mirrored here for the SAME reason
+        // `record_resolves` mirrors the shell resolver above it: a second implementation that
+        // drifted would silently stop proving what this test claims to prove. Returns the 1-based
+        // line number of a file's OWN first hit, if any.
+        fn first_redfirst_hit_line(path: &std::path::Path) -> Option<usize> {
+            let tokens = ["test", "belt", "mutant", "red-first", "red first", "assert"];
+            let content = std::fs::read_to_string(path).ok()?;
+            for (i, line) in content.lines().enumerate() {
+                let lower = line.to_lowercase();
+                if tokens.iter().any(|t| lower.contains(t)) {
+                    return Some(i + 1);
+                }
+            }
+            None
+        }
+
+        // The CANONICAL file `resolve_record` would pick for `id` -- NOT necessarily the `path`
+        // this loop happens to be iterating. Needed because `BRIEF-` ids are NOT unique per file
+        // (the shell tries docs/legal/ THEN docs/proposals/, and a stamp can legitimately name
+        // MULTIPLE files in the same directory, e.g. two proposals sharing `BRIEF-20260808`): the
+        // shell always resolves such an id to ONE specific file, so the hit line pinned in the
+        // `Red-first:` entry must come from THAT file, or the citation is internally inconsistent
+        // (found running this fix against the real corpus, not designed in advance).
+        fn first_glob_match(dir: &std::path::Path, prefix: &str) -> Option<std::path::PathBuf> {
+            let mut m: Vec<std::path::PathBuf> = std::fs::read_dir(dir).ok()?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.file_name().and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(prefix) && n.ends_with(".md")))
+                .collect();
+            m.sort();
+            m.into_iter().next()
+        }
+        fn canonical_resolved_path(root: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
+            if let Some(rest) = id.strip_prefix("ADR-") {
+                if rest.len() == 4 && rest.chars().all(|c| c.is_ascii_digit()) {
+                    return first_glob_match(&root.join("docs/adr"), &format!("{}-", rest));
+                }
+                return first_glob_match(&root.join("docs/adr"), id)
+                    .or_else(|| first_glob_match(&root.join("docs/adr"), rest));
+            }
+            if id.starts_with("PROP-") {
+                return first_glob_match(&root.join("docs/proposals"), id);
+            }
+            if id.starts_with("BRIEF-") {
+                return first_glob_match(&root.join("docs/legal"), id)
+                    .or_else(|| first_glob_match(&root.join("docs/proposals"), id));
+            }
+            let p = root.join("docs/decisions").join(format!("{}.yaml", id));
+            if p.exists() { return Some(p); }
+            None
+        }
+
         let mut refused: Vec<String> = Vec::new();
         for (id, path) in &records {
+            let hit_path = canonical_resolved_path(&root, id).unwrap_or_else(|| root.join(path));
+            let redfirst = match first_redfirst_hit_line(&hit_path) {
+                Some(line) => format!(
+                    "\\nRed-first: NEW::corpus_redfirst_check — {}:{} — mutant: delete the corpus's own text — expected red: register-check corpus test refuses",
+                    id, line),
+                None => String::new(),
+            };
             let payload = format!(
                 "{{\"tool_name\":\"Agent\",\"tool_input\":{{\"subagent_type\":\"executor\",\
-                 \"prompt\":\"DISPATCH. Register check: {} (2026-01-01, open) -- covers X, silent on Y\"}}}}",
-                id);
+                 \"prompt\":\"DISPATCH. Register check: {} (2026-01-01, open) -- covers X, silent on Y{}\"}}}}",
+                id, redfirst);
             let mut child = std::process::Command::new("bash")
                 .arg(&hook)
                 .env("REGISTER_CHECK_LOG", "/dev/null")
