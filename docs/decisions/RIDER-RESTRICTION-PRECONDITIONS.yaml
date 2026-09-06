@@ -35,4 +35,4 @@ note: 'The key is consumed at the WRITE door only: restrictRider OFF returns the
   field name `amendment_20260905` outside the closed decision-row schema, tripping
   `decision-field-unknown`, and as a SECOND `note:` key in the same mapping, which YAML silently
   resolves to only the LAST one -- the amendment above was merged into this single `note:` field,
-  content unchanged, to restore a green `make validate`.)'
+  content unchanged, to restore a green `make validate`.) Precondition (1) is DISCHARGED ON THE CODE SIDE 2026-09-06 by 6-v (PR #907) + 6-iii (PR #909): an ADMIN with a recorded platform grant can sign in on system.captain.food and reach /system/riders. It stays a FLIP precondition -- in production it holds only once RUN_PLATFORM_ACCESS_GRANT and RUN_ADMIN_SIGN_IN_DOOR are flipped, the bootstrap has run, and the founder''s external items (DNS SPF/DKIM/DMARC, EMAIL_QUOTA_KEY_HMAC_SECRET, PLATFORM_BOOTSTRAP_ADMIN_SUBJECT) are provisioned (all "not yet" on 2026-09-06). The row stays open on (2)-(4).'

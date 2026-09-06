@@ -299,6 +299,16 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   creating `captain-food/cad2-wt` — a worktree nested in its own repo, showing up as an untracked
   directory one `git add -A` away from being committed. Verify with `git worktree list` after adding,
   and remove with `git worktree remove --force` rather than `rm -rf`.
+- **ONE session's `make test-crates` wipes itself the same way once `crates/server/tests/*.rs` has enough
+  binaries** (2026-09-06, #909): `cargo test --workspace` runs test BINARIES concurrently, and each DB-gated
+  binary's first test runs the same database-wide `DROP SCHEMA public CASCADE`. The signature is a MASS
+  failure across binaries the branch never touched — `actor_runtime` concurrency/discipline/mailbox suites,
+  `rls_matrix`, `staging_upsert` — all dying on `42P01 relation "inbound_messages" does not exist` or
+  `panicked at .../common.rs:149`. That is not a regression; it is the reset racing another binary's
+  migration. Re-run ONCE with binaries serialized: `make test-crates` with `-j 1` on the cargo test
+  invocation (229/229 on #909 after 134+ failures the first time). The cost of not knowing this was one
+  wasted nine-minute run plus a manual `psql` diagnostic pass. The real fix is per-binary databases or a
+  test-scoped reset — an architect row, not a card item.
 - **Two sessions running `make test-crates` on ONE Postgres wipe each other**: the harness resets with
   `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` (`crates/infrastructure/tests/main/common.rs`),
   which is database-wide, not test-scoped. So when a neighbour's server is already up, do not reuse
@@ -330,6 +340,15 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   succeeded. A clean pop would have silently applied held work into an unrelated branch AND deleted
   it from the stack, with no signal in either direction. **Check `git stash list` before any pop, or
   simply do not stash**: a clean tree needs no stash, and a dirty one is better committed.
+- **An empty or stale task transcript file is NOT evidence that a subagent died** (2026-09-06, #909 round 2):
+  after a container restart the coordinator judged the resumed executor dead from a 123-byte transcript file
+  untouched for thirty minutes with no `cargo`/`make` process visible, and dispatched a duplicate on the same
+  branch — while the original was alive in its editing phase and handed back thirty minutes later. The
+  duplicate was stopped before it wrote anything. Evidence of death is the task's OWN notification (the
+  harness sends one when an agent stops), or a process check PLUS `git log origin/<branch>` PLUS a second
+  consecutive silent check-in — never file size. What made the restart survivable at all: one commit per
+  card item, so the killed run's finished work was on the branch for its successor to push.
+
 
 ## The session disk allowance dies mid-run, silently, and subagent scratch is the hog (2026-08-28)
 
