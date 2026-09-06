@@ -607,7 +607,7 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let authority = ctx.data::<std::sync::Arc<dyn application::ports::AsOfPriceAuthority>>()?;
-        let door = crate::graphql::cart_read::FoldPricedReadOpen::from_flag(ctx.data::<crate::graphql::schema::RunFoldPricedCartRead>()?.0);
+        let door = crate::graphql::cart_read::FoldPricedReadOpen::from_flag(*ctx.data::<crate::graphql::schema::RunFoldPricedCartRead>()?);
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
         // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
         // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
@@ -642,7 +642,7 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let authority = ctx.data::<std::sync::Arc<dyn application::ports::AsOfPriceAuthority>>()?;
-        let door = crate::graphql::cart_read::FoldPricedReadOpen::from_flag(ctx.data::<crate::graphql::schema::RunFoldPricedCartRead>()?.0);
+        let door = crate::graphql::cart_read::FoldPricedReadOpen::from_flag(*ctx.data::<crate::graphql::schema::RunFoldPricedCartRead>()?);
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
         // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
         // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly

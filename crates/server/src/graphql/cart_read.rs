@@ -107,22 +107,24 @@ pub fn readable_by(row: &CartRow, scope: &ReadScope) -> bool {
 }
 
 /// The fold-priced door's OPEN state — a WITNESS, not a `bool` (ADR-20260906-192007 D-L). The only
-/// constructor is [`FoldPricedReadOpen::from_flag`]; a caller with `flag = false` gets `None`, and
+/// constructor is [`FoldPricedReadOpen::from_flag`]; a caller passing a closed `RunFoldPricedCartRead` gets `None`, and
 /// there is no other way to produce `Some`. [`priced_list`] (the `carts` fan-out) never calls this
 /// constructor and never receives a value of this type — its own signature has nowhere to put one
-/// — so the multi-restaurant list cannot mint N unbounded head folds in one request regardless of
-/// the door's runtime position, closed by the type system rather than by a convention the fan-out
-/// could accidentally violate later.
+/// — so the multi-restaurant list cannot perform N unbounded coordinate-bearing reads in one
+/// request regardless of the door's runtime position, closed by the type system rather than by a
+/// convention the fan-out could accidentally violate later.
 #[derive(Debug, Clone, Copy)]
 pub struct FoldPricedReadOpen(());
 
 impl FoldPricedReadOpen {
-    /// `Some` when the door's own config flag is open; `None` otherwise. The two single-cart-read
-    /// entry points (`cart`, `current`) are the only emitted call sites for this constructor —
-    /// `carts` reads no door flag at all (D-L: the `ctx.data::<RunFoldPricedCartRead>()` call the
-    /// fan-out used to make is dead code once it calls [`priced_list`] instead, and is removed).
-    pub fn from_flag(flag: bool) -> Option<Self> {
-        flag.then_some(Self(()))
+    /// `Some` when the door's own config flag is open; `None` otherwise. Takes the config newtype
+    /// itself (`RunFoldPricedCartRead`), never a bare `bool`, so a caller cannot pass some OTHER
+    /// boolean context value in its place. The two single-cart-read entry points (`cart`,
+    /// `current`) are the only emitted call sites for this constructor — `carts` reads no door flag
+    /// at all (D-L: the `ctx.data::<RunFoldPricedCartRead>()` call the fan-out used to make is dead
+    /// code once it calls [`priced_list`] instead, and is removed).
+    pub(crate) fn from_flag(cfg: super::schema::RunFoldPricedCartRead) -> Option<Self> {
+        cfg.0.then_some(Self(()))
     }
 }
 
@@ -203,8 +205,9 @@ pub async fn priced(
                         serde_json::json!({ "cartId": row.cart_id, "offerId": lines[0].offer_id }),
                     ));
                 };
-                // THE mint (D2): one unbounded range read to head, returning prices carrying their
-                // own coordinate (the tuple collapse, ADR-20260906-192007 D-L). `Err` here
+                // THE coordinate-bearing read (D2): one unbounded range read to head, returning
+                // prices carrying their own coordinate (the tuple collapse, ADR-20260906-192007
+                // D-L). `Err` here
                 // (coordinate absent, stream unreadable) falls straight through to the SAME
                 // `map_err` below as any other pricing failure — technical_error, never a
                 // HEAD/projection fallback (D4, every lens's STOP).
@@ -254,9 +257,9 @@ pub async fn priced(
             // owns the impure survivors; the degenerate shape ships — same as checkout).
             uber_comparison: None,
             // ADR-20260906-192007 D-A/D-J: the signed quote. `None` here for now -- the
-            // `QuoteMinter` this field is meant to carry does not exist until a later phase of
-            // this same PR (D-H); every read answers null in the meantime, one of `CartQuote`'s
-            // three documented null causes (scalars.yaml#/CartQuote).
+            // `QuoteMinter` this field is meant to carry does not exist until the quote is
+            // verified server-side (D-H); every read answers null in the meantime, one of
+            // `CartQuote`'s three documented null causes (scalars.yaml#/CartQuote).
             quote: None,
             updated_at: row.updated_at,
             restaurant,
@@ -316,8 +319,8 @@ fn unpriced_empty(row: &CartRow, restaurant: Restaurant) -> Cart {
         },
         breakdown: None,
         uber_comparison: None,
-        // ADR-20260906-192007 D-A/D-J: no lines, no mint -- null, same as every other arm before
-        // `QuoteMinter` lands (D-H, a later phase of this same PR).
+        // ADR-20260906-192007 D-A/D-J: no lines, no coordinate-bearing read -- null, same as every
+        // other arm before `QuoteMinter` lands (D-H, once the quote is verified server-side).
         quote: None,
         updated_at: row.updated_at,
         restaurant,

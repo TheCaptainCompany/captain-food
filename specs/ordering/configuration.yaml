@@ -277,8 +277,8 @@ keys:
       signing key is a forgeable price (dba). Unset in development/test, a fixed `DEV_ONLY` value is used
       (`application::email_guard::DEV_ONLY_HMAC_KEY`'s own precedent), and the write door REFUSES
       TO OPEN AT BOOT when the resolved key is that dev value and the door is open in
-      staging/production -- never a per-request check. `application::quote::SigningKey` (a later
-      phase of this PR) wraps this value with a module-private constructor (the `ActingRole` shape,
+      staging/production -- never a per-request check. `application::quote::SigningKey` (landing
+      once the quote is verified server-side) wraps this value with a module-private constructor (the `ActingRole` shape,
       ADR-20260803-234035 level 4) so the dev value is uncallable from the production construction
       path. `QuoteMinter` holds exactly ONE current key from this value (never the plural set
       below) -- a minter cannot accidentally verify. Key CUSTODY is admin-gated, the founder's

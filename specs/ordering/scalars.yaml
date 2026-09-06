@@ -15,8 +15,10 @@ CartQuote:
   pattern: '^[A-Za-z0-9_-]+$'
   maxLength: 4096  # UNVERIFIED: no antecedent sizes this bound against an actual encoded-token length
   description: >
-    An OPAQUE, server-signed token binding a cart's priced read to the exact catalog coordinate
-    that produced it (PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-A/D-J) — base64url, no
+    An OPAQUE, server-signed token binding a cart's PRICES — never its display labels, which the
+    read always resolves fresh at HEAD (`application::pricing::price_cart_at`'s own split: "HEAD's
+    business, never this capability's") — to the exact catalog coordinate that produced them
+    (PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-A/D-J) — base64url, no
     internal structure a client may parse or construct. Returned by `cart.current`/`cart` on the
     SAME read that painted the total the customer sees; `null` on that same read means one of
     three things, never distinguished on the wire (D-D's cause-neutral posture, restated at the
