@@ -8,7 +8,7 @@
 //! returns) so `cargo test` stays green offline.
 
 use application::queries::CatalogReadRepository as _;
-use domain::generated::scalars::{CatalogItemAvailability, OfferId, RestaurantId, StockStatus};
+use domain::generated::scalars::{CatalogId, CatalogItemAvailability, OfferId, RestaurantId, StockStatus};
 use infrastructure::{PgCatalogRepository, ProjectionWorker};
 use sqlx::PgPool;
 
@@ -47,7 +47,7 @@ async fn catalog_event_folds_into_the_read_model() {
     let product_id = uuid::Uuid::new_v4();
     let offer_id = uuid::Uuid::new_v4();
     let option_list_id = uuid::Uuid::new_v4();
-    let stream = format!("Catalog-{catalog_id}");
+    let stream = domain::catalog::stream(CatalogId(catalog_id));
 
     // The creation fact, camelCase payload matching domain::generated::events::CatalogCreated.
     append_event(

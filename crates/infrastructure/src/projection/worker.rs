@@ -284,7 +284,8 @@ impl ReadModelProjector {
                 }
             }
             Self::Catalog => {
-                let id = CatalogId(aggregate_uuid_of(env, "Catalog-", "catalogId")?);
+                let prefix = format!("{}-", domain::catalog::CATEGORY);
+                let id = CatalogId(aggregate_uuid_of(env, &prefix, "catalogId")?);
                 let state = catalog_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_catalog(&CatalogProjector, state, env) {
                     catalog_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
