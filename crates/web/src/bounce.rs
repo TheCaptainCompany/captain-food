@@ -79,10 +79,13 @@ fn percent_encode_next(input: &str) -> String {
     out
 }
 
-/// Where one refused GraphQL call bounces `screen`'s visitor, or `None` to stay put. The ONLY
-/// entry point either call site (the hydrate loop's per-read outcome, `interact.rs`'s pre-
-/// acceptance mutation failure) may use to decide a bounce — see the module docs for the two legs.
-pub fn bounce_after(err: &TransportError, screen: &Screen) -> Option<&'static str> {
+/// Where one refused GraphQL call bounces `screen`'s visitor, or `None` to stay put. Private
+/// (#904 R2-4, compiler-first): [`bounce_target`] is the ONE public surface both call sites (the
+/// hydrate loop's per-read outcome, `interact.rs`'s pre-acceptance mutation failure) use — routing
+/// through this function directly, bypassing `bounce_target`'s `?next=` composition, is
+/// unspellable outside this module now, not merely discouraged. See the module docs for the two
+/// legs.
+fn bounce_after(err: &TransportError, screen: &Screen) -> Option<&'static str> {
     match err {
         TransportError::Errors { extensions, .. } => {
             if extensions.iter().any(|e| e.reason.as_deref() == Some(shared_types::RIDER_RESTRICTED)) {
