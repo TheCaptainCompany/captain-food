@@ -391,7 +391,13 @@ directory as "full (0MB free)", which reads like a per-session tmpfs quota but I
 `echo`/`pwd` twelve times and handed back a fully verified, UNCOMMITTED round: the recovery was one
 `rm -rf target/debug/incremental target/debug/build > /dev/null 2>&1` from the coordinator, after
 which `git commit` worked; the child process RUNS under this condition, only its output is lost —
-so run the cleanup, never a probe); (2b) on a confirmation round, COMMIT the verified diff BEFORE
+so run the cleanup, never a probe); (2a) the hog inside `target/debug/deps` is STALE hash-suffixed test/bin
+executables — the #933 phase-B executor found five hashes for the SAME test name and 22-27G in `deps`; the
+recipe that freed 8-15G each time while keeping the build warm is
+`find target/debug/deps -maxdepth 1 -type f ! -name '*.rlib' ! -name '*.rmeta' ! -name '*.d' -size +1M -delete`
+plus `rm -rf target/debug/incremental` — run it BEFORE any `cargo build -p server --tests`/`--workspace`, and
+build ONE `--test <name>` at a time, which avoids the spike entirely (cost that earned it: two aborted
+builds and ~10 min per occurrence); (2b) on a confirmation round, COMMIT the verified diff BEFORE
 starting the whole-workspace gate run — the compile is what fills the disk, and the last commit is
 what survives (rounds 2/3 push red+green together, so a local commit costs nothing); (3) a finished worktree's `target/` is reclaimable by
 the COORDINATOR only — executors must report, not delete, other agents' trees. **Corrected 2026-08-31 (#764 records dispatch)** — this paragraph used to end *"executors cannot

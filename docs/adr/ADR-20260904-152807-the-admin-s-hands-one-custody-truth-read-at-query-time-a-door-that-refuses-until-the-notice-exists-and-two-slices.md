@@ -263,3 +263,12 @@ Briefing before any code; **no lens output is legal advice or clearance**.
 §11 — *does abrupt loss of the working channel before the statement of reasons is displayed
 constitute the decision taking effect without its accompanying statement under Art. 11(3)?* — not
 answered here, and no lens output above is legal advice or clearance for it either.
+
+**Addendum (step 5's client leg, 2026-09-06):** the counsel packet gains a tenth question, posed by
+[ADR-20260906-191836](ADR-20260906-191836-the-client-leg-of-the-restriction-close-the-pair-selects-restricted-an-unknown-4403-is-terminal-and-the-route-is-the-screens-own.md)'s
+Consequences — *where the platform's own client navigates the worker to the statement screen at the
+instant of the decision, and that screen can transiently display the restriction without its
+ground or dates, has the statement been provided under Art. 11(3) at that moment, or only when the
+ground and effectiveAt render? And is a client-side navigation a durable medium at all, or does the
+durable-medium duty fall entirely on #874's SMS?* — not answered here, and no lens output above is
+legal advice or clearance for it either.

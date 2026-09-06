@@ -84,6 +84,18 @@ client dev-dependency PROP §7.1 named adds no crate family. The Leptos client
    holding food keeps `delivery` and `handBackDelivery` (business, holub, legal). **Residual, named**:
    a reconnect inside the `Rider` projection's one-tick lag re-resolves ACTIVE for that tick (vernon) —
    bounded, and the new connection's watcher then covers any later fact; recorded, not fixed here.
+
+   **Amended 2026-09-06 by [ADR-20260906-191836](ADR-20260906-191836-the-client-leg-of-the-restriction-close-the-pair-selects-restricted-an-unknown-4403-is-terminal-and-the-route-is-the-screens-own.md):**
+   the narrowing holds only where a route is declared — on `jobs`/`job_detail` the 4403-then-reconnect
+   instance disappears entirely. On the `/restricted` screen itself (no declared route) this residual
+   is now reached DETERMINISTICALLY at `backoff::delay(1)` = 1s on every close, not merely possibly: a
+   reconnect inside the lag is not one stale tick but a permanent ACTIVE grant for that connection
+   (this §'s no-next-envelope argument, unchanged). "The capability does not go stale" is true of THIS
+   client (every mutation on the carve set re-guards over a fresh HTTP read) and not of the guard
+   surface generally; the remainder is the server's position-fenced resolve, filed on
+   [#931 "#929 follow-ups (step 5 client leg): the position-fenced standing resolve in
+   connection_init, /restricted re-read on reconnect, client-side close observability before the
+   flip, bundle skew, LookupFailed retry amplification"](https://github.com/TheCaptainCompany/captain-food/issues/931).
 6. **Behind a gate, default OFF** — `RUN_RIDER_RESTRICTION_SOCKET_CLOSE` (a generated config key, the
    `RUN_EVENT_PUSH` shape), flipped by a separate one-line ADR after a smoke. The split: farley (the gate
    buys deploy ≠ release — choose the flip hour, never Friday 19:40; a key flip and an image revert both
@@ -125,6 +137,12 @@ client dev-dependency PROP §7.1 named adds no crate family. The Leptos client
     graphql-architect). Until that lands the rider learns on the next tap (the HTTP refusal → the 4-ii
     `/restricted` bounce), never "pushed"; this record says so rather than implying it. Rider screens
     declare no `subscription:` today, so 7a is rider-invisible and survivable (ux).
+
+    **Amended 2026-09-06 by [ADR-20260906-191836](ADR-20260906-191836-the-client-leg-of-the-restriction-close-the-pair-selects-restricted-an-unknown-4403-is-terminal-and-the-route-is-the-screens-own.md):**
+    gap closed by [PR #929](https://github.com/TheCaptainCompany/captain-food/pull/929). The record
+    inherits only what the unit tests assert: the close handler routes to the screen's declared
+    restricted route instead of reconnecting; holds at backoff otherwise — never "the rider is now
+    told on the close" (§11 stands unamended on that point).
 11. **What this does not claim.** The close does not satisfy Art. 11(3): a dead socket is a
     notification without reasons; the statement lives on `/restricted` (legal — VERIFY-FIRST, PWD
     2024/2831 transposition pending). #874 stays a blocker. No production restriction can fire
@@ -132,6 +150,12 @@ client dev-dependency PROP §7.1 named adds no crate family. The Leptos client
     *does abrupt loss of the working channel before the statement of reasons is displayed constitute the
     decision taking effect without its accompanying statement under Art. 11(3)?* No lens output here is
     legal advice or clearance.
+
+    **Pointer, 2026-09-06**: the client leg landed by [PR #929](https://github.com/TheCaptainCompany/captain-food/pull/929)
+    opens a NEW legal residue — the `/restricted` screen's `details_pending` transient is now
+    structurally reachable on the close, not merely on a later tap — and a second counsel question;
+    both recorded, with this §'s posture otherwise unamended, in
+    [ADR-20260906-191836](ADR-20260906-191836-the-client-leg-of-the-restriction-close-the-pair-selects-restricted-an-unknown-4403-is-terminal-and-the-route-is-the-screens-own.md).
 12. **Order.** holub advised step 6 first — step 5 is the fifth dark PR of this epic and step 6 (the
     staff door) is the first outcome a human in Tours can experience. The founder chose the order
     3, 4, 5, 6, 7 on 2026-09-04 (answer 5→A); re-ordering it is his, so the advice goes to the decision
@@ -162,8 +186,14 @@ issue, so until it lands the rider is told on the next tap.
 
 ## Follow-up actions
 
-- Issue: the client reads the 4403 close and routes to `/restricted` (the 4-ii bounce), replacing
-  unconditional reconnect; the reconnect-inside-lag residual of §5 is reconsidered there.
+- **DONE** — [PR #929](https://github.com/TheCaptainCompany/captain-food/pull/929): the client reads
+  the 4403 close and routes to `/restricted` (the 4-ii bounce), replacing unconditional reconnect; the
+  reconnect-inside-lag residual of §5 is amended in place by
+  [ADR-20260906-191836](ADR-20260906-191836-the-client-leg-of-the-restriction-close-the-pair-selects-restricted-an-unknown-4403-is-terminal-and-the-route-is-the-screens-own.md),
+  narrowed rather than fully closed — the server-side remainder lives on
+  [#931 "#929 follow-ups (step 5 client leg): the position-fenced standing resolve in
+  connection_init, /restricted re-read on reconnect, client-side close observability before the
+  flip, bundle skew, LookupFailed retry amplification"](https://github.com/TheCaptainCompany/captain-food/issues/931).
 - BUS-1 / #385 gains one line: the rider-socket termination is a consumer that needs the cross-process
   bus before the #358 cutover.
 - The counsel question of §11 appended to the packet on ADR-20260904-152807.

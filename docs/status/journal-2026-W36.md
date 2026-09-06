@@ -2,6 +2,146 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-06 — [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — eleven
+> declared controls render as an empty tagged div (GAP(renderer)); make `render_node_kind`
+> exhaustive over `ComponentKind`"](https://github.com/TheCaptainCompany/captain-food/issues/888)
+> SLICE 1 landed, draft [PR #932](https://github.com/TheCaptainCompany/captain-food/pull/932), Lane
+> B (session_01H3AFBVzhSiGXJcFuwKjiMQ, `888-render-node-kind-exhaustive`), `HOLD: human`
+> (Tours-facing).** `render_node_kind` is now EXHAUSTIVE over `ComponentKind` — no `_` wildcard.
+> The compiler named **46** kinds with no dedicated arm the moment the wildcard was removed, not
+> the issue's own "eleven" (off by 35, and stated with no antecedent — ADR-20260817-105845). Every
+> one of the 46 renders BYTE-IDENTICAL to the old wildcard's tagged container (title/label/value
+> text, children, `data-group`) plus one BARE marker attribute, `data-no-arm` (no value — evans/
+> observability/reviewer: a ticket id baked into customer-facing HTML names a concept after the
+> ticket that found it; the bare attribute audits identically). `data-no-arm` is the DOM spelling
+> of the specs' `GAP(renderer)`; the DOM could not take `data-gap`, which already means
+> no-backing-query. **The Badge finding**: `Badge`'s own arm is GUARDED
+> (`if node.prop("text").is_some()`), and match-arm guards never count towards exhaustivity in
+> rustc — but rustc ALSO omits a guard-only-covered variant from its E0004 list while ANY other
+> variant is fully unmatched, so the FIRST E0004 (45 kinds) never named `Badge` at all; it only
+> surfaced on a SECOND recompile after the other 45 were closed. An exhaustive match is proven only
+> by that second recompile, never the first E0004 read alone (recorded as an executable-adjacent
+> rule in `docs/claude/sessions/gates.md` §19j, with the minimal repro that confirms it).
+> `crates/web/src/interact.rs input_value` (the `{{ <id>.value }}` dispatch read) now tries
+> `HtmlTextAreaElement` after `HtmlInputElement` (`complete_len` widened the same way, for
+> symmetry) — the honest fix the FIRST #888 card's STOP forbade (card defect, banked, lifted for
+> this dispatch). This fallback is UNREACHABLE today, not merely untested: `grep -rn "<textarea"
+> crates/web/src` finds nothing, since `text_area` still renders the no-arm `<div>`.
+>
+> Reds, each isolated against its named mutant, quoted and reverted: the two tests that "cannot
+> find the marker/the set" (`no_arm_nodes_carry_the_marker_and_no_action`,
+> `no_arm_set_is_exactly_the_declared_list`) red against the pre-fix wildcard; moving `TextArea`
+> out of the no-arm arm reds the frozen-list test (`TextArea` missing from the rendered set);
+> emitting `data-action` in the no-arm arm reds the no-action test; dropping the title/label text
+> reds the unchanged-container test; the scratch-worktree `Zzz` enum mutant reds E0004 naming
+> `renderer.rs:850` (quoted, worktree discarded, generated file never touched in the branch); at
+> the checkpoint, beck's added named test
+> (`a_guarded_arm_kind_without_its_guard_condition_still_lands_in_no_arm`) reds when the `Badge`
+> arm's guard is dropped (quoted, reverted) — the guard-only-covered class now fails BY NAME, not
+> only inside the 46-element set diff.
+>
+> **Consent decision (thirteen lenses, ADR-20260904-013834 — a split resolved by the safer option
+> on a legal-adjacent surface): `text_area`'s functional arm stays DEFERRED.** Originally: three of
+> its six DSL sites bind to no mutation AND the driver could not read a `<textarea>`. D2 closed the
+> READ leg in this same slice, so **one surviving reason remains**: `delivery_reason` and
+> `delivery_instructions` bind to no mutation, and `item_instructions` rides
+> `add_to_cart.instructions` but `CartLineInput` has no such field — binding it needs a new field
+> threaded through codegen, the GraphQL resolver, persistence and the kitchen ticket
+> (`crates/server`), an UNQUANTIFIED cost (holub: the renderer's own comment previously promised
+> "one commit", which overstated it — reworded). `tip_amount_selector` stays deferred to
+> [#887](https://github.com/TheCaptainCompany/captain-food/issues/887) (its `recipient` binding is
+> dead). Tracked as [#934](https://github.com/TheCaptainCompany/captain-food/issues/934) item 1
+> (bind the sites) and item 6 (a real DOM gate — cannot exercise the textarea fallback while no
+> `<textarea>` exists to exercise it against; the residue closes on BOTH, not item 6 alone).
+>
+> **Card defects, banked**: the first #888 card's STOP forbade the honest `interact.rs` fix,
+> forcing the cast bug to survive an extra round; the card counted "five" `text_area` sites where
+> the specs actually declare **six** (`delivery_instructions` nested in the checkout section);
+> "eleven" was stated with no antecedent (ADR-20260817-105845); and the issue cited a renderer-arm
+> coverage test that does not exist in this repo (checked, none found). **A roster-width miss,
+> attributed to the coordinator's roster selection, not the executor**: the mob briefing had no
+> security/privacy lens, so the shipped-DOM exposure question — what a `data-no-arm` marker (or a
+> ticket-numbered one) reveals about internal gap-tracking to anyone reading page source — went
+> unowned until the checkpoint's evans/observability pass caught the ticket-id naming issue.
+> Observability's verbatim finding: *"`data-no-arm` is a grep-able DOM marker for kinds with no
+> dedicated renderer arm, frozen by test. It is NOT audited: no counter, no span, no boundary
+> event — production emits nothing when a no-arm node paints; `sdui_degraded_render_total`'s reason
+> set is closed and gains no value here."* Evans: *"the class had a published name in the specs
+> before it had one in the code; the code coined a second."*
+>
+> **Full mob** (reviewer, beck, farley, evans, observability, holub, graphql, business, dba, legal,
+> ux, vernon, young) — briefing + checkpoint both passed, corrections landed as D2b. No `specs/**`
+> edit, no ADR (the issue already decided compiler-first), no `STATUS.md` row (checked: none tracks
+> the renderer no-arm gap specifically — row 5 is the general SDUI-renderer placeholder).
+
+> **2026-09-06 — [#894 "Rider client: read the 4403 restricted WebSocket close and route to
+> /restricted instead of reconnecting on backoff (step 5's client leg)"](https://github.com/TheCaptainCompany/captain-food/issues/894)
+> D1/D2/D2b/D5 landed, draft [PR #929](https://github.com/TheCaptainCompany/captain-food/pull/929),
+> Lane B (session_01H3AFBVzhSiGXJcFuwKjiMQ, `894-rider-client-4403-close`), `HOLD: human`
+> (Tours-facing rider surface).** A pure, native-testable `close_disposition(code, reason) ->
+> CloseDisposition { Reconnect, Restricted, Terminal }` in the non-browser part of
+> `crates/web/src/subscriptions.rs`: `Restricted` iff BOTH `shared_types::
+> RIDER_RESTRICTED_SOCKET_CLOSE_CODE` and `_REASON` match (the signal is the PAIR, never `code`
+> alone); any other 4403 is `Terminal` (no reconnect, no bounce — the HTTP leg refuses on the next
+> action). The screen-agnostic seam `handle_close` composes the disposition with a caller's
+> per-screen rule (`bounce::restricted_target(screen) = screen.restricted_route`, the ONE seam both
+> the HTTP leg's `bounce_after` and this socket leg now read through); the wasm `onclose` handler
+> becomes a three-line adapter; the two `Connection::open` callers (`interact.rs`'s SDUI screen
+> socket, `handwritten.rs`'s customer tracking socket with no `Screen` — an explicit `|| None`).
+> Reds, each isolated against its named mutant, quoted and reverted: T1 (invert the code
+> comparison, `left: Reconnect / right: Restricted`), T2/T2b (drop the reason conjunct,
+> `left: Restricted / right: Terminal`), T3a (drop the code conjunct,
+> `left: Restricted / right: Reconnect`), T4 (`handle_close` reconnects unconditionally,
+> `left: [3] / right: []`), T5 (`Restricted` + no route calls neither, `left: [] / right: [3]`), T6
+> (`Terminal` treated as `Reconnect`, `left: [1] / right: []`), and T3c — added at the CHECKPOINT
+> (beck, required before ready): the ordinary `Reconnect` arm had two surviving mutants nothing
+> caught (`Reconnect => {}` and the off-by-one `Reconnect => reconnect(attempt)`, both green across
+> 222 tests) — now red under both (`left: [] / right: [3]`; `left: [2] / right: [3]`) before green.
+> **Checkpoint passed** (reviewer, beck re-ran every mutant, the 4404 constant-substitution proof
+> reproduced); because the chunk's class is Tours-facing, the coordinator then invited the remaining
+> eight lenses on the diff — a **roster-width defect, banked** (ADR-20260816-134352's attribution
+> requirement) — and all **thirteen** consented to D1/D2/D3 as coded, with corrections: (evans)
+> `CloseDisposition::Stop` renamed to `Terminal` — this same file already used `Stop` for "stop one
+> subscription" (~:193/~:435), a name collision, not a synonym; (graphql) `bounce_after` now calls
+> `restricted_target(screen)` instead of reading the field inline, so it is read from ONE seam; three
+> doc-comment corrections striking premises the original card carried: "degrades to its existing
+> declared poll fallback" (FALSE — no standing read poll exists anywhere in `crates/web`, only the
+> per-command `operationStatus` loop), "the DECLARED degraded mode" on the no-route arm (FALSE — that
+> phrase is ADR-20260810-231300's own and requires an observability contract this arm does not
+> carry; the arm is UNCHANGED reconnect), and "reinstatement relies on that reconnect" (FALSE — the
+> server seeds an already-RESTRICTED cell at `connection_init` and never re-closes it as a matter of
+> course, only on a NEW fact or a `Lagged` re-derivation; reinstatement is reload-driven,
+> ADR-20260904-124600 §4 — the reconnect is necessary, never sufficient). The two coordinator-verified
+> facts from dispatch (the config key is `RUN_RIDER_RESTRICTION_SOCKET_CLOSE`, not the architect's
+> invented `RUN_RIDER_SOCKET_TERMINATION`; the one spelling of leaving a screen is `interact::
+> navigate_to`, now `pub(crate)`, never `sign_in_return::navigate_away`) both held. Records
+> ([ADR-20260906-191836](https://github.com/TheCaptainCompany/captain-food/blob/main/docs/adr/ADR-20260906-191836-the-client-leg-of-the-restriction-close-the-pair-selects-restricted-an-unknown-4403-is-terminal-and-the-route-is-the-screens-own.md),
+> thirteen-lens `Consulted` block) amends
+> [ADR-20260905-065415](https://github.com/TheCaptainCompany/captain-food/blob/main/docs/adr/ADR-20260905-065415-the-restriction-fact-terminates-the-rider-s-socket-a-connection-local-standing-read-inside-the-guard-and-one-writer-to-the-transport.md)
+> §5/§10 in place (§10's gap closed by PR #929; §5's residual NARROWED, never closed — on a
+> no-route screen (`/restricted` itself) the reconnect-inside-lag residual is now reached
+> DETERMINISTICALLY at `backoff::delay(1)` = 1s, a permanent ACTIVE grant on that connection, not one
+> stale tick) and §11 with one pointer sentence only (routing is not reasons; §11 stands UNAMENDED;
+> a new legal residue — `/restricted`'s one-tick `details_pending` transient is now structurally
+> reachable on the close — and a second counsel question land in the new ADR, never here). An
+> unknown 4403 (`Terminal`) is declared and UNOBSERVABLE (no client telemetry exists in `crates/web`
+> at all) and admissible only while UNREACHABLE (the gate is OFF, one emitter always sends the pair);
+> the full 4400-4499 band stays a NOTE, not filed as inventory. The server-side remainder — the
+> position-fenced standing resolve in `connection_init`, `/restricted`'s own re-read on reconnect,
+> client-side close observability (required before any flip), the bundle-skew pre-flip smoke, and
+> the `LookupFailed` retry-amplification watch — is filed on
+> [#931 "#929 follow-ups (step 5 client leg): the position-fenced standing resolve in
+> connection_init, /restricted re-read on reconnect, client-side close observability before the
+> flip, bundle skew, LookupFailed retry amplification"](https://github.com/TheCaptainCompany/captain-food/issues/931),
+> cited from both the amended ADR and the new one everywhere "follow-up" is said. Gates: `cargo test
+> -p web` 223 passed 0 failed, `cargo clippy -p web` (native + wasm32/hydrate) no new warnings versus
+> base, `make wasm` green, `make validate` 0 errors, `make rust` on the committed tree green with no
+> drift; `make test-crates` not applicable (no Postgres in this container; CI is the gate). PR stays
+> DRAFT — `HOLD: human` merge condition, the coordinator merges after the TEAM's independent
+> reviewer pass, never a founder wait. Nothing a rider can see changed: preconditions (2)–(4) of
+> RIDER-RESTRICTION-PRECONDITIONS stay open, two keys stay OFF, production is suspended and the
+> rider population is zero.
+
 > **2026-09-06 — PROP-20260831-134539 §11 item 4 (slice 3b + the command change, ONE deliverable) BRIEFED and RECORDED (records-only run, [ADR-20260906-192007](../adr/ADR-20260906-192007-slice-3b-and-the-command-change-land-as-expand-contract-behind-an-interlocked-write-door-with-the-refusal-set-enumerated.md), team consent, ADR-20260904-013834) — BEFORE the card, per holub's WIP-one condition.** Fourteen lenses answered the 19:08Z briefing (`briefing-816-s3b4-answers.md`); **every one declared CONCERN**. Decisions, one sentence each, all pointing at the new ADR: D-A expand/contract on the shipped `quote` input (`quote` nullable now, `expectedTotal` kept nullable/deprecated/ignored, requiredness enforced by a WRITE door, never SDL `!`) — a new extension of ADR-0043's discipline to a GraphQL input, superseding PROP §6 D4's original "one change" recommendation; D-B the write door `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` interlocked with 3a's read door, refused at startup when mismatched; D-C a new `deprecated:` emitter key; D-D the refusal set ENUMERATED (structural rejections, loud/no price copy; `QuoteNoLongerHonoured` for a cart edit or expiry, `context: { cartId }` only; a fold failure stays `technical_error`; `PriceMismatch` deleted with its coverage) behind ONE cause-neutral customer screen, ux's draft for counsel; D-E the token signs the catalog-lines total, the write side refuses on a lines+fees mismatch rather than charging the delta; D-F verify sits in `commands.rs`'s pre-payment guard block, folding `as_of(V)`, never `at_head`; D-G the seventh carve-out recorded on `main` before the branch (ADR-20260904-081527 §8); D-H the signing key is a declared `configuration.yaml` secret copying `EMAIL_QUOTA_KEY_HMAC_SECRET`, a 60-minute two-key rotation overlap as a precondition of this deliverable; D-I the `quote.verify` span alternates with the write door, a `required: false` verify scoring success is a STOP; D-J the walk's home is the DB-gated `crates/server/tests/quote_walk.rs` (`tools/walk/` is not on `main`), the refusal must render client-side (`order_tracking`/`tracking.rs`), and the /cart→/checkout binding sentence; D-K the sampled `payload_bytes` re-measure is cut, the benchmark arm and the deadline arm (dedicated fold pool + `statement_timeout`) land here; D-L compiler-first shapes (tuple collapse, the `carts` witness, `CatalogVersion` in zero input blocks and zero field arguments, 3b's own codegen test module); D-M no Tours arrival rate exists anywhere, every rate a named shape not a figure, the fold count per checkout is ≥3 (not 1, correcting the phase-0 budget row). Eleven card defects banked (attribution `card defect`, the dispatch's own text said ten — a discrepancy stated rather than silently resolved, ADR-20260817-105845): the `process_managers/**` path claim (vernon), `CQ-7` cited but non-existent (legal, now authored), "ONE refusal" over an un-enumerated set (evans), a nonexistent `customer.yaml` cited (ux), the "paid TWICE" bare number (observability), the second door without an interlock (young), the unnamed opposite rollout ordering (graphql), D4-vs-nullable unreconciled (beck, reviewer), the closed arm left blank (holub), `tools/walk/` cited but not on `main` (farley), and rate-like figures at risk of being recorded as decided (dba, business). [#816](https://github.com/TheCaptainCompany/captain-food/issues/816) REOPENED (a stale linked-issue association had closed it at 19:01:43Z with no closing keyword in the squash — `commands.rs:2855`/`commands.yaml:141-149` still carry `expectedTotal`). Companion amendments in the same commit: `ADR-20260904-081527` §8 gains the seventh carve-out; `PROP-20260831-134539` §6 D4 and §11 item 4 rewritten (living-proposal refinement, no superseded block), §13 item 5 closed; `QUOTE-MINT-PRECONDITIONS.yaml` items (2)/(3)/(8) corrected, items (14)-(17) opened; `BRIEF-20260831` §7 gains CQ-7 (the refusal's information duty and the created-not-captured `PaymentIntent`), prepared for counsel, never clearance. [#925 "Emit the citation graph"](https://github.com/TheCaptainCompany/captain-food/issues/925) SEQUENCED AFTER this deliverable (architect: a `warning-baseline.json` collision — 3b moves the same warning surface #925 also touches). No code lands in this run — records only, straight to `main` per CLAUDE.md's docs-only path.
 
 > **2026-09-06 — PROP-20260831-134539 slice 3a MERGED (PR [#922](https://github.com/TheCaptainCompany/captain-food/pull/922), squash `f6c28bc3`, three rounds — the ceiling).** Per-PR row: #922 · tier lower (executor Sonnet; lenses Opus) · class HOLD: human (money path) · lane: this container (session_01BXTg9ZhjzYHyRkVq3g9uxJ) · wall_clock_dispatch_to_merge: card-816-s3.md written 14:39Z → merged 19:01Z (≈ 4 h 22 min, incl. one fence STOP + continuation, a disk-full incident and three review rounds) · gate_minutes_per_round (CI check-run startedAt→completedAt, the `ci` workflow): round 1 `bd747b98` 17:33→17:40 ≈ 7 · round 2 `6537e53d` 18:36→18:43 ≈ 7 · round 3 `a5ed17d7` 18:54→19:01 ≈ 7 · local_gate_rounds 3 · round-1 blockers 5 (4 record, 1 test gap) · attribution: 4 card defects (D1 "the ONLY priced read"; D2 silent on display-metadata authority; the fence-glob rewrite the card could not grant; the lever and its decomposition ordered in one round without reconciliation) + 1 roster miss owned by beck at briefing (the Red-first list omitted the mutant that survives) · 0 executor misses against an ADR line. Follow-ups [#930](https://github.com/TheCaptainCompany/captain-food/issues/930) (17 items). Lane B in the same window: [#927](https://github.com/TheCaptainCompany/captain-food/pull/927) merged `e4c476dd` on its Ask. Next: §11 item 4 (3b + the command change, ONE deliverable) briefed to the full mob.

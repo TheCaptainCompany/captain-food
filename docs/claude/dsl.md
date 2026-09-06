@@ -85,7 +85,13 @@ one catalog is a validation error (`scope-duplicate-item`).
   in `tests.yaml`, and that test needs a `rules: [{ $ref: 'rules.yaml#/<Rule>' }]` link (add the rule to
   `rules.yaml` if new); a new mutation/query needs a story step in `stories.yaml`. `make validate` fails
   otherwise (`test-uncovered-*`, `rule-uncovered`, `test-no-rule`, `op-uncovered-by-story`). Extend the
-  specs — never weaken the gate.
+  specs — never weaken the gate. **Sequencing consequence (PR #933 checkpoint, 2026-09-06):** an error may
+  be DECLARED in `errors.yaml` ahead of its handler, but the moment it is named in any `throws:`
+  (`actors.yaml` or a `processmanager.yaml` guard) `test-uncovered-error` demands a real passing
+  `tests.yaml` `thrown:` case, and `emit/behaviour_tests.rs` drives the REAL handler — so a new error
+  or PM guard can never be phased "spec now, Rust later": the wiring, its test and the code land in one
+  change. A card that splits phases around a new error names the gate that makes the intermediate
+  state legal and shows it validating, or it does not split.
 - After any DSL change: `make validate` must be green before `make generate`.
 
 ## `legacyStates:` — a retired lifecycle state, exempt from reachability (#639 part C step 4-i, ADR-20260904-081527 §6)

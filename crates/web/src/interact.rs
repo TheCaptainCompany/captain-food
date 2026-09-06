@@ -133,6 +133,10 @@ pub fn install(
                 *socket_slot.borrow_mut() = Some(handle.clone());
             }),
             Rc::new(move |sub_id, event| d.on_push(sub_id, event)),
+            // #894 D2: this socket's restriction close bounces through the SAME per-screen rule
+            // the HTTP leg applies (`bounce::restricted_target` = `screen.restricted_route`) —
+            // `screen` is already in hand here, never a synthesised route.
+            Rc::new(move || crate::bounce::restricted_target(screen)),
         );
     }
 
@@ -192,9 +196,14 @@ pub fn install(
             else {
                 return;
             };
+            // #888 D2: shares `input_value`'s cast, widened the same way (a `text_area` does not
+            // wire `on_complete` today, but a future one must not silently read 0 chars). Same
+            // residue as `input_value`: UNREACHABLE until the renderer emits a `<textarea>`.
             let filled = el
                 .dyn_ref::<web_sys::HtmlInputElement>()
-                .map(|i| i.value().chars().count())
+                .map(|i| i.value())
+                .or_else(|| el.dyn_ref::<web_sys::HtmlTextAreaElement>().map(|t| t.value()))
+                .map(|v| v.chars().count())
                 .unwrap_or(0);
             if filled >= len && el.get_attribute("data-busy").is_none() {
                 d.on_click(el);
@@ -444,10 +453,27 @@ fn current_locale() -> String {
 }
 
 /// The live value of a form field by element id (`{{ <id>.value }}` bindings).
+///
+/// #888 D2: a `text_area` node paints a `<textarea>`, not an `<input>` — reading only
+/// `HtmlInputElement` would silently drop its value at dispatch (the honest fix the first #888
+/// card's STOP forbade, banked as a card defect). Tries `HtmlInputElement` first (the common
+/// case), falls back to `HtmlTextAreaElement`.
+///
+/// UNREACHABLE today, not just untested (farley): `grep -rn "<textarea" crates/web/src` finds
+/// NOTHING — `text_area` still renders the no-arm `<div>` (renderer.rs), so no `<textarea>` ever
+/// reaches this driver in the served bundle. UNTESTABLE natively either way: this whole driver is
+/// gated behind `cfg(wasm32 + hydrate)` (`lib.rs`) and `make wasm` is a compile check, not a DOM
+/// test — pinned by `make wasm` + `cargo clippy --target wasm32-unknown-unknown` + review. The
+/// residue closes on TWO conditions, not one: #934 item 1 (bind the sites so the arm can land)
+/// AND #934 item 6 (a real DOM gate) — #934 item 6 alone cannot exercise this fallback while no
+/// `<textarea>` exists to exercise it against.
 fn input_value(field_id: &str) -> Option<String> {
     let doc = web_sys::window()?.document()?;
     let el = doc.get_element_by_id(field_id)?;
-    el.dyn_into::<web_sys::HtmlInputElement>().ok().map(|i| i.value())
+    el.dyn_into::<web_sys::HtmlInputElement>()
+        .map(|i| i.value())
+        .or_else(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().map(|t| t.value()))
+        .ok()
 }
 
 /// Toggle sheet visibility: `Some(id)` shows THAT sheet (hiding the others — one sheet at a
@@ -535,8 +561,10 @@ fn reveal_inline_error(action: &str, text: &str) -> bool {
 
 /// `navigate` step target (#529): the special [`crate::executor::RELOAD_ROUTE`] token reloads the
 /// current location (a fresh SSR pass re-reads the now-set auth cookie); anything else is a literal
-/// href.
-fn navigate_to(route: &str) {
+/// href. `pub(crate)` (#894 D2): the app's ONE spelling of leaving a screen, reused by the socket
+/// module's restriction-close navigation (`subscriptions::browser`) rather than a second one
+/// invented there or `sign_in_return::navigate_away` (a DIFFERENT, cross-origin-capable helper).
+pub(crate) fn navigate_to(route: &str) {
     let Some(w) = web_sys::window() else { return };
     if route == crate::executor::RELOAD_ROUTE {
         let _ = w.location().reload();

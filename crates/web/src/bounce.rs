@@ -14,6 +14,11 @@
 //!   * anything else (a `RoleGuard` refusal with no reason, a network failure, a malformed
 //!     envelope, a business rejection surfacing through `operationStatus` — never through here) →
 //!     `None`: the caller keeps its own degraded-render / toast posture.
+//!
+//! A third, socket-originated leg (#894 D2): a raw WebSocket close never carries a
+//! [`crate::graphql::TransportError`], so it reads the SAME per-screen rule through
+//! [`restricted_target`] instead of `bounce_after`/[`bounce_target`] — the module's scope is a
+//! refused GraphQL call OR a socket the platform closed on purpose, never a third invented signal.
 
 use crate::generated::screens::Screen;
 use crate::graphql::TransportError;
@@ -79,6 +84,18 @@ fn percent_encode_next(input: &str) -> String {
     out
 }
 
+/// The per-screen restricted-route rule (= `screen.restricted_route`, never invented on a screen
+/// that declares none): the ONE seam that reads it, written here so it is written exactly ONCE.
+/// [`bounce_after`] (below) calls it for the HTTP leg; it exists as its OWN name — not inlined into
+/// `bounce_after` — because a raw WebSocket close (#894 D2, `subscriptions::handle_close`'s
+/// `restricted` closure) needs the SAME rule and never carries a [`TransportError`], so it cannot
+/// run through `bounce_after`/[`bounce_target`] at all, and must NEVER synthesise one just to get
+/// there (that would forge a server signal the socket never actually carried). Grows nowhere else:
+/// these two callers are the whole surface.
+pub fn restricted_target(screen: &Screen) -> Option<&'static str> {
+    screen.restricted_route
+}
+
 /// Where one refused GraphQL call bounces `screen`'s visitor, or `None` to stay put. Private
 /// (#904 R2-4, compiler-first): [`bounce_target`] is the ONE public surface both call sites (the
 /// hydrate loop's per-read outcome, `interact.rs`'s pre-acceptance mutation failure) use — routing
@@ -89,7 +106,7 @@ fn bounce_after(err: &TransportError, screen: &Screen) -> Option<&'static str> {
     match err {
         TransportError::Errors { extensions, .. } => {
             if extensions.iter().any(|e| e.reason.as_deref() == Some(shared_types::RIDER_RESTRICTED)) {
-                return screen.restricted_route;
+                return restricted_target(screen);
             }
             // #639 part C step 6-iii (ADR-20260906-023825): an ADMIN-claimed token with no live
             // platform grant -- the server's own re-derivation refused it (`RoleGuard`, never a
@@ -191,6 +208,21 @@ mod tests {
     fn a_screen_without_a_restricted_route_never_bounces() {
         assert_eq!(sign_in_door().restricted_route, None, "fixture assumption");
         assert_eq!(bounce_after(&restricted_reason(), sign_in_door()), None);
+    }
+
+    // ---- #894 D2: restricted_target, the socket-close leg's per-screen rule ----
+
+    /// Equals the screen's own declared route (the jobs pair carries `Some("/restricted")`).
+    #[test]
+    fn restricted_target_equals_the_screens_declared_route() {
+        assert_eq!(restricted_target(jobs()), Some("/restricted"));
+        assert_eq!(restricted_target(job_detail()), Some("/restricted"));
+    }
+
+    /// `None` on a screen that declares none — the sign-in door, same fixture the HTTP leg uses.
+    #[test]
+    fn restricted_target_is_none_on_the_sign_in_door() {
+        assert_eq!(restricted_target(sign_in_door()), None);
     }
 
     /// A bare 401 (no session) bounces to the screen's `unauthenticated_route` — the 2c-ii leg,
