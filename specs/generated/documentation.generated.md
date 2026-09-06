@@ -8609,6 +8609,7 @@ _criticality: **high**_
 | `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`*, `business.service_window_verdict`* |
 | `cart.read` | `INTERNAL` | ✅ | — | `business.aggregate_id`* |
 | `pricing.compute` | `INTERNAL` | ✅ | — | `business.service_fee`*, `business.split_ok`* |
+| `quote.verify` | `INTERNAL` | ⬜ | — | `business.aggregate_id`*, `business.correlation_id`* |
 | `payment.intent.create` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |
 | `event.store.append` | `INTERNAL` | ⬜ | — | `business.event_type`*, `business.stream_id`* |
 | `order.lane.enqueue` | `PRODUCER` | ⬜ | — | `messaging.system`*, `business.event_type`*, `business.aggregate_id`* |
@@ -8616,7 +8617,7 @@ _criticality: **high**_
 | `event.consume.projection` | `CONSUMER` | ✅ | `>= 1` | `business.projection_name`* |
 
 - **Metrics**: `place_order_duration_ms` _(histogram)_, `checkout_degraded_render_total` _(counter)_, `order_birth_lag_ms` _(histogram)_, `order_lane_watch_heartbeat_total` _(counter)_, `order_lane_oldest_pending_age_ms` _(gauge)_, `runtime_flag_state` _(gauge)_, `payment_authorized_no_order_birth_age_seconds` _(gauge)_, `payment_birth_gap_sweep_heartbeat_total` _(counter)_ · **Business metrics**: `orders_placed_total` _(counter)_, `checkout_payment_failures_total` _(counter)_
-- **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, `pricing.compute`, `payment.intent.create`, (`event.store.append` | `order.lane.enqueue`), `event.publish`, `event.consume.projection`]
+- **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, (`quote.verify` | `command.validate`), `pricing.compute`, `payment.intent.create`, (`event.store.append` | `order.lane.enqueue`), `event.publish`, `event.consume.projection`]
 - **SLOs**: p95 ≤ 800ms · p99 ≤ 1500ms · error rate ≤ 1%
 
 <a id="obs-refund"></a>
