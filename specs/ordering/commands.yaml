@@ -141,16 +141,18 @@ PlaceOrder:
     expectedTotal:
       $ref: 'entities.yaml#/Money'
       nullable: true
-      deprecated: "Superseded by `quote` (PROP-20260831-134539 slice 3b); a later phase of the same PR retires the check that reads it."
+      deprecated: "Retired by the quote (PROP-20260831-134539 slice 3b); today no shipped client sends it and the check is dead in production."
       description: >
-        DEPRECATED (ADR-20260906-192007 D-A), superseded by `quote` below — but STILL CHECKED,
-        unchanged, for equality against the server-recomputed total (divergence rejects with
-        `errors.yaml#/PriceMismatch`) until a later phase of this same PR retires that check
-        together with the write-side verify guard it hands off to (the two land in one change,
-        `rules.yaml#/ServerPriceAuthority`). Kept nullable for the expand/contract discipline
-        either way: a client that keeps sending this field must not break. Its OWN deletion is a
-        separate, later recorded change (the contract half of D-A), gated on a client cache-drain
-        condition.
+        DEPRECATED (ADR-20260906-192007 D-A), superseded by `quote` below. The equality check
+        against the server-recomputed total (divergence rejects with `errors.yaml#/PriceMismatch`)
+        is LIVE IN CODE and DEAD ON THE SHIPPED CLIENT: no shipped client sets this field
+        (`crates/web/src/checkout.rs:610` is a test fixture, not a call site), so the check never
+        actually fires in production today. It stays checked, unchanged, for whatever DOES send it,
+        until the quote is verified server-side and this field's own check retires together with
+        the write-side verify guard it hands off to (the two land in one change,
+        `rules.yaml#/ServerPriceAuthority`). Kept nullable for the expand/contract discipline in the
+        meantime. Its OWN deletion is a separate, later recorded change (the contract half of D-A),
+        gated on a client cache-drain condition.
     quote:
       $ref: 'scalars.yaml#/CartQuote'
       nullable: true
@@ -159,9 +161,9 @@ PlaceOrder:
         recap total the customer confirmed — never one stashed from an earlier read. Accepted
         structurally and NEVER READ by any code yet: the write door
         `configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` and the verify guard that would
-        read this field both land in a later phase of the same PR (D-F/D-G) — until then this field
-        is pure expand, and every order still prices and charges at HEAD via the unchanged
-        `expectedTotal` equality check above. Once that phase lands: CLOSED (default, everywhere)
+        read this field both land only once the quote is verified server-side (D-F/D-G) — until
+        then this field is pure expand, and every order still prices and charges at HEAD via the
+        unchanged `expectedTotal` equality check above. Once that lands: CLOSED (default, everywhere)
         keeps this exact behaviour; OPEN, an ABSENT quote refuses at the HANDLER (typed) — never as
         a GraphQL non-null violation, so requiredness can flip without a same-change SDL edit; a
         PRESENT quote is verified (rules.yaml#/ServerPriceAuthority, D-F) and a mismatch produces
