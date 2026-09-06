@@ -848,7 +848,7 @@ like a malformed positive entry.
 **The entry's shape, each clause load-bearing**: `<test path>` exists on disk or is the literal
 token `NEW` (the test does not exist yet — this card is what creates it); `<record>` is a RECORD
 ID — `ADR-…`, `PROP-…`, `BRIEF-…`, `journal-…` or a register key — **never a file path** (the hook
-resolves the id to its file; a path is refused as an unresolvable record, and so is any extra
+resolves the id to its file **in the LOCAL checkout** — so a card citing a record just pushed to `main` from a session whose checkout sits on another branch is refused with the SHAPE message, which hides the real cause (the 3b+4 dispatch of 2026-09-06 was refused twice on ADR-20260906-192007, landed on `main` four minutes earlier; `git checkout -B main origin/main` fixed it — fetch the record before the card, never re-word the entry); a path is refused as an unresolvable record, and so is any extra
 ` — ` clause between the test and the record — the entry has exactly four clauses); `<line>` is a
 real line NUMBER in that file, and that line itself carries one of the tokens above (never a
 paraphrase — the citation must be checkable without reading the whole file). Cost that earned the
