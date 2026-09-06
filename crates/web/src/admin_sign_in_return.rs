@@ -1,5 +1,5 @@
 //! The ADMIN magic-link RETURN landing (#639 part C step 6-iii, ADR-20260906-023825) --
-//! `system.yaml#/screens/sign_in_return`, deliberately NOT SDUI (`sdui: false`): the
+//! `system.yaml#/screens/admin_sign_in_return`, deliberately NOT SDUI (`sdui: false`): the
 //! `crates/web/src/sign_in_return.rs` System TWIN (never the SAME hand-written page reused --
 //! the confirmed action, the error/refusal routes and the translation keys all differ). Extracting
 //! `?token=` from the URL the mail client opens and sequencing confirm -> claim -> route is client

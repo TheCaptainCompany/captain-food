@@ -40,7 +40,7 @@ pub enum HandWrittenScreen {
     /// ADR-20260905-101349 §2 amendment) — `invitation_accept.rs`. The `SignInReturn` shape,
     /// doubled: TWO commands sequenced client-side (never a process manager).
     InvitationAccept,
-    /// `system.yaml#/screens/sign_in_return` (#639 part C step 6-iii, ADR-20260906-023825) --
+    /// `system.yaml#/screens/admin_sign_in_return` (#639 part C step 6-iii, ADR-20260906-023825) --
     /// `admin_sign_in_return.rs`. The `SignInReturn` System TWIN: same query-string/acceptance-
     /// first reasons, a DIFFERENT screen id owner (this variant, not `SignInReturn`) because the
     /// two live on different surfaces with different routes/actions/copy.
