@@ -499,6 +499,21 @@ cart-price:
       attributes:
         - { key: "business.aggregate_id", type: string, required: true }
         - { key: "business.correlation_id", type: string, required: true }
+    # PROP-20260831-134539 slice 3a (D5, ADR-20260906-154419): the as-of price-fold read the OPEN
+    # arm of `cart.current`/`cart`/`carts` performs behind `RUN_FOLD_PRICED_CART_READ` — joined
+    # HERE, inside `cart-price`, never as a sibling contract (the gap-between-two-contracts
+    # hazard). `required: false`: only the door-OPEN arm ever opens it; the door defaults CLOSED
+    # everywhere, so this span is silent in production today.
+    - name: "catalog.as_of.fold"
+      kind: INTERNAL
+      required: false
+      attributes:
+        - { key: "business.aggregate_id", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
+        - { key: "business.version", type: int, required: false }
+        - { key: "business.rows_read", type: int, required: false }
+        - { key: "business.events_applied", type: int, required: false }
+        - { key: "business.failure_reason", type: string, required: false }
 
   metrics:
     # Read-side pricing latency: an in-memory fold over already-loaded offers — if this histogram
@@ -513,10 +528,24 @@ cart-price:
     #   stock_unknown  — the offer resolves but its orderability/stock state cannot be established
     # Alert on ANY sustained non-zero rate.
     - { name: "cart_price_unresolvable_total", type: counter, attributes: ["reason"] }
+    # PROP-20260831-134539 slice 3a (D5): the as-of fold's OWN duration (SQL + decode + the fold),
+    # inside the whole-read `cart_price_ms` — the lever if the headroom carve
+    # (`QUOTE-MINT-PRECONDITIONS`) drifts.
+    - { name: "catalog_as_of_fold_ms", type: histogram, attributes: [] }
+    # The TRUE head-derived stream length L — `attributes: []`, no bounded population exists for
+    # catalog/tenant (a per-catalog L is a span query on `business.aggregate_id` instead).
+    - { name: "catalog_as_of_stream_length", type: histogram, attributes: [] }
+    # dba: L's cost is BYTES, not length — one 500-product `CatalogImported` resync is ~200 KB in
+    # 0.05% of L. `attributes: []`, same no-bounded-population reason.
+    - { name: "catalog_as_of_payload_bytes", type: histogram, attributes: [] }
+    # DEAD-MAN (ADR-20260810-231300): `outcome` is a CLOSED set (applied|refused) so a
+    # HEAD-fallback regression that stopped calling this read at all cannot hide as silence —
+    # both series would starve together, not just one.
+    - { name: "catalog_as_of_reads_total", type: counter, attributes: ["outcome"] }
 
   status_rules:
     success:
-      required_spans: ["cart.price"]
+      required_spans: ["cart.price"]   # catalog.as_of.fold is OPTIONAL (gated by the door)
     # CLASSIFICATION (recorded, deliberate): an unresolvable price at READ is a technical_error,
     # never business_rejected — the customer asked to see their cart and got no price (a defect in
     # what we serve), not a domain rule refusing a request. The write-path twin (PriceUnresolvable
@@ -526,6 +555,9 @@ cart-price:
 
   # INITIAL budgets — set from the write-path pricing seam's share of place-order, TUNABLE once
   # cart_price_ms carries real traffic; revisit after the first peak (Fri/Sat 19:00-21:30) window.
+  # PROP-20260831-134539 slice 3a: the as-of fold, where the door opens it, is a HEADROOM CARVE
+  # inside this SAME budget (QUOTE-MINT-PRECONDITIONS names the phase-0 leg target with its
+  # antecedents) — this budget does not move, and the fold now sits inside it.
   latency_budget: { max_p95_ms: 300, max_p99_ms: 600 }
   error_budget: { max_error_rate_pct: 1.0 }
 

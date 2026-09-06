@@ -642,6 +642,60 @@ pub mod cart_price {
     }
 }
 
+/// `catalog.as_of.fold`'s own technical metrics (PROP-20260831-134539 slice 3a, D5) — INSIDE the
+/// `cart-price` contract, never a sibling (the gap-between-two-contracts hazard,
+/// `specs/observability.yaml:459`). Emitted by the Postgres adapter's `at_head`, the mint's ONE
+/// caller.
+pub mod catalog_as_of {
+    use super::*;
+
+    fn fold_duration_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| meter().f64_histogram(metric::CATALOG_AS_OF_FOLD_MS).with_unit("ms").build())
+    }
+
+    fn stream_length_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| meter().f64_histogram(metric::CATALOG_AS_OF_STREAM_LENGTH).build())
+    }
+
+    fn payload_bytes_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::CATALOG_AS_OF_PAYLOAD_BYTES).with_unit("By").build()
+        })
+    }
+
+    fn reads_total_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CATALOG_AS_OF_READS_TOTAL).build())
+    }
+
+    /// `catalog_as_of_fold_ms` — SQL + decode + the fold, end to end (the SAME span
+    /// `at_head`/`as_of` instrument).
+    pub fn fold_duration(elapsed_ms: f64) {
+        fold_duration_histogram().record(elapsed_ms, &[]);
+    }
+
+    /// `catalog_as_of_stream_length` — the TRUE head-derived L, `attributes: []`.
+    pub fn stream_length(rows: f64) {
+        stream_length_histogram().record(rows, &[]);
+    }
+
+    /// `catalog_as_of_payload_bytes` — the raw JSON payload bytes read, `attributes: []`.
+    pub fn payload_bytes(bytes: f64) {
+        payload_bytes_histogram().record(bytes, &[]);
+    }
+
+    /// `catalog_as_of_reads_total{outcome}` — the dead-man: `outcome` is `"applied"` on a
+    /// successful mint, `"refused"` on a fold `Err` (coordinate absent, stream unreadable). Never
+    /// silent: a HEAD-fallback regression that stopped calling this read at all would starve BOTH
+    /// series, not just one.
+    pub fn reads_total(outcome: &str) {
+        reads_total_counter().add(1, &[KeyValue::new("outcome", outcome.to_string())]);
+    }
+}
+
 /// Technical metrics for the `customer-identity` contract (#641, IDENT-1 Phase A): the
 /// request-seam CUSTOMER identity resolution (`RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES`).
 pub mod customer_identity {

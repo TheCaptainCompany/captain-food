@@ -188,17 +188,21 @@ impl PgAsOfCatalogRepository {
     /// the head, by construction of reading everything. `Err` when the stream has no rows at all —
     /// the catalog does not exist yet — never a HEAD price for a catalog that was never created.
     ///
-    /// DELIBERATELY NO SPAN here in this slice (3a deliverable 1, structural/dark): the
-    /// `catalog.as_of.fold` span (`telemetry::spans::catalog_as_of_fold`) is constructed from a
-    /// KNOWN coordinate, which `at_head` does not have until after this read returns — instrumenting
-    /// this leg honestly (including the fold, per `as_of`'s own round-3 correction) is deliverable
-    /// 4's job in this card, deferred with it (see the hand-back's fence finding).
+    /// Instrumented at [`AsOfPriceAuthority::at_head`], the ONE caller (deliverable 4, D5): this
+    /// leg only computes what `at_head` records — `payload_bytes` is the SUM of the raw JSON
+    /// payload sizes over EVERY row returned (technical rows included, before
+    /// [`Self::decode_rows`] drops them), because L's cost is bytes, not length (dba: one
+    /// 500-product `CatalogImported` resync is ~200 KB in 0.05% of L).
     async fn load_to_head(
         &self,
         stream: &str,
-    ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize, CatalogVersion), DomainError> {
+    ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize, CatalogVersion, usize), DomainError> {
         let rows = self.fetch_all_rows(stream).await?;
         let stream_length = rows.len();
+        let payload_bytes: usize = rows
+            .iter()
+            .map(|(_, _, payload)| serde_json::to_vec(payload).map(|v| v.len()).unwrap_or(0))
+            .sum();
         let highest = rows.iter().map(|(v, _, _)| *v).max();
         let Some(coordinate) = highest.and_then(CatalogVersion::try_new) else {
             return Err(db_err(format!(
@@ -207,7 +211,7 @@ impl PgAsOfCatalogRepository {
             )));
         };
         let events = Self::decode_rows(rows)?;
-        Ok((events, stream_length, coordinate))
+        Ok((events, stream_length, coordinate, payload_bytes))
     }
 }
 
@@ -246,17 +250,44 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
     /// verified over the same rows that produced the prices, never a second, separately-checked
     /// value. `Err` when the stream has no rows at all (the catalog does not exist yet) — never a
     /// HEAD price for a catalog that was never created.
+    ///
+    /// Instrumented end to end (deliverable 4, D5): `catalog.as_of.fold` joins the `cart-price`
+    /// contract's spans, `catalog_as_of_fold_ms`/`catalog_as_of_stream_length`/
+    /// `catalog_as_of_payload_bytes` join its metrics, and `catalog_as_of_reads_total{outcome}` is
+    /// the dead-man — `correlation_id` is this read's own first real value (recorded IMMEDIATELY,
+    /// the observability HARD STOP).
     async fn at_head(
         &self,
         catalog_id: CatalogId,
-        // Threaded from the priced read's request id; wired onto the `catalog.as_of.fold` span in
-        // deliverable 4 (D5). Deliverable 3 lands the signature and the caller so the observability
-        // change that follows touches no call site.
-        _correlation_id: uuid::Uuid,
+        correlation_id: uuid::Uuid,
     ) -> Result<(AsOfCatalog, CatalogVersion), DomainError> {
         let stream = domain::catalog::stream(catalog_id);
-        let (events, _stream_length, coordinate) = self.load_to_head(&stream).await?;
-        let catalog = AsOfCatalog::from_stream(&events, coordinate);
-        Ok((catalog, coordinate))
+        let span = telemetry::spans::catalog_as_of_fold_at_head(
+            &catalog_id.0.to_string(),
+            &correlation_id.to_string(),
+        );
+        let span_for_record = span.clone();
+        let started = std::time::Instant::now();
+        let outcome = async move {
+            let (events, stream_length, coordinate, payload_bytes) =
+                self.load_to_head(&stream).await.map_err(|e| {
+                    telemetry::spans::record_catalog_as_of_fold_error(
+                        &span_for_record,
+                        "catalog_not_created",
+                    );
+                    e
+                })?;
+            let catalog = AsOfCatalog::from_stream(&events, coordinate);
+            telemetry::spans::record_catalog_as_of_fold(&span_for_record, stream_length, events.len());
+            telemetry::spans::record_catalog_as_of_fold_version(&span_for_record, coordinate.get());
+            telemetry::meters::catalog_as_of::stream_length(stream_length as f64);
+            telemetry::meters::catalog_as_of::payload_bytes(payload_bytes as f64);
+            Ok((catalog, coordinate))
+        }
+        .instrument(span)
+        .await;
+        telemetry::meters::catalog_as_of::fold_duration(started.elapsed().as_secs_f64() * 1000.0);
+        telemetry::meters::catalog_as_of::reads_total(if outcome.is_ok() { "applied" } else { "refused" });
+        outcome
     }
 }

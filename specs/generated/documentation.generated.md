@@ -13295,8 +13295,9 @@ _criticality: **high**_
 | Span | Kind | Req. | Multiplicity | Attributes |
 | --- | --- | --- | --- | --- |
 | `cart.price` | `INTERNAL` | ✅ | — | `business.aggregate_id`*, `business.correlation_id`* |
+| `catalog.as_of.fold` | `INTERNAL` | ⬜ | — | `business.aggregate_id`*, `business.correlation_id`*, `business.version`, `business.rows_read`, `business.events_applied`, `business.failure_reason` |
 
-- **Metrics**: `cart_price_ms` _(histogram)_, `cart_price_unresolvable_total` _(counter)_ · **Business metrics**: —
+- **Metrics**: `cart_price_ms` _(histogram)_, `cart_price_unresolvable_total` _(counter)_, `catalog_as_of_fold_ms` _(histogram)_, `catalog_as_of_stream_length` _(histogram)_, `catalog_as_of_payload_bytes` _(histogram)_, `catalog_as_of_reads_total` _(counter)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans [`cart.price`]
 - **SLOs**: p95 ≤ 300ms · p99 ≤ 600ms · error rate ≤ 1%
 
