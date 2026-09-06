@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CartLineId(pub uuid::Uuid);
 
+/// An OPAQUE, server-signed token binding a cart's priced read to the exact catalog coordinate that produced it (PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-A/D-J) — base64url, no internal structure a client may parse or construct. Returned by `cart.current`/`cart` on the SAME read that painted the total the customer sees; `null` on that same read means one of three things, never distinguished on the wire (D-D's cause-neutral posture, restated at the read): the fold-priced read is CLOSED (`configuration.yaml#/RUN_FOLD_PRICED_CART_READ` off — no coordinate exists to sign), the fold itself failed, or this is the `carts` LIST read (D-L: the fan-out never mints, structurally). The checkout submits the quote of the read that painted `/checkout`'s own recap total, never one stashed at `/cart` (restaurant_frontoffice.yaml — the /cart→/checkout binding). DARK on the write side until a later phase of this PR lands the signer/verifier and the write door (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`): today the value returned here is accepted structurally on `PlaceOrder.quote` but never read by any code.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CartQuote(pub String);
+
 /// Restaurant rating in stars (0–5), given by the customer on a delivered order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StarRating(pub i64);

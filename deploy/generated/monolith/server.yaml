@@ -134,6 +134,16 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: UBER_DIRECT_WEBHOOK_SECRET
+            - name: QUOTE_SIGNING_KEY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: QUOTE_SIGNING_KEY_HMAC_SECRET
+            - name: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:

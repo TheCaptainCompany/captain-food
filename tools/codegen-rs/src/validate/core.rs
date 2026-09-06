@@ -465,6 +465,9 @@ pub(crate) fn validate(model: &Model) -> Report {
     // #816): CatalogVersion in zero `input {}` blocks and zero field-argument lists of the
     // generated SDL.
     check_catalog_version_never_on_the_wire(model, &mut issues);
+    // D-C (#816): a `deprecated:` source property renders `@deprecated` in the generated SDL, and
+    // vice versa.
+    check_deprecated_key_reaches_the_sdl(model, &mut issues);
 
     // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
     let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();

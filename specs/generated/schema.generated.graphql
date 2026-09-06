@@ -109,6 +109,7 @@ scalar ProspectionScore
 scalar MembershipId
 scalar RestaurantInvitationId
 scalar CartLineId
+scalar CartQuote
 scalar StarRating
 scalar RatingComment
 scalar DeliveryDissatisfactionReason
@@ -1032,6 +1033,7 @@ type Cart {
   totalAmount: Money!
   breakdown: PaymentBreakdown
   uberComparison: UberComparison
+  quote: CartQuote
   updatedAt: DateTime!
   restaurant: Restaurant!
 }
@@ -1722,7 +1724,8 @@ input PlaceOrderInput {
   deliveryAddress: AddressInput
   note: OrderNote
   paymentMethodId: String!
-  expectedTotal: MoneyInput
+  expectedTotal: MoneyInput @deprecated(reason: "Superseded by `quote` (PROP-20260831-134539 slice 3b); a later phase of the same PR retires the check that reads it.")
+  quote: CartQuote
 }
 
 input AcceptOrderInput {

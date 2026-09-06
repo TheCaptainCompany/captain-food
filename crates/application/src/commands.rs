@@ -2677,7 +2677,9 @@ pub async fn place_replacement_order(
 /// server-side from the LIVE catalog (`crate::pricing::price_cart` —
 /// rules.yaml#/ServerPriceAuthority: the server is the only price authority; an unresolvable line
 /// price rejects fail-closed with `errors.yaml#/PriceUnresolvable`, and a client `expectedTotal`
-/// that diverges from the recomputed total rejects with `errors.yaml#/PriceMismatch`) and create
+/// that diverges from the recomputed total rejects with `errors.yaml#/PriceMismatch` — this
+/// equality check is superseded by `cmd.quote`'s verify guard, ADR-20260906-192007 D-A/D-F, a
+/// later phase of the same PR; both `expectedTotal` and this check stay live until then) and create
 /// the Stripe PaymentIntent through the generated [`PaymentService`] port for exactly that recomputed amount
 /// (a synchronous decline is the canonical `errors.yaml#/PaymentDeclined`). Returns the created
 /// intent so the mutation payload can carry `paymentIntentId`/`clientSecret` (api.yaml).
@@ -2852,6 +2854,8 @@ pub async fn place_order(
     }
     // The client's expectedTotal (optional) is a CONFIRMATION only — checked for equality against the
     // recomputed total so the customer is never charged an amount other than the one displayed.
+    // Superseded by `cmd.quote`'s verify guard in a later phase of this same PR (ADR-20260906-192007
+    // D-A/D-F) — both this check and `expectedTotal` stay live, unchanged, until then.
     if let Some(expected) = &cmd.expected_total {
         if *expected != priced.total_amount {
             return Err(reject(

@@ -23,6 +23,8 @@
       { "env_key": "UBER_DIRECT_CLIENT_ID", "from_secret": "UBER_DIRECT_CLIENT_ID_TEST", "secret": true },
       { "env_key": "UBER_DIRECT_CLIENT_SECRET", "from_secret": "UBER_DIRECT_CLIENT_SECRET_TEST", "secret": true },
       { "env_key": "UBER_DIRECT_WEBHOOK_SECRET", "from_secret": "UBER_DIRECT_WEBHOOK_SECRET_TEST", "secret": true },
+      { "env_key": "QUOTE_SIGNING_KEY_HMAC_SECRET", "from_secret": "QUOTE_SIGNING_KEY_HMAC_SECRET", "secret": true },
+      { "env_key": "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET", "from_secret": "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET", "secret": true },
       { "env_key": "STRIPE_SECRET_KEY", "from_secret": "STRIPE_SECRET_KEY_TEST", "secret": true },
       { "env_key": "STRIPE_WEBHOOK_SECRET", "from_secret": "STRIPE_WEBHOOK_SECRET", "secret": true }
     ],
@@ -45,6 +47,8 @@
       { "env_key": "UBER_DIRECT_CLIENT_ID", "from_secret": "UBER_DIRECT_CLIENT_ID_TEST", "secret": true },
       { "env_key": "UBER_DIRECT_CLIENT_SECRET", "from_secret": "UBER_DIRECT_CLIENT_SECRET_TEST", "secret": true },
       { "env_key": "UBER_DIRECT_WEBHOOK_SECRET", "from_secret": "UBER_DIRECT_WEBHOOK_SECRET_TEST", "secret": true },
+      { "env_key": "QUOTE_SIGNING_KEY_HMAC_SECRET", "from_secret": "QUOTE_SIGNING_KEY_HMAC_SECRET", "secret": true },
+      { "env_key": "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET", "from_secret": "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET", "secret": true },
       { "env_key": "STRIPE_SECRET_KEY", "from_secret": "STRIPE_SECRET_KEY_PROD", "secret": true },
       { "env_key": "STRIPE_WEBHOOK_SECRET", "from_secret": "STRIPE_WEBHOOK_SECRET", "secret": true }
     ]

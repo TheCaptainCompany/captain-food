@@ -53,16 +53,42 @@ RefundRequestByCustomer:
 # --- PlaceOrderProcess (checkout saga) ---
 ServerPriceAuthority:
   description: >
-    The server is the only price authority on the write path: order line totals, the order total and
-    the payment-intent amount are recomputed at checkout from the live catalog (Offer prices, Option
-    prices) — no client-supplied amount is ever trusted. A client-submitted expectedTotal is a
-    confirmation only, checked for equality (divergence rejects with PriceMismatch), and a cart line
-    whose price cannot be resolved from the live catalog rejects the checkout fail-closed
-    (PriceUnresolvable) — never a fallback to the client's number. LEGAL DISPLAY GUARANTEE
-    (Code de la consommation L112-1/L221-5 posture): the total displayed at the commit moment
-    equals the CheckoutSnapshot total — the price the consumer agreed to IS the price charged.
-    The equality check on expectedTotal is the enforcement: a displayed total that drifted from
-    the server's recomputation can never be charged, only rejected and re-confirmed.
+    Rewritten in the same change as the write-side expand/contract door's SPEC shapes
+    (PROP-20260831-134539 slice 3b + the command change, ADR-20260906-192007 D-A/D-D/D-F) — the
+    write-side ENFORCEMENT this rule describes still lands in a LATER phase of the same PR,
+    together with `errors.yaml#/QuoteNoLongerHonoured`'s real test coverage (the two cannot split
+    across phases: `make validate`'s `test-uncovered-error` refuses a `throws:` reference to an
+    error no code can yet produce). Until then, the rule below is UNCHANGED IN BEHAVIOUR: the
+    server is the only price authority on the write path — order line totals, the order total and
+    the payment-intent amount are recomputed at checkout from the live catalog (Offer prices,
+    Option prices) — no client-supplied amount is ever trusted. A client-submitted `expectedTotal`
+    is a confirmation only, checked for equality (divergence rejects with `PriceMismatch`), and a
+    cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed
+    (`PriceUnresolvable`) — never a fallback to the client's number. LEGAL DISPLAY GUARANTEE (Code
+    de la consommation L112-1/L221-5 posture): the total displayed at the commit moment equals the
+    CheckoutSnapshot total — the price the consumer agreed to IS the price charged. The equality
+    check on `expectedTotal` is the CURRENT enforcement (unchanged by this deliverable so far): a
+    displayed total that drifted from the server's recomputation can never be charged, only
+    rejected and re-confirmed.
+
+    **What this deliverable adds, additive-only in this phase, inert until the write door opens**:
+    `expectedTotal` is now DEPRECATED (superseded by the signed `quote`, D-A/D-J) — still checked
+    exactly as above, kept nullable for expand/contract, its own deletion a later, separate step.
+    `quote` is accepted on the command, structurally, and NEVER READ while the write door
+    (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`) is CLOSED (default, everywhere) — the
+    behaviour above is exactly today's, unconditionally. Once that later phase opens the write
+    door: an absent `quote` refuses at the handler (typed, never an SDL non-null violation); a
+    present `quote` is verified against `as_of(catalogId, V)` AT THE COORDINATE it names (never
+    `at_head` — D-F) — the fold-derived projection may only VETO a price the catalog can no longer
+    support or refuse a stale/tampered/foreign quote, NEVER ADD a price, a tax rate or an
+    acceptance the fold itself did not produce (the same "projection is a veto, never a source"
+    posture ADR-20260906-154419 D2 states for the read side, restated here for the write side); the
+    `expectedTotal` equality check and `errors.yaml#/PriceMismatch` are retired TOGETHER with that
+    same change, replaced by `errors.yaml#/QuoteNoLongerHonoured` (the ONE business refusal for a
+    cart edited after minting or an expired quote) plus the ADR-20260810-112836 §6 technical path
+    for every structural cause (forged signature, a foreign cart's quote, a retired key, a
+    coordinate beyond the stream's own head) — the customer sees ONE cause-neutral screen for the
+    whole set, D-D.
 
 CheckoutPricesCartCreatesPaymentIntent:
   description: >

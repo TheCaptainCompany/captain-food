@@ -25,6 +25,7 @@ types:
       totalAmount: { $ref: 'entities.yaml#/Money' }   # food sub-total, computed at read from the live catalog
       breakdown: { $ref: 'entities.yaml#/PaymentBreakdown', nullable: true }   # estimated checkout fee breakdown (ADR-0018), computed at read (V0 degenerate shape, same as checkout)
       uberComparison: { $ref: 'entities.yaml#/UberComparison', nullable: true }   # estimated Uber Eats price/split for this cart (ADR-0022/0025), computed at read; null if no cuisine
+      quote: { $ref: 'scalars.yaml#/CartQuote', nullable: true }   # signed coordinate binding (ADR-20260906-192007 D-A/D-J); null = fold-priced read closed / fold failed / the `carts` list read (D-L) -- see scalars.yaml#/CartQuote
       updatedAt: { type: string, format: date-time }
 
   Order:

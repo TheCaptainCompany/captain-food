@@ -331,6 +331,16 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         "RUN_FOLD_PRICED_CART_READ",
         env_flag("RUN_FOLD_PRICED_CART_READ", false),
     );
+    // PROP-20260831-134539 slice 3b + the command change (ADR-20260904-081527 §8 STANDING CLAUSE,
+    // consent farley + vernon -- NOT the seventh carve-out, which covers the processmanager.yaml/
+    // mailbox hunks of a LATER phase of this same PR): the standing clause pre-authorizes exactly
+    // this bare `declare_flag` + `env_flag` default for every `runKind: door` key introduced after
+    // 2026-09-06, under the fifth carve-out's own four conditions -- byte-parallel to the monolith
+    // root's line above, additive-only, no other hunk under this licence, this comment naming it.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
+        env_flag("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", false),
+    );
     deps
 }
 

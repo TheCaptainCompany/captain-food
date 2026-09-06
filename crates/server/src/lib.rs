@@ -1713,6 +1713,16 @@ pub async fn router() -> Router {
         "RUN_FOLD_PRICED_CART_READ",
         config.run_fold_priced_cart_read,
     );
+    // PROP-20260831-134539 slice 3b + the command change (ADR-20260906-192007 D-B/D-H), NOT the
+    // seventh carve-out (that licenses the processmanager.yaml/mailbox hunks, a LATER phase of the
+    // same PR): a bare fleet-parity declaration for a new `runKind: door` key, `crates/server/src/lib.rs`
+    // is not a fenced file at all -- no verify logic reads this yet (D-F/D-G land in that later
+    // phase), so this call registers the key's resolved value for the fleet-parity gate ONLY, the
+    // `RUN_FOLD_PRICED_CART_READ` precedent immediately above.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
+        config.run_quote_required_on_place_order,
+    );
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
     // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside

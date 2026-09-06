@@ -110,6 +110,16 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: EMAIL_QUOTA_KEY_HMAC_SECRET
+            - name: QUOTE_SIGNING_KEY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: QUOTE_SIGNING_KEY_HMAC_SECRET
+            - name: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
           readinessProbe:
             httpGet:
               path: /health

@@ -91,12 +91,18 @@ pub(crate) fn push_doc(out: &mut String, indent: &str, desc: Option<&str>) {
 /// Push one generated GraphQL struct field: the spec description as a `///` doc (→ introspection), an
 /// explicit `#[graphql(name = …)]` (the exact SDL name — independent of derive rename rules and raw
 /// `r#` idents), `#[serde(default)]` on arrays (lenient jsonb → typed mapping), raw-escaped snake_case
-/// ident.
-pub(crate) fn push_gql_field(out: &mut String, name: &str, base: &str, non_null: bool, desc: Option<&str>) {
+/// ident. `deprecated` (ADR-20260906-192007 D-C) is `Some(reason)` for a source property carrying a
+/// `deprecated:` key — one MORE `#[graphql(...)]` line, `InputObjectField`'s own `deprecation`
+/// attribute (async-graphql-derive `args.rs`'s `Deprecation::Deprecated { reason }`), never a second
+/// derive or a hand-rolled directive string.
+pub(crate) fn push_gql_field(out: &mut String, name: &str, base: &str, non_null: bool, desc: Option<&str>, deprecated: Option<&str>) {
     let ident = rust_ident(&snake_field(name));
     let ty = if non_null { base.to_string() } else { format!("Option<{}>", base) };
     push_doc(out, "    ", desc);
     out.push_str(&format!("    #[graphql(name = \"{}\")]\n", name));
+    if let Some(reason) = deprecated {
+        out.push_str(&format!("    #[graphql(deprecation = {:?})]\n", reason));
+    }
     if ty.starts_with("Vec<") {
         out.push_str("    #[serde(default)]\n");
     }
@@ -157,7 +163,14 @@ pub(crate) fn push_gql_object_fields_excluding(out: &mut String, def: &Value, ct
         } else {
             p.get("nullable").and_then(|x| x.as_bool()) != Some(true)
         };
-        push_gql_field(out, name, &base, non_null, p.get("description").and_then(|x| x.as_str()));
+        push_gql_field(
+            out,
+            name,
+            &base,
+            non_null,
+            p.get("description").and_then(|x| x.as_str()),
+            p.get("deprecated").and_then(|x| x.as_str()),
+        );
     }
 }
 
@@ -287,7 +300,7 @@ pub(crate) fn emit_server_types(model: &Model) -> String {
                         }
                         out.push_str(&format!("    pub {}: {},\n", rust_ident(&snake_field(&n.field)), ty));
                     }
-                    None => push_gql_field(out, &n.field, &base, n.list || !n.nullable, None),
+                    None => push_gql_field(out, &n.field, &base, n.list || !n.nullable, None, None),
                 }
             }
         }
@@ -311,7 +324,7 @@ pub(crate) fn emit_server_types(model: &Model) -> String {
         push_gql_struct_open(&mut out, &t.name, "SimpleObject", t.description.as_deref());
         for f in &t.properties {
             let base = rust_api_field_base(model, f, false);
-            push_gql_field(&mut out, &f.name, &base, !f.nullable, f.description.as_deref());
+            push_gql_field(&mut out, &f.name, &base, !f.nullable, f.description.as_deref(), None);
         }
         push_nav(&mut out, &t.name);
         out.push_str("}\n");
@@ -471,7 +484,7 @@ pub(crate) fn emit_server_inputs(model: &Model) -> String {
         push_gql_struct_open(&mut out, &format!("{}QueryInput", pascal(&q.name)), "InputObject", one_of_doc.as_deref());
         for a in &q.args {
             let base = rust_api_field_base(model, a, true);
-            push_gql_field(&mut out, &a.name, &base, a.required, a.description.as_deref());
+            push_gql_field(&mut out, &a.name, &base, a.required, a.description.as_deref(), None);
         }
         out.push_str("}\n");
         for a in &q.args {
@@ -488,7 +501,7 @@ pub(crate) fn emit_server_inputs(model: &Model) -> String {
         push_gql_struct_open(&mut out, &format!("{}SubscriptionInput", pascal(&s.name)), "InputObject", None);
         for a in &s.args {
             let base = rust_api_field_base(model, a, true);
-            push_gql_field(&mut out, &a.name, &base, a.required, a.description.as_deref());
+            push_gql_field(&mut out, &a.name, &base, a.required, a.description.as_deref(), None);
         }
         out.push_str("}\n");
         for a in &s.args {
@@ -516,7 +529,7 @@ pub(crate) fn emit_server_inputs(model: &Model) -> String {
         push_gql_struct_open(&mut out, name, "InputObject", None);
         for f in fields {
             let base = rust_api_field_base(model, f, true);
-            push_gql_field(&mut out, &f.name, &base, f.required, f.description.as_deref());
+            push_gql_field(&mut out, &f.name, &base, f.required, f.description.as_deref(), None);
         }
         out.push_str("}\n");
     }

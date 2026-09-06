@@ -90,6 +90,17 @@ PlaceOrderProcess:
               The same re-derivation for the line's selected options: they must still belong to
               the offer's option lists, within their selection bounds, in the catalog as it stands
               now — an option list edited since the line was added is the same staleness class.
+        # NOT yet the seventh carve-out's guard-replace (ADR-20260904-081527 §8, ADR-20260906-192007
+        # D-G): `make validate`'s `test-uncovered-error` demands a REAL, passing `thrown:` test for
+        # any error a guard's `throws:` structurally names, and the quote-verify logic this guard
+        # would describe does not exist until a later phase of this same PR -- landing the
+        # `$ref` here now would make `QuoteNoLongerHonoured` throwable with no code that can ever
+        # produce it, which the gate rightly refuses (confirmed empirically, not assumed: `make
+        # validate` errors `test-uncovered-error errors.yaml/QuoteNoLongerHonoured` the moment this
+        # guard's `throws:` names it). The carve-out's own framing -- "one indivisible write-side
+        # guard" -- turns out to be validator-enforced, not just descriptive: this guard-replace
+        # lands together with its Rust and its real test, not ahead of them. PriceMismatch stays
+        # live below until then.
         - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/CustomerCreditBalance' }

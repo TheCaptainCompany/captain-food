@@ -17,6 +17,13 @@
 //! hand-maintained mirror of it — so a future emitter change that starts spelling `CatalogVersion`
 //! anywhere on the wire fails HERE, at the seam that would let it through, rather than being
 //! caught later by a client integration surprise.
+//!
+//! Also hosts D-C's codegen test (same deliverable, same "never `tests.rs`" reason): a source
+//! property marked `deprecated: "<reason>"` (`commands.yaml`/`entities.yaml`) must render
+//! `@deprecated(reason: "<reason>")` on its SDL field, and the count of `deprecated:`-marked
+//! source properties must equal the count of `@deprecated` field directives in the generated SDL —
+//! a field marked deprecated that is not so marked in the wire, or one so marked with nothing
+//! behind it, is caught by the mismatch either way.
 
 use crate::*;
 
@@ -76,6 +83,59 @@ pub(crate) fn check_catalog_version_never_on_the_wire(model: &Model, issues: &mu
     }
 }
 
+/// Every `deprecated: "<reason>"` source property across `commands.yaml`/`entities.yaml` — the two
+/// files `object_fields_excluding`/`push_gql_object_fields_excluding` ever draw a `ctx` from. Walks
+/// every top-level type's `properties:` mapping; nested object types are reached too, because a
+/// `deprecated:` key on an entity property (never used by this deliverable, but not excluded)
+/// renders through the exact same emitter branch.
+fn deprecated_source_properties(model: &Model) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    for file in ["commands.yaml", "entities.yaml"] {
+        let Some(Value::Mapping(types)) = model.defs.get(file) else { continue };
+        for (type_name, def) in types {
+            let Some(type_name) = type_name.as_str() else { continue };
+            let Some(Value::Mapping(props)) = def.get("properties") else { continue };
+            for (prop_name, prop_def) in props {
+                let Some(prop_name) = prop_name.as_str() else { continue };
+                if let Some(reason) = prop_def.get("deprecated").and_then(|d| d.as_str()) {
+                    out.push((type_name.to_string(), prop_name.to_string(), reason.to_string()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The count of `@deprecated(reason: "…")` field directives anywhere in the generated SDL.
+fn deprecated_sdl_directive_count(sdl: &str) -> usize {
+    let re = regex::Regex::new(r#"@deprecated\(reason:\s*""#).expect("static regex compiles");
+    re.find_iter(sdl).count()
+}
+
+pub(crate) fn check_deprecated_key_reaches_the_sdl(model: &Model, issues: &mut Vec<Issue>) {
+    const RULE: &str = "deprecated-key-reaches-the-sdl";
+    let sdl = emit_schema(model);
+    let source = deprecated_source_properties(model);
+    let sdl_count = deprecated_sdl_directive_count(&sdl);
+    if source.len() != sdl_count {
+        issues.push(err(
+            RULE,
+            "schema.generated.graphql".to_string(),
+            format!(
+                "{} source propert{} carry `deprecated:` ({}), but the generated SDL carries {} \
+                 `@deprecated` field directive{} -- ADR-20260906-192007 D-C: every `deprecated:` \
+                 key must render as `@deprecated` on its SDL field, and no field may carry \
+                 `@deprecated` that the source did not mark.",
+                source.len(),
+                if source.len() == 1 { "y" } else { "ies" },
+                source.iter().map(|(t, p, _)| format!("{t}.{p}")).collect::<Vec<_>>().join(", "),
+                sdl_count,
+                if sdl_count == 1 { "" } else { "s" },
+            ),
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +189,35 @@ mod tests {
             args.iter().all(|(_, list)| !list.contains(FORBIDDEN)),
             "no argument list should contain CatalogVersion here: {args:?}"
         );
+    }
+
+    /// RED-FIRST (ADR-20260906-192007:34, D-C): the real corpus's `PlaceOrder.expectedTotal`
+    /// carries `deprecated:` and must render `@deprecated` in the generated SDL. Mutant: drop the
+    /// emitter branch that renders deprecation for an input field -- expected red: `expectedTotal`
+    /// carries no `deprecated` directive in the generated schema.
+    #[test]
+    fn the_deprecated_key_reaches_the_sdl() {
+        let m = model();
+        let mut issues = Vec::new();
+        check_deprecated_key_reaches_the_sdl(&m, &mut issues);
+        assert!(issues.is_empty(), "unexpected findings: {:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        let source = deprecated_source_properties(&m);
+        assert!(
+            source.iter().any(|(t, p, _)| t == "PlaceOrder" && p == "expectedTotal"),
+            "PlaceOrder.expectedTotal must be marked `deprecated:` in commands.yaml: {source:?}"
+        );
+        let sdl = emit_schema(&m);
+        assert!(
+            sdl.contains("expectedTotal: MoneyInput @deprecated(reason:") || sdl.contains("expectedTotal: MoneyInput  @deprecated(reason:"),
+            "expectedTotal must carry @deprecated in the generated SDL"
+        );
+    }
+
+    /// A field with no `deprecated:` key must never carry `@deprecated` (the negative half of the
+    /// same invariant) -- pinned via the count-equality check rather than naming every field.
+    #[test]
+    fn a_field_with_no_deprecated_key_is_not_marked() {
+        let sdl = "input Foo {\n  a: Int!\n  b: Int @deprecated(reason: \"x\")\n}";
+        assert_eq!(deprecated_sdl_directive_count(sdl), 1, "exactly one @deprecated directive expected");
     }
 }

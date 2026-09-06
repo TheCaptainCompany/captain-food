@@ -253,6 +253,11 @@ pub async fn priced(
             // The Uber-comparison estimate is a policy read this seam does not perform yet (#463
             // owns the impure survivors; the degenerate shape ships — same as checkout).
             uber_comparison: None,
+            // ADR-20260906-192007 D-A/D-J: the signed quote. `None` here for now -- the
+            // `QuoteMinter` this field is meant to carry does not exist until a later phase of
+            // this same PR (D-H); every read answers null in the meantime, one of `CartQuote`'s
+            // three documented null causes (scalars.yaml#/CartQuote).
+            quote: None,
             updated_at: row.updated_at,
             restaurant,
         })
@@ -311,6 +316,9 @@ fn unpriced_empty(row: &CartRow, restaurant: Restaurant) -> Cart {
         },
         breakdown: None,
         uber_comparison: None,
+        // ADR-20260906-192007 D-A/D-J: no lines, no mint -- null, same as every other arm before
+        // `QuoteMinter` lands (D-H, a later phase of this same PR).
+        quote: None,
         updated_at: row.updated_at,
         restaurant,
     }

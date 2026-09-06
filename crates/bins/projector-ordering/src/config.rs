@@ -304,6 +304,12 @@ pub struct Config {
     pub order_retention_window_days: i64,
     /// DEFAULT `false`. The priced read's fold arm (PROP-20260831-134539 slice 3a, D2/D4) — corrected wording, ADR-20260906-192007 D-L: "mint" is reserved for slice 3b's `QuoteMinter` (D-H), which signs a quote; this key gates a READ, and reading the fold is not minting anything. ON, `cart.current` and `cart` price the cart from `AsOfPriceAuthority::at_head` — ONE unbounded range read of the `Catalog-<id>` stream, returning an `AsOfCatalog` that carries its own coordinate (`AsOfCatalog::coordinate`; the tuple collapse, ADR-20260906-192007 D-L: `at_head` no longer returns a second, separately-checked `CatalogVersion` that could disagree with the value's own field), never a second read and never a caller-supplied expectation to check against. The `carts` LIST fan-out (one row per restaurant) does NOT participate in this door at all — structurally, not by convention: its own entry point (`cart_read::priced_list`) carries no witness parameter to open it, closed by the type system rather than left to this flag (D-L; dba's saturation concern — N restaurants would otherwise mean N unbounded head folds inside one request). The coordinate is server-carried only in this slice: it travels inside the read and is DROPPED at the reply boundary — no `catalogVersion` field, no input, no entities.yaml property (D3; the published `quote` word is slice 3b's). OFF is NOT a fallback of a failed fold: it is TODAY'S read, stated explicitly as the closed arm — `CatalogSnapshot::load` + `price_cart` against the live catalog PROJECTION, exactly as it has always run, carrying no coordinate. A fold failure with the door OPEN (the coordinate absent, or the stream unreadable) is `technical_error` through the EXISTING unresolvable-at-read path (`errors.yaml#/PriceUnresolvable`'s sibling classification, ADR-20260810-112836 §6) — NEVER a HEAD/projection fallback, and never presented as a price change. `decisionRow` binds this key to `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open): the phase-0 latency budget, the observability contract rows (incl. `payload_bytes`), the walk drill, 3b's signed quote, and dba's preconditions (content-hash import suppression landed, the buffer-cache instrument named) all gate the flip. `declare_flag` at BOTH composition roots (`crates/server/src/lib.rs`, `crates/infrastructure/src/mailbox/standalone.rs`) is the fleet-parity evidence (ADR-20260905-223957 §5, ADR-20260906-113444) — the standalone root's line is the PRE-RECORDED carve-out of ADR-20260904-081527 §8's standing clause, since this key is a `runKind: door` newly introduced.
     pub run_fold_priced_cart_read: bool,
+    /// DEFAULT `false`. The write-side door (ADR-20260906-192007 D-A/D-B). CLOSED (default, everywhere, and the only state this deliverable ships): `quote` on `PlaceOrder` is accepted structurally and NEVER READ -- every order is priced and charged at HEAD via the unchanged `expectedTotal` equality check, exactly today's behaviour. OPEN (not reachable by any code in this deliverable; a later phase of the same PR lands the reader): an absent `quote` refuses at the handler (typed, never SDL non-null); a present `quote` is verified against `as_of(catalogId, V)` at the coordinate it names (never `at_head` -- D-F), and a mismatch produces exactly one of the enumerated refusals (D-D). INTERLOCKED, not a shared key (D-B): this door may only be `true` when `RUN_FOLD_PRICED_CART_READ` is ALSO `true` -- the write-door witness is CONSTRUCTED FROM the read-door witness (compiler-first, ADR-20260803-234035 level 4), so the mixed state (verify against a coordinate the read side never mints) is unrepresentable rather than merely checked; a later phase of this PR pins this with a startup-refusal test at both composition roots. `decisionRow` binds this key to `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open): the door opens ONCE, after every item on that row discharges. `declare_flag` at BOTH composition roots (`crates/server/src/lib.rs`, `crates/infrastructure/src/mailbox/standalone.rs`) is the fleet-parity evidence (ADR-20260905-223957 §5, ADR-20260906-113444) -- the standalone root's line is the PRE-RECORDED carve-out of ADR-20260904-081527 §8's standing clause, since this key is a `runKind: door` newly introduced.
+    pub run_quote_required_on_place_order: bool,
+    /// The signed quote's CURRENT signing key (ADR-20260906-192007 D-H), copying `specs/common/configuration.yaml#/EMAIL_QUOTA_KEY_HMAC_SECRET` key-for-key: `secret: true`, `required: [staging, production]`, NO default -- a defaulted signing key is a forgeable price (dba). Unset in development/test, a fixed `DEV_ONLY` value is used (`application::email_guard::DEV_ONLY_HMAC_KEY`'s own precedent), and the write door REFUSES TO OPEN AT BOOT when the resolved key is that dev value and the door is open in staging/production -- never a per-request check. `application::quote::SigningKey` (a later phase of this PR) wraps this value with a module-private constructor (the `ActingRole` shape, ADR-20260803-234035 level 4) so the dev value is uncallable from the production construction path. `QuoteMinter` holds exactly ONE current key from this value (never the plural set below) -- a minter cannot accidentally verify. Key CUSTODY is admin-gated, the founder's external list (not a crypto-shredding key -- nothing personal is encrypted by it); rotation policy is the team's, recorded as: single key + one live `keyId` is acceptable at V0 provided the overlap window below is observed on any rotation.
+    pub quote_signing_key_hmac_secret: String,
+    /// The signed quote's RETIRED-BUT-STILL-ACCEPTED key (ADR-20260906-192007 D-H) -- OPTIONAL, unlike its `QUOTE_SIGNING_KEY_HMAC_SECRET` current-key sibling: absent whenever no rotation is in flight. `QuoteVerifier` (a later phase of this PR) holds a key SET built from both values (plural -- it must accept a quote signed under a key that has since been retired but is still inside the overlap window), a DIFFERENT type from `QuoteMinter`'s single current key, so a verifier cannot accidentally mint. A two-key overlap of 60 minutes (`N` + skew, `N` = the existing 30-minute `QUOTE-STALENESS` backstop) is a PRECONDITION of this deliverable, not of a later rotation: without it, a hard key-rotation cutover rejects every quote minted in the preceding 30 minutes platform-wide.
+    pub quote_signing_key_previous_hmac_secret: Option<String>,
 }
 
 impl Config {
@@ -496,6 +502,16 @@ impl Config {
             .or_else(|| baked("RUN_FOLD_PRICED_CART_READ", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_FOLD_PRICED_CART_READ", &v, false))
             .unwrap_or(false);
+        let run_quote_required_on_place_order = raw("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER")
+            .or_else(|| baked("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", &v, false))
+            .unwrap_or(false);
+        let quote_signing_key_hmac_secret = raw("QUOTE_SIGNING_KEY_HMAC_SECRET");
+        if quote_signing_key_hmac_secret.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
+            problems.missing.push(MissingKey { name: "QUOTE_SIGNING_KEY_HMAC_SECRET", gates: "The signed quote's CURRENT signing key (ADR-20260906-192007 D-H), copying `specs/common/configuration.yaml#/EMAIL_QUOTA_KEY_HMAC_SECRET` key-for-key: `secret: true`, `required: [staging, production]`, NO default -- a defaulted signing key is a forgeable price (dba). Unset in development/test, a fixed `DEV_ONLY` value is used (`application::email_guard::DEV_ONLY_HMAC_KEY`'s own precedent), and the write door REFUSES TO OPEN AT BOOT when the resolved key is that dev value and the door is open in staging/production -- never a per-request check. `application::quote::SigningKey` (a later phase of this PR) wraps this value with a module-private constructor (the `ActingRole` shape, ADR-20260803-234035 level 4) so the dev value is uncallable from the production construction path. `QuoteMinter` holds exactly ONE current key from this value (never the plural set below) -- a minter cannot accidentally verify. Key CUSTODY is admin-gated, the founder's external list (not a crypto-shredding key -- nothing personal is encrypted by it); rotation policy is the team's, recorded as: single key + one live `keyId` is acceptable at V0 provided the overlap window below is observed on any rotation." });
+        }
+        let quote_signing_key_hmac_secret = quote_signing_key_hmac_secret.unwrap_or_default();
+        let quote_signing_key_previous_hmac_secret = raw("QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET");
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -600,6 +616,9 @@ impl Config {
                 enforce_acceptance_timeout,
                 order_retention_window_days,
                 run_fold_priced_cart_read,
+                run_quote_required_on_place_order,
+                quote_signing_key_hmac_secret,
+                quote_signing_key_previous_hmac_secret,
             },
             problems,
         )
@@ -684,12 +703,15 @@ impl Config {
         out.push_str(&format!("  ENFORCE_ACCEPTANCE_TIMEOUT = {}\n", self.enforce_acceptance_timeout));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  RUN_FOLD_PRICED_CART_READ  = {}\n", self.run_fold_priced_cart_read));
+        out.push_str(&format!("  RUN_QUOTE_REQUIRED_ON_PLACE_ORDER = {}\n", self.run_quote_required_on_place_order));
+        out.push_str(&format!("  QUOTE_SIGNING_KEY_HMAC_SECRET = {}\n", if self.quote_signing_key_hmac_secret.is_empty() { "unset" } else { "set" }));
+        out.push_str(&format!("  QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET = {}\n", if self.quote_signing_key_previous_hmac_secret.is_some() { "set" } else { "unset" }));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 61;
+pub const KEY_COUNT: usize = 64;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -755,6 +777,9 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ENFORCE_ACCEPTANCE_TIMEOUT",
     "ORDER_RETENTION_WINDOW_DAYS",
     "RUN_FOLD_PRICED_CART_READ",
+    "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
+    "QUOTE_SIGNING_KEY_HMAC_SECRET",
+    "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
@@ -794,4 +819,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_RETENTION_SWEEP", "staging", "true"),
     ("RUN_FOLD_PRICED_CART_READ", "production", "false"),
     ("RUN_FOLD_PRICED_CART_READ", "staging", "false"),
+    ("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", "production", "false"),
+    ("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", "staging", "false"),
 ];

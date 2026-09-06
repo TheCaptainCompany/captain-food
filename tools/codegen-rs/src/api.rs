@@ -353,7 +353,16 @@ pub(crate) fn object_fields_excluding(model: &Model, def: &Value, ctx: &str, inp
         } else {
             p.get("nullable").and_then(|x| x.as_bool()) != Some(true)
         };
-        out.push(format!("  {}: {}{}", name, base, if non_null { "!" } else { "" }));
+        // The `deprecated:` key (ADR-20260906-192007 D-C): a string reason on the SOURCE property
+        // (commands.yaml/entities.yaml) renders as a GraphQL `@deprecated(reason: "…")` directive
+        // on the field — the expand/contract discipline's SDL half, so a client can keep sending a
+        // field the server has stopped requiring without the SDL lying about its status.
+        let deprecated = p
+            .get("deprecated")
+            .and_then(|x| x.as_str())
+            .map(|reason| format!(" @deprecated(reason: {:?})", reason))
+            .unwrap_or_default();
+        out.push(format!("  {}: {}{}{}", name, base, if non_null { "!" } else { "" }, deprecated));
     }
     out
 }
