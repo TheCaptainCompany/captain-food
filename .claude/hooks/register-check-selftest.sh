@@ -724,6 +724,15 @@ expect_d RF13-missing-double-colon-on-existing-path 2 "{\"tool_name\":\"Agent\",
 #    the FIRST cited record only -- that would read 0 and wrongly ALLOW.
 DTRAIL_ZH_THEN_RF='Register check: ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture, and ADR-20260906-050000 (2026-09-06, open) -- covers the redfirst fixture too'
 expect_d RF14-none-over-two-records-one-hitting 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_ZH_THEN_RF\\nRed-first: none — ADR-20260906-060000 names no test\"}}" dispatch-redfirst-false-negative
+# RF14b BLOCK (beck): the SAME two-record trail as RF14, with the citation ORDER REVERSED (the
+#    redfirst fixture FIRST, the zero-hit fixture SECOND) -- same expected refusal, but a
+#    DIFFERENT isolating mutant. RF14 alone does not catch "count hits over the LAST cited record
+#    only": in RF14's own order that mutant would take the redfirst fixture (the LAST record
+#    there) and still sum to the correct answer BY ACCIDENT, surviving the whole suite. Reversing
+#    the order here closes that gap: under the "last only" mutant this trail's last-cited record
+#    is the ZERO-hit fixture, so the mutant reads 0 and wrongly ALLOWs.
+DTRAIL_RF_THEN_ZH='Register check: ADR-20260906-050000 (2026-09-06, open) -- covers the redfirst fixture, and ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture too'
+expect_d RF14b-none-over-two-records-reversed-order 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF_THEN_ZH\\nRed-first: none — ADR-20260906-060000 names no test\"}}" dispatch-redfirst-false-negative
 # RF15 BLOCK: the SAME malformed text as RF10 ("nonesuch garbage"), but on a record that DOES have
 #    hits (`$DTRAIL_RF`) -- PRECEDENCE. This must resolve to `dispatch-redfirst-shape`, never to the
 #    false negative RF5 pins: the OLD prefix glob read "nonesuch" as the negative (it starts with
