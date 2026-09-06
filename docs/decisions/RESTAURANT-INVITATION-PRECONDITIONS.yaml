@@ -71,4 +71,4 @@ note: 'This row cannot close before `MEMBER-ACCESS-GRANT-PRECONDITIONS` AND
   fact -- the caller is proven the accepting subject by presenting the token, the same proof
   `acceptRestaurantInvitation` already required, so no new legal actor is introduced -- and its
   `membershipId`/`memberId` are DERIVED (UUIDv5 from `invitationId`), enforcing one membership per
-  invitation structurally rather than by a runtime check.'
+  invitation structurally rather than by a runtime check. Founder confirmed 2026-09-06 (status form, all seven external items): "Not yet -- keep carrying it" -- relayed to the whole roster (thirteen lenses, journal 2026-09-06), nothing decided or reversed; re-ask only when production un-suspends (ADR-20260817-105844) or a Tours restaurateur is scheduled (architect). The invitation email cannot deliver without DNS SPF/DKIM/DMARC (item 1) -- the same founder-held item as the member door.'
