@@ -14645,7 +14645,7 @@ _Surface_ **`system.yaml`**
 | write | `request_admin_sign_in_link` | [✏️ `requestAdminSignInLink`](#mutation-requestadminsigninlink) |
 
 **Gaps**
-- ⚠️ No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — "authenticate access to Captain's internal tools" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) is NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note (legal, ADR-20260906-023825, round 2 R2-L1 precedent). ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here.
+- ⚠️ No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — "authenticate access to Captain's internal tools" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) plus the LCEN art. 6 III (mentions légales) obligation are NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note carries. ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here.
 - ⚠️ The link-expiry countdown and a delayed resend re-enable need a client-side timer/countdown primitive this DSL does not declare (the restaurant_backoffice.yaml sign_in screen's own gap): the resend control is always active instead (the wall is server-side, harmless).
 
 <a id="screen-admin_sign_in_return"></a>
@@ -14682,7 +14682,7 @@ _Surface_ **`system.yaml`**
 
 
 **Gaps**
-- ⚠️ No legal/privacy link exists on this surface yet (no such page exists anywhere in the product today) -- the same absence the sign_in screen's own gaps note carries.
+- ⚠️ No legal/privacy link exists on this surface yet (no such page exists anywhere in the product today) -- the same absence the sign_in screen's own gaps note carries, including the LCEN art. 6 III (mentions légales) obligation.
 - ⚠️ No exit control exists on this screen by design (ux STOP, 2026-09-06 briefing): #94 (real sign-out) is the named follow-up that unblocks one, since a navigate-to-/sign-in control would loop on the still-valid ADMIN-claimed cookie.
 - ⚠️ The verified-email echo limitation (the restaurant_backoffice.yaml not_linked screen's own gap, :~994): no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, so the refused address is not printed here.
 
@@ -15218,6 +15218,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-sys-sign_in-no_password"></a>`sys.sign_in.no_password` | — | No password: the link replaces it. | Aucun mot de passe : le lien remplace le mot de passe. |
 | <a id="translation-sys-sign_in-support_lead"></a>`sys.sign_in.support_lead` | — | A problem? support@captain.food | Un problème ? support@captain.food |
 | <a id="translation-sys-sign_in-confirmation_body"></a>`sys.sign_in.confirmation_body` | — | If this address has platform access, a link has just been sent to it. | Si cette adresse dispose d'un accès plateforme, un lien vient de lui être envoyé. |
+| <a id="translation-sys-sign_in-confirmation_title"></a>`sys.sign_in.confirmation_title` | — | Check your email | Vérifiez vos e-mails |
+| <a id="translation-sys-sign_in-close"></a>`sys.sign_in.close` | — | Close | Fermer |
 | <a id="translation-sys-sign_in_return-title"></a>`sys.sign_in_return.title` | — | Signing you in… | Connexion en cours… |
 | <a id="translation-sys-sign_in_return-working"></a>`sys.sign_in_return.working` | — | Please wait, we're checking your link… | Merci de patienter, nous vérifions votre lien… |
 | <a id="translation-sys-sign_in_return-no_token"></a>`sys.sign_in_return.no_token` | — | This link is incomplete. Please request a new one. | Ce lien est incomplet. Merci d'en demander un nouveau. |

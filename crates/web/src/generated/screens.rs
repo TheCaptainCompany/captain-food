@@ -1316,9 +1316,9 @@ pub mod system {
                 Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("restrict_rider_error")), ("for_action", PropValue::Text("restrict_rider"))], children: &[], branches: &[] }
             ], branches: &[] } },
         Sheet { id: "admin_sign_in_confirmation_sheet", node:
-            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("admin_sign_in_confirmation_sheet")), ("title", PropValue::I18n("sys.sign_in.title"))], children: &[
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("admin_sign_in_confirmation_sheet")), ("title", PropValue::I18n("sys.sign_in.confirmation_title"))], children: &[
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.sign_in.confirmation_body"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("admin_sign_in_confirmation_close")), ("label", PropValue::I18n("sys.sign_in.title")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("admin_sign_in_confirmation_close")), ("label", PropValue::I18n("sys.sign_in.close")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }
             ], branches: &[] } },
     ];
 }

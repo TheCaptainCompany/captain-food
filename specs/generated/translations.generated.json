@@ -2111,9 +2111,17 @@
     "en": "If you believe this is an error, write to us:",
     "fr": "Si vous pensez qu'il s'agit d'une erreur, écrivez-nous :"
   },
+  "sys.sign_in.close": {
+    "en": "Close",
+    "fr": "Fermer"
+  },
   "sys.sign_in.confirmation_body": {
     "en": "If this address has platform access, a link has just been sent to it.",
     "fr": "Si cette adresse dispose d'un accès plateforme, un lien vient de lui être envoyé."
+  },
+  "sys.sign_in.confirmation_title": {
+    "en": "Check your email",
+    "fr": "Vérifiez vos e-mails"
   },
   "sys.sign_in.email_label": {
     "en": "Email address",
