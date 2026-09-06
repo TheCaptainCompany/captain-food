@@ -29,6 +29,7 @@ pub mod handwritten;
 pub mod i18n;
 #[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
 pub mod interact;
+pub mod next_param;
 pub mod pending;
 pub mod renderer;
 pub mod router;

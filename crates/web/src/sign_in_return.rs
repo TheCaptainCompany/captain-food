@@ -131,6 +131,27 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The pure decision behind [`return_target`], split out so it is testable off-wasm (the
+/// `parse_token`/`percent_decode` convention this file already uses): given the RAW captured
+/// value (if any) and the CURRENT host, decide the destination through `router::safe_next` — the
+/// ONE validation point. `None`/an invalid/unresolvable candidate all fall back to `/` — **NEVER**
+/// to `/sign-in`: this landing runs AFTER the sign-in confirm already succeeded, so falling back to
+/// sign-in would be a loop, not a safe default.
+#[cfg(any(test, all(target_arch = "wasm32", feature = "hydrate")))]
+fn resolve_return_target(host: &str, raw_next: Option<&str>) -> &'static str {
+    raw_next.and_then(|raw| crate::router::safe_next(host, raw)).unwrap_or("/")
+}
+
+/// The validated return-to-screen target after a SUCCESSFUL sign-in (#904 D3, ADR-20260905-101349
+/// §13): consumes the ONE captured `?next=` value (`next_param::take_next` — removed on read, so a
+/// reload of THIS page never replays a stale target) and validates it through [`resolve_return_target`]
+/// at THIS moment, the ONE consumption point — never earlier (storage never validates), never twice.
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+pub fn return_target() -> &'static str {
+    let Some(host) = web_sys::window().and_then(|w| w.location().host().ok()) else { return "/" };
+    resolve_return_target(&host, crate::next_param::take_next().as_deref())
+}
+
 /// Leave the page with a full browser navigation (never an SPA route, since this page mounts no
 /// router): the confirm/claim work is finished, and the destination is a fresh document either
 /// way (the orders queue needs a signed-in read; the not-linked screen is `graphql_role: PUBLIC`
@@ -173,5 +194,31 @@ mod tests {
         // appear in a real token, but a stranger can put anything in a URL.
         assert_eq!(parse_token("?token=a+b"), Some("a b".to_string()));
         assert_eq!(parse_token("?token=a%40b"), Some("a@b".to_string()));
+    }
+
+    // ---- D3 (#904, ADR-20260905-101349 §13): the return-to-screen consumption ----
+
+    /// Red-first (ADR-20260905-101349:171): a mutant that "accepts it" — returns the raw captured
+    /// value verbatim instead of routing it through `router::safe_next` — would send a visitor
+    /// straight back to `/sign-in` for the `Some("/sign-in")` case (a loop: this landing runs
+    /// AFTER sign-in already succeeded) instead of falling back to `/`.
+    #[test]
+    fn next_absent_or_invalid_navigates_to_root() {
+        let host = "riders.captain.food";
+        assert_eq!(resolve_return_target(host, None), "/", "nothing captured -> root");
+        assert_eq!(
+            resolve_return_target(host, Some("/sign-in")),
+            "/",
+            "the sign-in door itself must never be a return target (would loop)"
+        );
+        assert_eq!(resolve_return_target(host, Some("//evil.com")), "/", "an open redirect must never pass");
+        assert_eq!(resolve_return_target(host, Some("/route/does/not/exist")), "/");
+    }
+
+    /// A valid captured `next` (a `requires_auth` screen of the SAME surface) is honored.
+    #[test]
+    fn a_valid_captured_next_is_honored() {
+        let host = "riders.captain.food";
+        assert_eq!(resolve_return_target(host, Some("/")), "/");
     }
 }

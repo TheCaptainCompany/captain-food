@@ -70,6 +70,13 @@ pub fn token_from_location() -> Option<String> {
     crate::sign_in_return::token_from_location()
 }
 
+/// The validated return-to-screen target after a SUCCESSFUL admin sign-in (#904 D3) — the SAME
+/// consume-once/validate-at-consumption rule `sign_in_return.rs` uses.
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+pub fn return_target() -> &'static str {
+    crate::sign_in_return::return_target()
+}
+
 /// Leave the page with a full browser navigation — the `sign_in_return.rs` shape.
 #[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
 pub fn navigate_away(origin: &str, path: &str) {

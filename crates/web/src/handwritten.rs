@@ -566,7 +566,10 @@ pub mod mount {
             match outcome {
                 Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
                     crate::auth::claim_session(&origin, message_id, session).await;
-                    crate::sign_in_return::navigate_away(&origin, "/");
+                    // #904 D3: the validated pending `next` (consumed ONCE from sessionStorage,
+                    // validated at THIS moment) — `/` when none was captured or it no longer
+                    // resolves.
+                    crate::sign_in_return::navigate_away(&origin, crate::sign_in_return::return_target());
                 }
                 Ok(crate::actions::ActionOutcome::Rejected { message_id, error_code, .. }) => {
                     // Best-effort: nothing was parked for every OTHER rejection (M5's shape), so
@@ -625,7 +628,9 @@ pub mod mount {
             match outcome {
                 Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
                     crate::auth::claim_session(&origin, message_id, session).await;
-                    crate::admin_sign_in_return::navigate_away(&origin, "/");
+                    // #904 D3: the validated pending `next` — `/` when none was captured or it no
+                    // longer resolves.
+                    crate::admin_sign_in_return::navigate_away(&origin, crate::admin_sign_in_return::return_target());
                 }
                 Ok(crate::actions::ActionOutcome::Rejected { message_id, error_code, .. }) => {
                     // Best-effort: nothing was parked for every OTHER rejection, so this call is a

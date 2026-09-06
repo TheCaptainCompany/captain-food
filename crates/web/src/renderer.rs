@@ -1585,10 +1585,12 @@ pub fn hydrate() {
     let location = window.location();
     let host = location.host().unwrap_or_default();
     let path = location.pathname().unwrap_or_else(|_| "/".into());
-    // #904 D2 (ADR-20260905-101349 §13): the CURRENT pathname+query, so a refused read can compose
-    // `?next=` back to itself (`bounce::bounce_target`) -- captured once, up front, alongside the
-    // other per-load location facts.
-    let current_path_and_query = format!("{path}{}", location.search().unwrap_or_default());
+    // #904 D3 (ADR-20260905-101349 §13): capture a `?next=` this load's URL is carrying, BEFORE
+    // anything else runs — every screen load is a candidate (see `next_param`'s doc for why this
+    // never needs a "is this the sign-in screen" allowlist).
+    crate::next_param::store_next_once(&location);
+    let current_path_and_query =
+        format!("{path}{}", location.search().unwrap_or_default());
     // Locale parity (#110): the shell's `<html lang>` is what SSR resolved through the chain; read it
     // back so the hydrate re-render can't disagree with the server's language (no flash, no re-resolve).
     let locale = window

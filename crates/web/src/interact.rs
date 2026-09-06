@@ -499,7 +499,7 @@ async fn apply_outcome(
                         let _ = crate::auth::claim_session(&origin, message_id, session).await;
                     }
                 },
-                |route| navigate_to(route),
+                |route| navigate_home_or_next(route),
                 |sheet_id| set_sheet_hidden(Some(sheet_id), false),
                 || set_sheet_hidden(None, true),
             )
@@ -543,6 +543,36 @@ fn navigate_to(route: &str) {
     } else {
         let _ = w.location().set_href(route);
     }
+}
+
+/// #904 D3 — the "rider door" leg (no email hop, same tab throughout): the `on_success` chain's
+/// generic home navigation (declared `route == "/"`) honors a pending `?next=` still present in
+/// the CURRENT location's query string — read directly, NEVER `sessionStorage` (that store is the
+/// EMAIL-HOP legs' mechanism, `sign_in_return.rs`/`admin_sign_in_return.rs`; here the page never
+/// navigated away, so the value is still right there in the URL). Any OTHER declared route is left
+/// exactly as the screen author wrote it — this never second-guesses an explicit destination, only
+/// the generic "go home" one. A renderer rule, no spec field (ADR-20260817-105845): the SDUI
+/// `navigate` grammar is untouched, this is plain Rust deciding which literal href to hand it.
+fn navigate_home_or_next(route: &str) {
+    if route == "/" {
+        if let Some(target) = pending_next_in_current_location() {
+            navigate_to(&target);
+            return;
+        }
+    }
+    navigate_to(route);
+}
+
+/// The validated `next` a stranger's URL is STILL carrying right now, if any — never consumed
+/// (nothing to remove: this reads the live location, not a store), never twice-decoded (`safe_next`
+/// decodes once).
+fn pending_next_in_current_location() -> Option<String> {
+    let window = web_sys::window()?;
+    let location = window.location();
+    let host = location.host().ok()?;
+    let search = location.search().ok()?;
+    let raw = crate::next_param::extract_next(&search)?;
+    crate::router::safe_next(&host, &raw).map(str::to_string)
 }
 
 /// The user-facing line for a non-success outcome: the server's message when present (it is the
