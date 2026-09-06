@@ -72,7 +72,9 @@ this the next chunk on 2026-09-05 (6-iii blocked; step 7 depends on a complete 6
    `auth.scope_membership.business.scope_type` bounded population is NOT touched (no PLATFORM value exists). Flip
    evidence is named on the row. farley's gate: a codegen test that every `RUN_*` key is `declare_flag`'d
    unconditionally at both roots with the same default — the parity has drifted twice on comments alone — lands with
-   6-v.
+   6-v. **AMENDED 2026-09-06 by [ADR-20260906-113444](ADR-20260906-113444-every-run-key-declares-runkind-door-or-worker-and-the-parity-gate-filters-on-it.md)**:
+   the gate's population is the DECLARED DOORS (`runKind: door`), never every `RUN_*` key — a worker may carry a
+   `decisionRow:` and stays out of the parity population; the proxy `decision_row.is_some()` is gone.
 6. **Legal posture (advice recorded, never clearance)**: a Captain admin is provisioned from the person themself —
    **Art. 13 at collection**, not the restaurant colleague's Art. 14; a SECOND Art. 30 entry (Captain as SOLE
    controller over its own worker, incl. admin action logs and their retention — grade (b), verify), never a widening
