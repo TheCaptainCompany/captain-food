@@ -46,4 +46,4 @@ note: 'The key is consumed at BOTH mutation handlers: OFF refuses `requestMember
   `MemberSignInDoorClosed`. The public-graph limits (E, ADR-20260905-101349 §9) ride the SAME PR
   but are NOT gated by this key -- they are a bound applied to every role''s schema, not a door,
   and they discharge PROP-20260831-180622''s `public-graph-limits` Concern independently of this
-  row''s status.'
+  row''s status. Founder confirmed 2026-09-06 (status form, all seven external items): "Not yet -- keep carrying it" -- relayed to the whole roster (thirteen lenses, journal 2026-09-06), nothing decided or reversed; re-ask only when production un-suspends (ADR-20260817-105844) or a Tours restaurateur is scheduled (architect). DNS SPF/DKIM/DMARC and EMAIL_QUOTA_KEY_HMAC_SECRET unprovisioned keep this door dark for everyone; from the first invitation batch onward that is top-of-funnel loss with no delivery contract to measure it (business). The support@ inbox named on every refusal screen has no owner yet; the copy promises no clock, so no string changes while the door is dark (ux).'

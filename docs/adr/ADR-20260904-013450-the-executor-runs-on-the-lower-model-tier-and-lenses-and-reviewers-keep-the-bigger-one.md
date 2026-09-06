@@ -64,7 +64,7 @@ were killed by container restarts (×3) and API overloads (×2), which are ortho
    load-bearing**, not a default that cost pressure may creep into next (holub): with a cheaper
    author, the reviewer is the only net for the two defect classes gates cannot catch — record
    accuracy and fail-closed defaults.
-3. **The `HOLD: human` carve-out of 2026-08-28 is withdrawn.** The old text kept the coordinator
+3. **The `HOLD: human` carve-out of 2026-08-28 is withdrawn.** *Amended 2026-09-06 by ADR-20260906-024838: every line of the card's cited record that names a test, belt or mutant is a red-first card step, and the hand-back carries the mandatory `New grammar / invented exemption:` line.* The old text kept the coordinator
    model for "anything on the `HOLD: human` class"; the founder chose the literal reading, so a
    `HOLD: human` executor card runs on the lower tier too. What changes on such a card is the
    **card**, not the model (beck, below): the mutant named, the expected-red list pre-classified,
@@ -72,7 +72,7 @@ were killed by container restarts (×3) and API overloads (×2), which are ortho
    `git diff --stat` between them, the negative cases spelled out, `DB_TESTS_REQUIRED=1` named.
 4. **The coordinator keeps the bigger tier** for triage, review verdicts, records (ADRs, journal,
    dispatch cards) and founder-facing surfaces — unchanged from 2026-08-28.
-5. **Exit condition, measured, never re-litigated per dispatch** (holub). Precondition: **the
+5. **Exit condition, measured, never re-litigated per dispatch** (holub). *AMENDED 2026-09-06 by [ADR-20260906-024838](ADR-20260906-024838-the-lower-tier-stays-for-every-class-and-the-two-failure-shapes-become-structural.md): the tier-exit trip fired five times (#875, #885, #899, #901, #907) and the founder answered KEEP; the trip is retired as a decision-queue trigger, the per-window journal line and the per-PR wide row remain, and §3's card contract gains the red-first card step.* Precondition: **the
    dispatch card and the PR body state the executor tier**, or the count cannot be made — today no
    PR says which tier ran it, so no per-tier baseline exists. Numerator: lower-tier-executed PRs
    whose FIRST independent reviewer pass (the presentation pass of
