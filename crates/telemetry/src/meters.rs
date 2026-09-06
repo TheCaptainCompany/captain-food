@@ -1367,7 +1367,7 @@ pub mod admin_sign_in {
         link_requested_counter().add(1, &[KeyValue::new("result", result.to_string())]);
     }
 
-    /// `admin_sign_in_confirmed_total{result}` -- `confirmAdminSignIn`'s outcome (linked |
+    /// `admin_sign_in_confirmed_total{result}` -- `confirmAdminSignIn`'s outcome (granted |
     /// not_granted | token_invalid | token_expired | lookup_failed | door_closed |
     /// requires_session | claim_conflict | rejected).
     pub fn confirmed(result: &str) {
@@ -1607,7 +1607,7 @@ mod tests {
         super::member_sign_in::refused("door_closed");
         super::member_sign_in::door_enforcing(true);
         super::admin_sign_in::link_requested("accepted");
-        super::admin_sign_in::confirmed("linked");
+        super::admin_sign_in::confirmed("granted");
         super::admin_sign_in::claim_stamp_failed("not_configured");
         super::admin_sign_in::refused("door_closed");
         super::admin_sign_in::door_enforcing(true);

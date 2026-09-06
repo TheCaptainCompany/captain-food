@@ -26,8 +26,10 @@ pub fn admin_sign_in_reason(e: &DomainError) -> &'static str {
 }
 
 /// The `admin.signin.confirm` span's `business.result` -- the contract's closed vocabulary
-/// (linked | not_granted | token_invalid | token_expired | lookup_failed | door_closed |
-/// requires_session | claim_conflict | rejected), never a bare error code.
+/// (granted | not_granted | token_invalid | token_expired | lookup_failed | door_closed |
+/// requires_session | claim_conflict | rejected), never a bare error code. Round 2 R2-4 (evans):
+/// the success token is "granted", never "linked" -- nothing links here, the grant pre-exists
+/// (`GrantPlatformAccess`, 6-v) and the door only identifies against it.
 pub fn admin_sign_in_confirm_result(e: &DomainError) -> &'static str {
     match e {
         DomainError::Rejected { code, .. } => match code.as_str() {

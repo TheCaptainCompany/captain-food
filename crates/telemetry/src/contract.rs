@@ -417,7 +417,7 @@ pub mod metric {
 
     /// `requestAdminSignInLink`'s outcome, attribute `result` (accepted | refused).
     pub const ADMIN_SIGN_IN_LINK_REQUESTED_TOTAL: &str = "admin_sign_in_link_requested_total";
-    /// `confirmAdminSignIn`'s outcome, attribute `result` (linked | not_granted | token_invalid |
+    /// `confirmAdminSignIn`'s outcome, attribute `result` (granted | not_granted | token_invalid |
     /// token_expired | lookup_failed | door_closed | requires_session | claim_conflict | rejected).
     pub const ADMIN_SIGN_IN_CONFIRMED_TOTAL: &str = "admin_sign_in_confirmed_total";
     /// The ADMIN claim stamp (`identity.stamp_admin_claim`) failed -- the
