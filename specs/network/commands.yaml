@@ -677,5 +677,3 @@ ConfirmMemberSignIn:
     token:
       $ref: 'scalars.yaml#/EmailVerificationToken'
   required: [token]
-
-

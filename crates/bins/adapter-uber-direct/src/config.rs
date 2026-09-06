@@ -216,6 +216,8 @@ pub struct Config {
     pub internal_trigger_token: Option<String>,
     /// The one-shot `bootstrap-platform-admin` subcommand's ONLY input: the first admin's verified Supabase auth subject. Read once, at invocation, never logged, never a command payload from a GraphQL client -- the command it dispatches (`GrantPlatformAccess`) is `roles: [ADMIN]` in steady state and unreachable from any public surface. Absent, the subcommand refuses to run and exits non-zero before touching the mailbox; the ordinary server boot never reads this key at all and is never blocked by its absence.
     pub platform_bootstrap_admin_subject: Option<String>,
+    /// DEFAULT `false`. The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON, `GrantPlatformAccess` appends `PlatformAccessGranted` as normal (subject to the accepted-basis check). OFF, the handler refuses BEFORE touching the store with the typed `PlatformAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. NO revoke command exists yet to be asymmetric with (ADR-20260905-223957 §3). Preconditions gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): the one-shot bootstrap landed and idempotent, the seam refusing an unbound ADMIN token proven red-first, the Art. 13/Art. 30 items (founder's, external), the labour posture (founder's), the `admin-sign-in` contract and both dead-man gauges live, and 6-iii's System routing items.
+    pub run_platform_access_grant: bool,
     /// DEFAULT `30`. How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
     pub mailbox_lease_seconds: i64,
     /// DEFAULT `10`. Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
@@ -387,6 +389,10 @@ impl Config {
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
         let platform_bootstrap_admin_subject = raw("PLATFORM_BOOTSTRAP_ADMIN_SUBJECT");
+        let run_platform_access_grant = raw("RUN_PLATFORM_ACCESS_GRANT")
+            .or_else(|| baked("RUN_PLATFORM_ACCESS_GRANT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_PLATFORM_ACCESS_GRANT", &v, false))
+            .unwrap_or(false);
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
@@ -539,6 +545,7 @@ impl Config {
                 external_api_tokens,
                 internal_trigger_token,
                 platform_bootstrap_admin_subject,
+                run_platform_access_grant,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activations,
@@ -619,6 +626,7 @@ impl Config {
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INTERNAL_TRIGGER_TOKEN     = {}\n", if self.internal_trigger_token.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  PLATFORM_BOOTSTRAP_ADMIN_SUBJECT = {}\n", if self.platform_bootstrap_admin_subject.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  RUN_PLATFORM_ACCESS_GRANT  = {}\n", self.run_platform_access_grant));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
@@ -666,7 +674,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 59;
+pub const KEY_COUNT: usize = 60;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -688,6 +696,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "EXTERNAL_API_TOKENS",
     "INTERNAL_TRIGGER_TOKEN",
     "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT",
+    "RUN_PLATFORM_ACCESS_GRANT",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATIONS",
@@ -751,6 +760,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("OTEL_TRACES_SAMPLE_RATIO", "staging", "1.0"),
     ("LOG_LEVEL", "production", "info"),
     ("LOG_LEVEL", "staging", "info"),
+    ("RUN_PLATFORM_ACCESS_GRANT", "production", "false"),
+    ("RUN_PLATFORM_ACCESS_GRANT", "staging", "false"),
     ("RUN_PROJECTOR", "production", "true"),
     ("RUN_PROJECTOR", "staging", "true"),
     ("RUN_PROCESS_MANAGERS", "production", "true"),

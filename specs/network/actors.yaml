@@ -340,5 +340,3 @@ RestaurantInvitation:
         fence on that file that named no concurrent claim; the recorder was already written and
         idempotent, so finishing the wiring was the honest fix (issue #902 tracks the follow-up
         observability, not the delivery itself, which now exists).
-
-

@@ -398,4 +398,3 @@ mutations:
     command: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
     roles: [PUBLIC]
     slice: V0
-

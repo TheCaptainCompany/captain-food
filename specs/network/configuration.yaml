@@ -136,35 +136,6 @@ keys:
       staging: "false"
 
 
-  # #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door, mirroring
-  # RUN_MEMBER_ACCESS_GRANT's shape exactly. Consumed at the WRITE door only
-  # (`grant_platform_access`'s handler, the `RestrictRider`/`RUN_MEMBER_ACCESS_GRANT` shape): OFF
-  # returns the typed refusal `PlatformAccessGrantDoorClosed` BEFORE the store is touched -- for
-  # BOTH the hand-issued GraphQL door and the one-shot bootstrap, which dispatches the SAME command
-  # through the SAME handler. `decisionRow` binds this key to
-  # `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` explicitly, so `decision-row-open-key-must-be-off`
-  # refuses any `deploy.production` value other than `"false"` while that row stays open.
-  RUN_PLATFORM_ACCESS_GRANT:
-    type: bool
-    scalar:
-      $ref: 'scalars.yaml#/ConfigBoolean'
-    default: false
-    decisionRow: ADMIN-DOOR-PRECONDITIONS
-    gates: >
-      The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON,
-      `GrantPlatformAccess` appends `PlatformAccessGranted` as normal (subject to the accepted-basis
-      check). OFF, the handler refuses BEFORE touching the store with the typed
-      `PlatformAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. NO
-      revoke command exists yet to be asymmetric with (ADR-20260905-223957 §3). Preconditions
-      gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): the
-      one-shot bootstrap landed and idempotent, the seam refusing an unbound ADMIN token proven
-      red-first, the Art. 13/Art. 30 items (founder's, external), the labour posture (founder's),
-      the `admin-sign-in` contract and both dead-man gauges live, and 6-iii's System routing items.
-    deploy:
-      production: "false"
-      staging: "false"
-
-
   # UNVERIFIED input (ADR-20260817-105845: a dispatch card may not state a derived number without
   # its antecedents, and this session has none to derive from -- no cost model, no support-ticket
   # data, no comparable product's own TTL is on the record). 604800s = 7 days is PROPOSED, not

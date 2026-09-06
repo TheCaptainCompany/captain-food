@@ -156,5 +156,3 @@ MemberSignInIdentifiesOnly:
 
 MemberSignInGatedBeforeStore:
   description: "requestMemberSignInLink and confirmMemberSignIn both refuse with the typed MemberSignInDoorClosed BEFORE the identity provider is touched while configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR is off (#639 part C step 6-ii, ADR-20260905-101349 §6)."
-
-
