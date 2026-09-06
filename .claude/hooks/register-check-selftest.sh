@@ -705,15 +705,33 @@ fi
 # LD3: the live docs tree resolves a real record id -- the anti-theatre check is only as good as
 # its resolver, and a resolver pointed at the wrong root refuses EVERY citation (fail-shut drift
 # that would read as "the coordinator keeps writing bad trails"). Carries a `Red-first:` entry
-# since #910: the REAL ADR-20260821-095957 names its own test discipline (8 hit lines today), so
-# once Rule 1 exists a trail-only citation of it is refused -- keeping this card trail-only would
-# have flipped LD3's own verdict, which the card's STOP condition forbids. NAMED RESIDUAL: pinned
-# to line 17 of the live file; if that ADR is ever edited and line 17 stops naming a test, this
-# case reds for a reason unrelated to Lane D itself -- re-pin it to any surviving hit line.
-printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::proves_live_docs_resolve — ADR-20260821-095957:17 — mutant: delete the docs override guard — expected red: register-check selftest LD3 fails to resolve\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
-if [ $? -ne 0 ]; then
-  echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
+# since #910: the REAL ADR-20260821-095957 names its own test discipline, so once Rule 1 exists a
+# trail-only citation of it is refused -- keeping this card trail-only would have flipped LD3's own
+# verdict, which the card's STOP condition forbids.
+# #914 item 5 (reviewer, beck): this used to pin a HARD-CODED line 17, structure-sensitive to an
+# edit of that ADR unrelated to Lane D itself. The hit line is now DERIVED at selftest time, the
+# same way the corpus test (`every_record_in_the_corpus_is_citable_through_lane_d`,
+# tools/codegen-rs/src/tests.rs) does: read `REDFIRST_TOKENS` FROM THE HOOK FILE itself (one `sed`
+# over its own `REDFIRST_TOKENS='...'` declaration -- no second copy of the token set to drift),
+# then `grep -niE` the live file for its own first hit line.
+ld3_tokens="$(sed -n "s/^REDFIRST_TOKENS='\(.*\)'\$/\1/p" "$HOOK")"
+ld3_file="$(ls "$ROOT"/docs/adr/ADR-20260821-095957-*.md 2>/dev/null | head -1)"
+ld3_line=""
+if [ -n "$ld3_tokens" ] && [ -n "$ld3_file" ]; then
+  ld3_line="$(grep -niE "$ld3_tokens" "$ld3_file" 2>/dev/null | head -1 | cut -d: -f1)"
+fi
+if [ -z "$ld3_tokens" ]; then
+  echo "register-check selftest: case LD3 FAILED -- could not extract REDFIRST_TOKENS from $HOOK; the sed pattern here is out of sync with the hook's own declaration" >&2
   fail=1
+elif [ -z "$ld3_line" ]; then
+  echo "register-check selftest: case LD3 FAILED -- no line of $ld3_file matches the extracted token set; re-pin or investigate before trusting this case" >&2
+  fail=1
+else
+  printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::proves_live_docs_resolve — ADR-20260821-095957:$ld3_line — mutant: delete the docs override guard — expected red: register-check selftest LD3 fails to resolve\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 (derived hit line $ld3_line) did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
+    fail=1
+  fi
 fi
 
 # ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────
