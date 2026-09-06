@@ -1168,9 +1168,15 @@ impl ProjectionWorker {
             // off a scan that observed nothing -- and it would under-report exactly at Friday peak,
             // where every tick's LAST page for a draining group is short by construction (the
             // backlog is rarely an exact multiple of `batch_size`). The loop falls through to the
-            // top instead, so the NEXT scan (cheap: one indexed tail scan, ~11 qps ceiling at 17
-            // groups, sub-ms) is the one that actually finds nothing pending and records the 0 --
-            // and if an event landed in the gap, that scan sees it and keeps draining, correctly.
+            // top instead, so the NEXT scan is the one that actually finds nothing pending and
+            // records the 0 -- and if an event landed in the gap, that scan sees it and keeps
+            // draining, correctly. This scan is NOT an index lookup (dba): `stream_name LIKE ANY`
+            // is a FILTER, not an index condition -- it is a PK-ordered (`position`) tail scan
+            // bounded by `position > checkpoint`, so its cost scales with `head - checkpoint` for
+            // THIS group, not with the table's total size (measured: 4.4 ms across a 50k-position
+            // gap, 0.03 ms once caught up). It runs on `self.pool` AFTER `tx.commit()` above --
+            // outside the batch transaction, holding no lock -- so it never extends the write's
+            // critical section.
         }
     }
 

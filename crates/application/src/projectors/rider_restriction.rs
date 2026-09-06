@@ -83,11 +83,15 @@ mod tests {
     /// D4 (dba, observability): a malformed `decidedAt`/`effectiveAt` on a RESTRICTED row must
     /// never fold to `None` -- that would render `restriction: null` on a rider the fold just
     /// classified RESTRICTED, worse than a wrong-but-present timestamp. It folds to
-    /// `env.occurred_at` instead (deterministic on replay) and REPORTS (a `tracing::error!`), never
-    /// silently. Seen RED against the mutant `.parse().ok()` (`left: None, right: Some(...)`,
-    /// i.e. `decided_at` reads `None` on a RESTRICTED row) -- recorded in the hand-back.
+    /// `env.occurred_at` instead (deterministic on replay). The production fold ALSO emits a
+    /// `tracing::error!` on this path (`position` + the raw string, classified technical) -- NOT
+    /// asserted here, since `application` carries no tracing `Capture` dev-dependency to observe
+    /// it; the log assertion is the linked follow-up
+    /// ([#936](https://github.com/TheCaptainCompany/captain-food/issues/936)). Seen RED against the
+    /// mutant `.parse().ok()` (`left: None, right: Some(...)`, i.e. `decided_at` reads `None` on a
+    /// RESTRICTED row) -- recorded in the hand-back.
     #[test]
-    fn a_malformed_restriction_timestamp_folds_to_occurred_at_and_reports() {
+    fn a_malformed_restriction_timestamp_folds_to_occurred_at() {
         let rider_id = uuid::Uuid::new_v4();
         let env = restricted_envelope(rider_id, "not-a-timestamp", "also-not-a-timestamp");
 

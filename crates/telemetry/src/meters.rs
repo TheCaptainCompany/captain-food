@@ -841,10 +841,12 @@ pub mod rider_restriction {
     }
 
     /// `rider_standing_lag_positions` — the Rider projector group's pending page length at each
-    /// scan: a lower bound capped at `batch_size` while draining, re-recorded only when the log
-    /// moves, 0 only on the first scan that finds nothing (round 2 item 6(b) — "0 while caught up"
-    /// was false as written; `drain_group`'s own pre-existing shape, shared with
-    /// `scope_membership_lag_positions`).
+    /// scan: a lower bound capped at `batch_size` while draining, 0 ONLY on a scan that observed
+    /// nothing pending (never inferred at a short page, #876 D2). Re-recorded on every IDLE pass
+    /// too, not only when the log moves (#876 D3, `worker.rs`'s idle gate) — a literal 0, since the
+    /// gate only arms once every group has fully drained. Saturates at `batch_size` above 0: honest
+    /// exactly at 0, not above it (the linked follow-up,
+    /// [#936](https://github.com/TheCaptainCompany/captain-food/issues/936)).
     pub fn lag(positions: i64) {
         lag_gauge().record(positions, &[]);
     }
@@ -1533,14 +1535,15 @@ pub mod restaurant_invitation {
 
     /// `restaurant_roster_lag_positions` — the `RestaurantRoster` projector group's pending page
     /// length at each scan (the `rider_standing_lag_positions`/`scope_membership_lag_positions`
-    /// shape): a lower bound capped at `batch_size` while draining, re-recorded only when the log
-    /// moves, 0 only on the first scan that finds nothing.
+    /// shape): a lower bound capped at `batch_size` while draining, 0 ONLY on a scan that observed
+    /// nothing pending (never inferred at a short page, #876 D2), and re-recorded on every IDLE
+    /// pass too, not only when the log moves (#876 D3).
     pub fn roster_lag(positions: i64) {
         roster_lag_gauge().record(positions, &[]);
     }
 
-    /// `restaurant_invitation_list_lag_positions` — same shape, for the `RestaurantInvitationList`
-    /// projector group.
+    /// `restaurant_invitation_list_lag_positions` — same shape (see [`roster_lag`]), for the
+    /// `RestaurantInvitationList` projector group.
     pub fn invitation_list_lag(positions: i64) {
         invitation_list_lag_gauge().record(positions, &[]);
     }
