@@ -17,7 +17,7 @@ and the chunk adds no CI step; [CITATION-RULE-LEVEL](../decisions/CITATION-RULE-
 reuses the existing citation walker, never a second prose parser; [DISPATCH-CARD-CITATION](../decisions/DISPATCH-CARD-CITATION.yaml)
 (decided) — the graph settles what is resolvable; [ADR-20260811-014129](ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)
 — prose citations stay prose and the graph is not a business metric. Precedent:
-[ADR-20260807-183024](ADR-20260807-183024-specs-per-scope-layout-and-the-cross-scope-ref-dag.md)'s
+[ADR-20260807-183024](ADR-20260807-183024-one-decomposition-axis.md)'s
 `crate-graph.generated.json`. Not a graph database and not GraphRAG — the founder's question was answered on
 that ground and the decision adopts the emitted artifact.
 
