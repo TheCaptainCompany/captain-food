@@ -6,6 +6,8 @@ FOUNDER-OWNED register row) · **Date**: 2026-08-16 ·
 **Register**: [DECISIONS](../proposals/DECISIONS.md) §44 (**MOB-COST-1**) ·
 **Session**: https://claude.ai/code/session_01SDJjYQsfwaa4DVyNfFepbA
 
+> **AMENDED IN PART 2026-09-06 by [ADR-20260906-152024](ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md)** — decision 6's local pre-flight on a branch now has a round shape: round 1 runs the full local set; a confirmation round runs a pre-push check over the reverse-dependency closure of the touched crates; CI stays the gate and the ready flip means CI green.
+
 ## The question (founder / Tech CEO, 2026-08-16)
 
 > "Do you have recommendations to optimise tokens consumption?"

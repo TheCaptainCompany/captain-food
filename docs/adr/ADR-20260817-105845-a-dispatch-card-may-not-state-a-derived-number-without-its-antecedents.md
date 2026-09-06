@@ -9,6 +9,8 @@
 **Register**: [DECISIONS §44](../proposals/DECISIONS.md) **MOB-COST-1a**, now answered ·
 **Session**: https://claude.ai/code/session_01SDJjYQsfwaa4DVyNfFepbA
 
+> **POINTER 2026-09-06 ([ADR-20260906-152024](ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md))** — *antecedent* keeps exactly this meaning: an input to a derived number. A prose claim ABOUT THE CODE cited on a card is governed by the sibling rule *claim pinning* (`Pinned by: <test>`), a witness, never an antecedent; the `UNVERIFIED input` marker is shared by both.
+
 ## Status
 
 Accepted.

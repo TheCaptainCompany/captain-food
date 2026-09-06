@@ -820,6 +820,25 @@ extraction from the cited record is COMPLETE (every line that "names a test" is 
 at the margins); those stay a lens read at the mob briefing and the independent reviewer's read
 over the full diff, exactly like every other honesty limit this file states for a gate.
 
+### The pinned claim — canonical format, declared once, HERE
+
+A **pinned claim** (founder decision 2026-09-06, [ADR-20260906-152024](../../adr/ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md) §2) is a
+dispatch-card entry for any spec note, doc comment, proposal sentence or `gaps:` bullet the card cites ABOUT THE
+CODE. The card carries a `Pinned claims:` block, one entry per claim:
+
+```
+Pinned claims:
+- <the claim, quoted> — Pinned by: <test path>::<name>
+- <the claim, quoted> — UNVERIFIED input (no test can pin it; say why)
+```
+
+The pin EXECUTES the code path and asserts the observable — a lexical check that a note contains a word pins the
+note to itself and is forbidden; a pin never seen red against a code mutation is not a pin. *Antecedent* stays
+the word for a derived number's inputs (ADR-20260817-105845); a pin is a witness. A legal claim in `specs/**`
+pins to an ENFORCEMENT test through the `rules:` → `tests.yaml` → generated behaviour-test chain, never to prose,
+and the card inherits only what the test asserts. Lane D of the register-check hook will check presence and
+resolution of the pin symbol over this block (#923); until then the block is prose and the reviewer reads it.
+
 ### A gate that classifies members of a corpus is tested against the CORPUS, not against fixtures
 
 **Fixtures prove the branches; only the corpus proves the classification.**
