@@ -151,6 +151,26 @@ impl CatalogReadRepository for Empty {
         Ok(None)
     }
 }
+/// The door defaults CLOSED and this suite never opens it; a real `at_head`/`as_of` call here
+/// would be a defect (the open arm reachable from a subscription resolver), so both refuse loudly
+/// rather than answering with an empty catalog.
+#[async_trait]
+impl application::ports::AsOfPriceAuthority for Empty {
+    async fn as_of(
+        &self,
+        _catalog_id: ds::CatalogId,
+        _version: domain::catalog_as_of::CatalogVersion,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+        Err(DomainError::Repository("Empty never folds".into()))
+    }
+    async fn at_head(
+        &self,
+        _catalog_id: ds::CatalogId,
+        _correlation_id: uuid::Uuid,
+    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+        Err(DomainError::Repository("Empty never folds".into()))
+    }
+}
 #[async_trait]
 impl CartReadRepository for Empty {
     async fn by_customer(&self, _id: ds::CustomerId) -> Result<Vec<CartRow>, DomainError> {
@@ -571,6 +591,8 @@ fn schema_over_with_deliveries(
         service_window_horizon: Default::default(),
         support_contact: None,
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+        as_of_price_authority: Arc::new(Empty),
+        run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         }),
         None,
         Some(bus),
@@ -1345,6 +1367,8 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
         service_window_horizon: Default::default(),
         support_contact: None,
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+        as_of_price_authority: Arc::new(Empty),
+        run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         }),
         None,
         None,

@@ -121,8 +121,11 @@ pub mod attr {
     /// correlation id). The as-of coordinate the read was bounded to (`CatalogVersion::get()`).
     pub const VERSION: &str = "business.version";
     /// Rows the SQL leg returned, technical rows included (before `$`-prefixed rows are dropped by
-    /// decode) — the read's own cost signal, distinct from `events_applied`.
-    pub const STREAM_LENGTH: &str = "business.stream_length";
+    /// decode) — the read's own cost signal, distinct from `events_applied`. Named `rows_read`, not
+    /// `stream_length` (PROP-20260831-134539 slice 3a, D5, beck): on a BOUNDED read (`as_of`) this
+    /// is rows AT OR BELOW the requested version, not the stream's true length; the true head-
+    /// derived L is what the `catalog_as_of_stream_length` histogram carries instead.
+    pub const ROWS_READ: &str = "business.rows_read";
     /// Business events the fold actually applied (`<= stream_length`, `<= version`).
     pub const EVENTS_APPLIED: &str = "business.events_applied";
 }
@@ -287,6 +290,23 @@ pub mod metric {
     /// policy_missing | stock_unknown). Each one is a customer who saw NO payable amount — a
     /// sale silently lost; alert on any sustained non-zero rate.
     pub const CART_PRICE_UNRESOLVABLE_TOTAL: &str = "cart_price_unresolvable_total";
+    /// `cart-price` contract (PROP-20260831-134539 slice 3a, D5): the as-of fold's OWN duration
+    /// (SQL + decode + the fold), inside `cart_price_ms` — if the leg drifts toward its phase-0
+    /// headroom (`QUOTE-MINT-PRECONDITIONS`), this is the number that shows it, distinct from the
+    /// whole-read timer.
+    pub const CATALOG_AS_OF_FOLD_MS: &str = "catalog_as_of_fold_ms";
+    /// `cart-price` contract (D5): the TRUE head-derived stream length L of the as-of read —
+    /// `attributes: []`, no bounded population exists for catalog/tenant (a per-catalog L is a
+    /// span query on `business.aggregate_id` instead).
+    pub const CATALOG_AS_OF_STREAM_LENGTH: &str = "catalog_as_of_stream_length";
+    /// `cart-price` contract (D5, dba): the as-of read's cost is BYTES, not length — one
+    /// 500-product `CatalogImported` resync is ~200 KB in 0.05% of L. `attributes: []`, same
+    /// no-bounded-population reason as the length histogram.
+    pub const CATALOG_AS_OF_PAYLOAD_BYTES: &str = "catalog_as_of_payload_bytes";
+    /// `cart-price` contract (D5): the as-of read's DEAD-MAN, `outcome` ∈ {applied, refused} (a
+    /// closed set) — so a HEAD-fallback regression (the read silently stops being called, or stops
+    /// ever refusing) cannot hide as silence (ADR-20260810-231300).
+    pub const CATALOG_AS_OF_READS_TOTAL: &str = "catalog_as_of_reads_total";
     /// `acceptance-timeout` contract (#167): the promotion machinery's DEAD-MAN'S SWITCH —
     /// emitted on EVERY watch tick per actor type (0 when nothing is due), never only when a
     /// reminder arrives (ADR-20260810-231300: a monitor that can only fire when a signal arrives

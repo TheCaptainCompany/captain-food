@@ -685,20 +685,23 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
 }
 
 /// `catalog.as_of.fold` (INTERNAL) — the as-of price-fold READ, end to end: SQL + decode + the
-/// fail-closed coordinate check + fold (PROP-20260831-134539 slice 2 of "the priced quote token",
-/// DARK — no production caller yet, no `specs/observability.yaml` contract row: it lands with slice
-/// 4 once a caller supplies a real correlation id, per the round-2 card's deliberate deviation from
-/// the round-1 shape). **True end to end as of round 3**: the constructor lives at the call site
-/// that owns the WHOLE body — `AsOfPriceAuthority::as_of` — and `.instrument`s SQL + decode + the
-/// fold together; round 1's span closed before the fold ran at all, round 2's still closed before
-/// it (the fold ran one level up, outside the `.instrument`ed block).
+/// fail-closed coordinate check + fold. Joins the `cart-price` contract's `spans:` as of
+/// PROP-20260831-134539 slice 3a (D5, ADR-20260906-154419): `AsOfPriceAuthority::at_head` is now a
+/// real caller ([`catalog_as_of_fold_at_head`], below), so the DARK/no-contract-row posture this
+/// constructor carried since slice 2 ends here. **True end to end as of round 3**: the constructor
+/// lives at the call site that owns the WHOLE body — `AsOfPriceAuthority::as_of`/`at_head` — and
+/// `.instrument`s SQL + decode + the fold together; round 1's span closed before the fold ran at
+/// all, round 2's still closed before it (the fold ran one level up, outside the `.instrument`ed
+/// block).
 ///
-/// `business.version` is the requested coordinate, known at construction. `business.stream_length`
-/// (rows returned, technical rows included) and `business.events_applied` (business events the fold
-/// actually applied) are late-bound — known only once the read completes — and DECLARED here so
-/// [`record_catalog_as_of_fold`] is not a silent no-op (the same trap `command.validate`'s
-/// `service_window_verdict` and `cart.price`'s `otel.status_code` exist to avoid: `tracing` cannot
-/// add a field that was not declared when the span was created).
+/// `business.version` is the requested coordinate, known at construction for the BOUNDED read
+/// (`as_of`, this constructor). `business.rows_read` (rows returned, technical rows included —
+/// named for what it is: at or below the coordinate, never the stream's true length, beck) and
+/// `business.events_applied` (business events the fold actually applied) are late-bound — known
+/// only once the read completes — and DECLARED here so [`record_catalog_as_of_fold`] is not a
+/// silent no-op (the same trap `command.validate`'s `service_window_verdict` and `cart.price`'s
+/// `otel.status_code` exist to avoid: `tracing` cannot add a field that was not declared when the
+/// span was created).
 ///
 /// `otel.status_code` and `business.failure_reason` are ALSO late-bound and declared for the same
 /// reason (round 3, obs NB2 — a round-2 regression: the fail-closed `Err` branch recorded nothing,
@@ -706,8 +709,8 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
 /// (`:667`) declares `otel.status_code` the same way for a late-known outcome; `FAILURE_REASON`
 /// (`contract.rs:117`) is the coarse `DomainError` class, never the query text or driver message.
 ///
-/// `business.correlation_id` is declared `Empty` and deliberately left UNSET this slice — there is no
-/// caller to supply a real one yet, so recording a placeholder would be worse than an honest absence.
+/// `business.correlation_id` is declared `Empty` here too — `as_of` itself is STILL dark (no
+/// production caller); [`catalog_as_of_fold_at_head`] is the constructor that actually records it.
 ///
 /// `business.head_version` is DELIBERATELY ABSENT: recording it would need a second HEAD read this
 /// capability does not perform, and inventing one only to populate a span would add exactly the
@@ -719,20 +722,47 @@ pub fn catalog_as_of_fold(aggregate_id: &str, version: i64) -> Span {
         business.aggregate_id = aggregate_id,
         business.version = version,
         business.correlation_id = Empty,
-        business.stream_length = Empty,
+        business.rows_read = Empty,
         business.events_applied = Empty,
         business.failure_reason = Empty,
         otel.status_code = Empty,
     )
 }
 
-/// Record the as-of read's two late-bound counts on `catalog.as_of.fold` — `stream_length` (rows
+/// `catalog.as_of.fold`, the AT-HEAD shape (PROP-20260831-134539 slice 3a, D5): the SAME span name
+/// and field set as [`catalog_as_of_fold`], but `business.version` is ALSO late-bound — `at_head`
+/// does not know the coordinate until the unbounded read returns it (unlike `as_of`, which is
+/// handed a coordinate up front). `business.correlation_id` is set IMMEDIATELY, from the priced
+/// read's own request-scoped id: this is the mint's first real caller, and the observability HARD
+/// STOP is that this field must never stay Empty once one exists.
+pub fn catalog_as_of_fold_at_head(aggregate_id: &str, correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "catalog.as_of.fold",
+        otel.kind = "internal",
+        business.aggregate_id = aggregate_id,
+        business.version = Empty,
+        business.correlation_id = correlation_id,
+        business.rows_read = Empty,
+        business.events_applied = Empty,
+        business.failure_reason = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the as-of read's two late-bound counts on `catalog.as_of.fold` — `rows_read` (rows
 /// returned, technical rows included) and `events_applied` (business events the fold actually
-/// applied; invariant: `events_applied <= stream_length` and the highest row version returned equals
-/// the requested `business.version`, or the adapter would already have failed closed).
+/// applied; invariant: `events_applied <= rows_read` and, on the BOUNDED read, the highest row
+/// version returned equals the requested `business.version`, or the adapter would already have
+/// failed closed).
 pub fn record_catalog_as_of_fold(span: &Span, stream_length: usize, events_applied: usize) {
-    span.record(attr::STREAM_LENGTH, stream_length as i64);
+    span.record(attr::ROWS_READ, stream_length as i64);
     span.record(attr::EVENTS_APPLIED, events_applied as i64);
+}
+
+/// Record the coordinate `at_head` resolved (late-bound — [`catalog_as_of_fold_at_head`] does not
+/// know it at construction, unlike [`catalog_as_of_fold`]'s eagerly-set `business.version`).
+pub fn record_catalog_as_of_fold_version(span: &Span, version: i64) {
+    span.record(attr::VERSION, version);
 }
 
 /// Record the fail-closed refusal (round 3, obs NB2): the requested coordinate is absent or beyond
@@ -913,8 +943,8 @@ mod tests {
              that later records it must not find a silent no-op"
         );
         assert!(
-            af.field(attr::STREAM_LENGTH).is_some(),
-            "business.stream_length is late-bound but declared"
+            af.field(attr::ROWS_READ).is_some(),
+            "business.rows_read is late-bound but declared"
         );
         assert!(
             af.field(attr::EVENTS_APPLIED).is_some(),
@@ -933,6 +963,110 @@ mod tests {
             rf.field("otel.status_code").is_some(),
             "otel.status_code is late-bound but declared -- without it a fail-closed refusal is \
              indistinguishable on this span from an ordinary success (round-2 regression, obs NB2)"
+        );
+    }
+
+    /// PROP-20260831-134539:557 (round 2, obs NB8) — the AT-HEAD shape's late-bound fields must
+    /// each be a DECLARED ATTRIBUTE on the `catalog.as_of.fold` contract row in
+    /// `specs/observability.yaml`, not merely declared as a `tracing` span field: the two can drift
+    /// independently (a field removed from the spec while the Rust constructor still declares it,
+    /// or vice versa), and [`catalog_as_of_fold_declares_every_recorded_field`] only ever checked
+    /// the Rust side. This test reads the CONTRACT itself.
+    #[test]
+    fn catalog_as_of_fold_at_head_declares_every_late_bound_field() {
+        // `business.version` is late-bound on the AT-HEAD shape specifically (unlike the bounded
+        // `as_of` shape, which is handed the coordinate up front); the other three are late-bound
+        // on both shapes.
+        let late_bound = [
+            "business.version",
+            "business.rows_read",
+            "business.events_applied",
+            "business.failure_reason",
+        ];
+
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let observability_yaml = manifest_dir.join("../../specs/observability.yaml");
+        let contents = std::fs::read_to_string(&observability_yaml)
+            .unwrap_or_else(|e| panic!("read {}: {e}", observability_yaml.display()));
+
+        // Isolate the `catalog.as_of.fold` span's OWN block: from its `- name:` line up to
+        // whichever comes first, the next span entry (block-mapping style, `- name: "..."`) or the
+        // `metrics:` key that closes the enclosing contract's `spans:` list. Metric entries use
+        // flow-mapping style (`- { name: "...", ... }`) so they never match the span pattern.
+        let start = contents
+            .find("- name: \"catalog.as_of.fold\"")
+            .expect("catalog.as_of.fold span declared in specs/observability.yaml");
+        let after = &contents[start..];
+        let next_span = after[1..].find("\n    - name: \"").map(|i| i + 1);
+        let next_metrics = after.find("\n  metrics:");
+        let end = match (next_span, next_metrics) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => after.len(),
+        };
+        let block = &after[..end];
+
+        for attr in late_bound {
+            assert!(
+                block.contains(&format!("key: \"{attr}\"")),
+                "the {attr} late-bound field must stay a DECLARED attribute on the \
+                 catalog.as_of.fold contract row in specs/observability.yaml -- undeclared \
+                 attribute: {attr}"
+            );
+        }
+    }
+
+    /// A minimal VALUE-capturing layer (unlike `with_subscriber`'s `fmt` layer, which only proves a
+    /// field is DECLARED): this actually records what `on_new_span` receives, so a test can assert a
+    /// field was RECORDED with a real value, not merely declared `Empty` and never populated —
+    /// PROP-20260831-134539 slice 3a's own STOP: `business.correlation_id` left Empty on the priced
+    /// read.
+    #[derive(Default, Clone)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>);
+
+    struct Visitor<'a>(&'a mut std::collections::HashMap<String, String>);
+    impl tracing::field::Visit for Visitor<'_> {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().to_string(), format!("{value:?}").trim_matches('"').to_string());
+        }
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Captured {
+        fn on_new_span(
+            &self,
+            attrs: &tracing::span::Attributes<'_>,
+            _id: &tracing::span::Id,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut map = self.0.lock().expect("lock");
+            attrs.record(&mut Visitor(&mut map));
+        }
+    }
+
+    /// PROP-20260831-134539:547 (slice 3a, D5) — `catalog.as_of.fold`'s AT-HEAD shape RECORDS
+    /// `business.correlation_id` from the priced read's own request id, immediately at
+    /// construction — never left `Empty` the way the bounded (`as_of`) shape still is (dark, no
+    /// caller). Value-capturing, not merely declaration-checking (see [`Captured`]'s doc): a
+    /// mutant that constructs the span with an empty placeholder instead of the real id would pass
+    /// every `field(..).is_some()` check above and still ship a useless span.
+    #[test]
+    fn catalog_as_of_fold_at_head_records_correlation_id_from_the_priced_read() {
+        use tracing_subscriber::layer::SubscriberExt;
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::registry().with(captured.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            let _span = catalog_as_of_fold_at_head("catalog-1", "corr-abc-123");
+        });
+        let map = captured.0.lock().expect("lock");
+        assert_eq!(
+            map.get(attr::CORRELATION_ID).map(String::as_str),
+            Some("corr-abc-123"),
+            "business.correlation_id must be RECORDED with the priced read's real request id, \
+             never left empty: captured fields = {map:?}"
         );
     }
 
@@ -961,6 +1095,7 @@ mod tests {
             claims_stamp(),
             reminder_promote("OrderAcceptanceTimedOut", true),
             catalog_as_of_fold("catalog-1", 1),
+            catalog_as_of_fold_at_head("catalog-1", "corr-1"),
         ];
         for s in spans {
             let meta = s.metadata().expect("span has metadata");

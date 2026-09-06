@@ -512,6 +512,9 @@ pub fn build_graphql_di(
     // ONCE by the caller — a parameter, like `support_contact`, so every bin passes its own
     // configured value onto `riders`/`rider`'s `restrictionDoorOpen`.
     run_rider_restriction_door: bool,
+    // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D4): `RUN_FOLD_PRICED_CART_READ`,
+    // resolved ONCE by the caller — the SAME parameter shape as `run_rider_restriction_door`.
+    run_fold_priced_cart_read: bool,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -566,6 +569,12 @@ pub fn build_graphql_di(
             pool.clone(),
         ),
     );
+    // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2): the fold-priced read authority --
+    // the SAME `pool` as `catalogs` above, a DIFFERENT read (the `Catalog-<id>` event-stream range
+    // read to head, never the `catalog` projection). Injected unconditionally, like `catalogs`
+    // itself; the door decides whether the OPEN arm ever calls it.
+    let as_of_price_authority: Arc<dyn application::ports::AsOfPriceAuthority> =
+        Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone()));
     let read = ReadDeps {
         restaurants: restaurants.clone(),
         prospection,
@@ -592,6 +601,8 @@ pub fn build_graphql_di(
         service_window_horizon,
         support_contact,
         run_rider_restriction_door: graphql::schema::RunRiderRestrictionDoor(run_rider_restriction_door),
+        as_of_price_authority,
+        run_fold_priced_cart_read: graphql::schema::RunFoldPricedCartRead(run_fold_priced_cart_read),
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -812,6 +823,7 @@ pub async fn router() -> Router {
                     ),
                     support_contact.clone(),
                     config.run_rider_restriction_door,
+                    config.run_fold_priced_cart_read,
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already
@@ -1691,6 +1703,16 @@ pub async fn router() -> Router {
         config.run_admin_sign_in_door,
     );
     telemetry::meters::admin_sign_in::door_enforcing(config.run_admin_sign_in_door);
+    // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D4): the priced-read mint door's own
+    // fleet-parity declaration -- the `RUN_ADMIN_SIGN_IN_DOOR` precedent above, no liveness gauge
+    // (the card names none for this key; the observability surface this slice adds lives on the
+    // `cart-price` contract instead, per D5). The monolith is the ONLY composition root that ever
+    // reads this key for real (`ReadDeps`/`GraphqlDi` below); the standalone root's declaration is
+    // fleet-parity EVIDENCE only (ADR-20260904-081527 §8's fifth carve-out).
+    telemetry::meters::runtime::declare_flag(
+        "RUN_FOLD_PRICED_CART_READ",
+        config.run_fold_priced_cart_read,
+    );
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
     // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside

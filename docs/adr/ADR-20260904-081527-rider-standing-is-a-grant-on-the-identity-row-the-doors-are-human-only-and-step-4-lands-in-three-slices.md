@@ -429,9 +429,10 @@ Briefing before any code; **no lens output is legal advice or clearance**.
 executor's STOP stands: (1) byte-parallel to the monolith root's declaration — same key string, default `false`,
 deploy-dark; exactly `declare_flag("RUN_FOLD_PRICED_CART_READ", env_flag("RUN_FOLD_PRICED_CART_READ", false))`,
 no `CommandDeps` field, no threading, no sibling `door_enforcing` gauge; (2) additive only — zero deleted lines
-across the §8 fence globs on the branch; (3) no other hunk anywhere in the fence; (4) a comment on the line naming
-this carve-out, because the executor's self-check is a path grep and the next reader must find the licence in the
-file. Cost that earned it: the slice-3a executor stopped correctly mid-run (deliverables 2–6 deferred) because the
+in `crates/infrastructure/src/mailbox/standalone.rs` under this licence; (3) no other hunk under THIS LICENCE — a
+hunk under another numbered carve-out is that carve-out's, judged by its own conditions; (4) a comment on the line
+naming this carve-out, because the executor's self-check is a path grep and the next reader must find the licence in
+the file. Cost that earned it: the slice-3a executor stopped correctly mid-run (deliverables 2–6 deferred) because the
 card named `runKind: door` and fenced `mailbox/**` without addressing that the fleet-parity gate
 (ADR-20260905-223957 §5, ADR-20260906-113444) makes the standalone `declare_flag` GATE-FORCED for every door key —
 the second STOP of this class (#909 was the first).
@@ -446,12 +447,31 @@ POINTER here; a template cannot amend a fence. Card-writer rule (the executor's,
 `runKind: door` key checks the parity test's two hardcoded root paths against its own Fence section BEFORE
 dispatch — a door key and a `mailbox/**` fence are jointly exhaustive on `standalone.rs`.
 
+**Sixth carve-out recorded 2026-09-06 (PR #922 round 2; found by reviewer, vernon and farley at the round-1
+presentation pass; consent farley + vernon; TEAM-DECIDES-OPTION-SPACES):** the PROSE-ONLY rewrite of ONE `note:`
+string in `specs/ordering/processmanager.yaml` — the PlaceOrder catalog-read step's note (line 68 at commit
+`66b09635`) — stating that the display/charge guarantee NARROWS while `RUN_FOLD_PRICED_CART_READ` is open.
+Conditions, all four or the STOP stands: (1) one YAML string value replaced, no key, `$ref`, step, guard or ordering
+added, removed or moved; (2) the rewrite lands in the SAME commit as the open arm it describes; (3) a SPEC-LOG
+sentence in the same commit; (4) the diff against the fence globs is exactly this one-line replace plus whatever a
+numbered carve-out already licenses. Cost that earned it: card-816-s3 D2 ordered this rewrite (evans STOP 4) while
+its own STOP list named the fence and its hand-back shape said 'fence hunks (none expected)', and the continuation
+card then bound carve-out (5)'s branch-wide 'zero deleted lines' on top of the same order — a card is not the
+fence's amendment surface; §8's fourth carve-out is the precedent (a card-directed touch recorded afterwards as a
+numbered carve-out with the card defect banked).
+
 Consulted (one line per lens asked; the class is a reversible refactor — ADR-20260816-134352):
 - farley — consent; the gate demands both roots because a fleet split in a release gate is the failure it exists
   to catch; refusing its mechanical output would make the gate the obstacle rather than the verdict; the record is
   §8, never a template.
 - vernon — consent; a declaration at a composition root touches no lane, lease, fencing token, dispatch arm or
   ordering; scope the standing clause to the two lines; the sibling gauge stays case-by-case.
+- reviewer — B1 at the #922 round-1 pass: the deletion inside a fence glob was unlicensed as written; a sixth
+  numbered carve-out with its own conditions, in this PR.
+- vernon — NB7: scope condition (2) to standalone.rs; the :68 rewrite touches no lane, lease, fencing token,
+  dispatch arm or ordering.
+- farley — NB7: 'no other hunk under THIS licence'; the fence stays enforceable only if each licence is judged by
+  its own conditions.
 
 ## Consulted, §8 third carve-out (2026-09-05, PR #901 round 3)
 

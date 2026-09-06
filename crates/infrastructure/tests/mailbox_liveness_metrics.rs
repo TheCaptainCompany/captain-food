@@ -546,6 +546,12 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // (`env_flag`, private to that module) -- so this pins the same default (`false`) the
             // test's unset environment resolves to, the one honest value available from here.
             ("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", false),
+            // PROP-20260831-134539 slice 3a (ADR-20260904-081527 SS8 fifth carve-out): the
+            // priced-read mint door's own fleet-parity evidence -- the SAME
+            // `RUN_RIDER_RESTRICTION_SOCKET_CLOSE` shape (no `CommandDeps` field; `standalone_deps`
+            // reads the environment directly), so this pins the same default (`false`) an unset
+            // environment resolves to.
+            ("RUN_FOLD_PRICED_CART_READ", false),
         ],
     );
 

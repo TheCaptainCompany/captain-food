@@ -673,6 +673,8 @@ fn sign_in_walk_app(
             mailbox_lanes: mailbox_lanes.clone(),
             service_window_horizon: Default::default(),
             support_contact: Some(domain::generated::scalars::EmailAddress("support@captain.food".into())),
+            as_of_price_authority: Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone())),
+            run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
             run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         }),
         Some(server::graphql_schema::WriteDeps {

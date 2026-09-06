@@ -157,6 +157,27 @@ impl CatalogReadRepository for SeededCatalogs {
 
 struct Empty;
 
+/// The door defaults CLOSED and this suite never opens it (the menu paint runs no priced read at
+/// all -- ux's own premise for PROP-20260831-134539 slice 3a D1); a real fold call here would be a
+/// defect, so both refuse loudly rather than answering with an empty catalog.
+#[async_trait]
+impl application::ports::AsOfPriceAuthority for Empty {
+    async fn as_of(
+        &self,
+        _catalog_id: domain::generated::scalars::CatalogId,
+        _version: domain::catalog_as_of::CatalogVersion,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+        Err(DomainError::Repository("Empty never folds".into()))
+    }
+    async fn at_head(
+        &self,
+        _catalog_id: domain::generated::scalars::CatalogId,
+        _correlation_id: uuid::Uuid,
+    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+        Err(DomainError::Repository("Empty never folds".into()))
+    }
+}
+
 #[async_trait]
 impl ProspectionReadRepository for Empty {
     async fn list(&self, _f: ProspectFilter) -> Result<Vec<ProspectionPipelineRow>, DomainError> {
@@ -440,6 +461,8 @@ fn schema() -> CaptainSchema {
             service_window_horizon: Default::default(),
             support_contact: None,
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+        as_of_price_authority: Arc::new(Empty),
+        run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         }),
         None,
         None,

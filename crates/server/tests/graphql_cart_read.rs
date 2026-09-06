@@ -23,6 +23,7 @@
 //! inference wearing the costume of an observation.
 
 use async_graphql::{Request, Variables};
+use application::ports::AsOfPriceAuthority;
 use async_trait::async_trait;
 use domain::generated::entities::{CartLineItem, Offer, OptionList, Product, ProductItemOption, TaxRate};
 use domain::generated::scalars as ds;
@@ -146,6 +147,242 @@ struct TreeCatalogs(CatalogRow);
 impl CatalogReadRepository for TreeCatalogs {
     async fn by_restaurant(&self, id: ds::RestaurantId) -> Result<Option<CatalogRow>, DomainError> {
         Ok((id == self.0.restaurant_id).then(|| self.0.clone()))
+    }
+}
+
+/// The door defaults CLOSED and most of this file's tests never open it; a real `at_head`/`as_of`
+/// call here would be a defect (the closed arm falling through to the fold), so both refuse loudly
+/// rather than answering with an empty catalog. The four door-OPEN tests below inject
+/// [`FakeAsOf`]/`FailingAsOf` instead.
+#[async_trait]
+impl application::ports::AsOfPriceAuthority for Empty {
+    async fn as_of(
+        &self,
+        _catalog_id: ds::CatalogId,
+        _version: domain::catalog_as_of::CatalogVersion,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+        Err(DomainError::Repository("Empty never folds".into()))
+    }
+    async fn at_head(
+        &self,
+        _catalog_id: ds::CatalogId,
+        _correlation_id: uuid::Uuid,
+    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+        Err(DomainError::Repository("Empty never folds".into()))
+    }
+}
+
+/// A fold-priced authority over an IN-MEMORY, append-only event log matching [`catalog_row`]'s own
+/// fixture exactly (catalog 50, restaurant 90, offer 20 @ 15,00 EUR, option 30 @ 2,00 EUR in list
+/// 200) -- built through the SAME `AsOfCatalog::from_stream` fold the real adapter uses, never a
+/// hand-assembled value (the one-pricer property, ADR-20260810-112836 §1/§3/§5/§6). `reads` counts
+/// `at_head` calls ONLY -- the mint's own read, never the (unrelated) `catalogs`/projection read
+/// (PROP-20260831-134539 slice 3a, D2's "exactly one catalog read" is about the fold leg).
+struct FakeAsOf {
+    events: std::sync::Mutex<Vec<domain::generated::events::DomainEvent>>,
+    catalog_id: ds::CatalogId,
+    reads: std::sync::atomic::AtomicUsize,
+    /// The coordinate the MOST RECENT `at_head` call returned -- test-only bookkeeping, honestly
+    /// recorded (never on the reply, D3), so a test can learn "the coordinate the mint used"
+    /// without hardcoding it.
+    last_coordinate: std::sync::atomic::AtomicI64,
+    /// The `correlation_id` the MOST RECENT `at_head` call received -- beck NB6: both fakes used to
+    /// discard `_correlation_id`, so a caller passing `Uuid::nil()` was indistinguishable from one
+    /// passing the request's own id. Captured honestly, never on the reply.
+    last_correlation_id: std::sync::Mutex<Option<uuid::Uuid>>,
+}
+
+impl FakeAsOf {
+    /// Three events -> head coordinate 3: `CatalogCreated`, `OptionListAdded` (option 30 @ 2,00),
+    /// `ProductAdded` (offer 20 @ 15,00, linked to option list 200) -- the exact fixture
+    /// [`catalog_row`] builds via the real projector fold, so a test comparing the fold-priced
+    /// path against the projection-priced path is comparing two folds of the SAME facts.
+    fn seeded(catalog_id: ds::CatalogId, restaurant: ds::RestaurantId) -> Self {
+        use domain::generated::entities::{
+            Offer, OptionList, Product, ProductItemOption, TaxRate,
+        };
+        use domain::generated::events::{CatalogCreated, DomainEvent, OptionListAdded, ProductAdded};
+        let option_list_id = ds::OptionListId(uid(200));
+        let option_id = ds::OptionId(uid(30));
+        let product_id = ds::ProductId(uid(120));
+        let offer_id = ds::OfferId(uid(20));
+        let events = vec![
+            DomainEvent::CatalogCreated(CatalogCreated {
+                catalog_id,
+                r#ref: None,
+                restaurant_id: restaurant,
+                name: ds::CatalogName("Menu".into()),
+            }),
+            DomainEvent::OptionListAdded(OptionListAdded {
+                catalog_id,
+                restaurant_id: restaurant,
+                option_list: OptionList {
+                    id: option_list_id,
+                    r#ref: None,
+                    name: ds::OptionListName("Extras".into()),
+                    min_selections: 0,
+                    max_selections: Some(1),
+                    multiple_selection: false,
+                    options: vec![ProductItemOption {
+                        id: option_id,
+                        r#ref: None,
+                        option_list_id,
+                        name: ds::OptionName("Cheese".into()),
+                        price: eur(200),
+                        r#default: false,
+                        availability: ds::CatalogItemAvailability::AVAILABLE,
+                        stock: None,
+                    }],
+                },
+            }),
+            DomainEvent::ProductAdded(ProductAdded {
+                catalog_id,
+                restaurant_id: restaurant,
+                product: Product {
+                    id: product_id,
+                    r#ref: None,
+                    catalog_id,
+                    restaurant_id: restaurant,
+                    category_ref: None,
+                    name: ds::ProductName("Burger".into()),
+                    description: None,
+                    tags: Vec::new(),
+                    image_ids: Vec::new(),
+                    tax_rate: TaxRate { delivery: ds::TaxRatePercent(10.0), collection: None, eat_in: None },
+                    offers: vec![Offer {
+                        id: offer_id,
+                        r#ref: None,
+                        product_id,
+                        name: ds::OfferName("Default".into()),
+                        price: eur(1500),
+                        availability: ds::CatalogItemAvailability::AVAILABLE,
+                        stock: None,
+                        option_list_ids: vec![option_list_id],
+                    }],
+                },
+            }),
+        ];
+        Self {
+            events: std::sync::Mutex::new(events),
+            catalog_id,
+            reads: std::sync::atomic::AtomicUsize::new(0),
+            last_coordinate: std::sync::atomic::AtomicI64::new(0),
+            last_correlation_id: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The coordinate the most recent `at_head` call returned (test-only introspection).
+    fn last_returned_coordinate(&self) -> i64 {
+        self.last_coordinate.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The `correlation_id` the most recent `at_head` call received (test-only introspection).
+    fn last_correlation_id(&self) -> Option<uuid::Uuid> {
+        *self.last_correlation_id.lock().expect("lock")
+    }
+
+    /// Appends a fourth event bumping offer 20's price to `new_price_cents` -- simulates a
+    /// concurrent catalog change that happened AFTER an earlier read (repricing-at-coordinate
+    /// tests use this to prove a bounded re-read at the ORIGINAL coordinate is unaffected).
+    fn append_price_update(&self, new_price_cents: i64) {
+        use domain::generated::events::{DomainEvent, ProductUpdated};
+        let mut events = self.events.lock().expect("lock");
+        let restaurant_id = match events.first() {
+            Some(DomainEvent::CatalogCreated(c)) => c.restaurant_id,
+            _ => panic!("seeded() always starts with CatalogCreated"),
+        };
+        events.push(DomainEvent::ProductUpdated(ProductUpdated {
+            catalog_id: self.catalog_id,
+            restaurant_id,
+            product: domain::generated::entities::Product {
+                id: ds::ProductId(uid(120)),
+                r#ref: None,
+                catalog_id: self.catalog_id,
+                restaurant_id,
+                category_ref: None,
+                name: ds::ProductName("Burger".into()),
+                description: None,
+                tags: Vec::new(),
+                image_ids: Vec::new(),
+                tax_rate: TaxRate { delivery: ds::TaxRatePercent(10.0), collection: None, eat_in: None },
+                offers: vec![Offer {
+                    id: ds::OfferId(uid(20)),
+                    r#ref: None,
+                    product_id: ds::ProductId(uid(120)),
+                    name: ds::OfferName("Default".into()),
+                    price: eur(new_price_cents),
+                    availability: ds::CatalogItemAvailability::AVAILABLE,
+                    stock: None,
+                    option_list_ids: vec![ds::OptionListId(uid(200))],
+                }],
+            },
+        }));
+    }
+}
+
+#[async_trait]
+impl application::ports::AsOfPriceAuthority for FakeAsOf {
+    async fn as_of(
+        &self,
+        catalog_id: ds::CatalogId,
+        version: domain::catalog_as_of::CatalogVersion,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+        if catalog_id != self.catalog_id {
+            return Err(DomainError::Repository("unknown catalog".into()));
+        }
+        let events = self.events.lock().expect("lock");
+        let versioned: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| (*i as i64 + 1) <= version.get())
+            .map(|(i, e)| (domain::catalog_as_of::CatalogVersion::try_new(i as i64 + 1).unwrap(), e.clone()))
+            .collect();
+        Ok(domain::catalog_as_of::AsOfCatalog::from_stream(&versioned, version))
+    }
+
+    async fn at_head(
+        &self,
+        catalog_id: ds::CatalogId,
+        correlation_id: uuid::Uuid,
+    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *self.last_correlation_id.lock().expect("lock") = Some(correlation_id);
+        if catalog_id != self.catalog_id {
+            return Err(DomainError::Repository("unknown catalog".into()));
+        }
+        let events = self.events.lock().expect("lock");
+        if events.is_empty() {
+            return Err(DomainError::Repository("catalog not created".into()));
+        }
+        let head = domain::catalog_as_of::CatalogVersion::try_new(events.len() as i64).unwrap();
+        let versioned: Vec<_> = events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (domain::catalog_as_of::CatalogVersion::try_new(i as i64 + 1).unwrap(), e.clone()))
+            .collect();
+        self.last_coordinate.store(head.get(), std::sync::atomic::Ordering::SeqCst);
+        Ok((domain::catalog_as_of::AsOfCatalog::from_stream(&versioned, head), head))
+    }
+}
+
+/// Always refuses (D4's "fold Err" case): an empty, never-created catalog stream.
+struct FailingAsOf;
+
+#[async_trait]
+impl application::ports::AsOfPriceAuthority for FailingAsOf {
+    async fn as_of(
+        &self,
+        _catalog_id: ds::CatalogId,
+        _version: domain::catalog_as_of::CatalogVersion,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+        Err(DomainError::Repository("catalog not created".into()))
+    }
+    async fn at_head(
+        &self,
+        _catalog_id: ds::CatalogId,
+        _correlation_id: uuid::Uuid,
+    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+        Err(DomainError::Repository("catalog not created".into()))
     }
 }
 
@@ -548,6 +785,52 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
         service_window_horizon: Default::default(),
         support_contact: None,
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+        as_of_price_authority: Arc::new(Empty),
+        run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
+        }),
+        None,
+        None,
+    )
+}
+
+/// The same schema, with the door's authority and position INJECTABLE — the four PROP-20260831-134539
+/// slice 3a tests below (D2/D4) need to swap in [`FakeAsOf`]/`FailingAsOf` and flip
+/// `RUN_FOLD_PRICED_CART_READ` ON.
+fn schema_over_with_door(
+    carts: Vec<CartRow>,
+    restaurant: ds::RestaurantId,
+    authority: Arc<dyn application::ports::AsOfPriceAuthority>,
+    door_open: bool,
+) -> CaptainSchema {
+    build_schema(
+        Some(ReadDeps {
+            restaurants: Arc::new(OneRestaurant(restaurant_row(restaurant.0))),
+            prospection: Arc::new(Empty),
+            pricing_policy: Arc::new(Empty),
+            uber_estimation_policy: Arc::new(Empty),
+            uber_split_policy: Arc::new(Empty),
+            catalogs: Arc::new(TreeCatalogs(catalog_row(restaurant))),
+            carts: Arc::new(MemCarts(carts)),
+            orders: Arc::new(Empty),
+            order_conversations: Arc::new(Empty),
+            customers: Arc::new(Empty),
+            deliveries: Arc::new(Empty),
+            rider_restrictions: Arc::new(Empty),
+            rider_roster: Arc::new(Empty),
+            member_authority: Arc::new(Empty),
+            restaurant_roster: Arc::new(Empty),
+            restaurant_invitations: Arc::new(Empty),
+            refunds: Arc::new(Empty),
+            delivery_satisfaction: Arc::new(Empty),
+            delivery_partner_availabilities: Arc::new(Empty),
+            reclamations: Arc::new(Empty),
+            customer_credit: Arc::new(Empty),
+            mailbox_lanes: Arc::new(Empty),
+            service_window_horizon: Default::default(),
+            support_contact: None,
+            run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+            as_of_price_authority: authority,
+            run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(door_open),
         }),
         None,
         None,
@@ -871,6 +1154,234 @@ async fn a_malformed_lines_row_errors_the_read_instead_of_rendering_a_partial_ca
     );
 }
 
+// --- PROP-20260831-134539:547 slice 3a (D2/D4): the door-gated fold-priced read ----------------
+
+/// The 1500-cent line: offer 20 alone (no options), quantity 1 — so `lineTotal == unit_price`
+/// exactly, the number the fixture's price update in [`FakeAsOf::append_price_update`] targets.
+fn line_1500() -> CartLineItem {
+    CartLineItem {
+        cart_line_id: ds::CartLineId(uid(12)),
+        offer_id: ds::OfferId(uid(20)),
+        quantity: 1,
+        selected_option_ids: vec![],
+    }
+}
+
+/// D2: the coordinate a bounded re-read reproduces is the SAME coordinate the mint returned — the
+/// property `AsOfCatalog`'s whole design exists for (repricing at a fixed coordinate is stable
+/// under later catalog changes). The mint's own coordinate is not on the reply (D3), so this test
+/// knows it analytically: three seeded events -> head is coordinate 3, and nothing else appends
+/// until AFTER the read below returns.
+///
+/// Also D5/beck NB6: `at_head` receives the REQUEST's own correlation id, not `Uuid::nil()` — both
+/// fakes used to discard `_correlation_id`, so this went unnoticed everywhere. The test injects one
+/// explicitly (`server::graphql_session::RequestCorrelationId`) and reads it back off the fake.
+#[tokio::test]
+async fn repricing_at_the_returned_coordinate_reproduces_the_returned_prices() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        true,
+    );
+    let request_correlation_id = uuid::Uuid::from_u128(0xC0FFEE);
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant))
+                .data(server::graphql_session::RequestCorrelationId(request_correlation_id)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let reply_price = resp.data.into_json().unwrap()["current"]["lines"][0]["lineTotal"]["amountCents"]
+        .as_i64()
+        .expect("a priced line");
+    assert_eq!(reply_price, 1500, "the mint prices offer 20 at 15,00 EUR (head, coordinate 3)");
+
+    // The coordinate the mint ACTUALLY used, read honestly off the fake (never off the reply --
+    // D3 keeps it off the wire entirely).
+    let minted_coordinate = fake.last_returned_coordinate();
+    assert_eq!(minted_coordinate, 3, "three seeded events -> head coordinate 3");
+
+    // The correlation id `at_head` ACTUALLY received is the request's own id, never `Uuid::nil()`.
+    assert_eq!(
+        fake.last_correlation_id(),
+        Some(request_correlation_id),
+        "the mint must carry the request's own correlation id, not a nil placeholder"
+    );
+
+    // The catalog changes AFTER the mint returned (a concurrent write, or simply time passing).
+    fake.append_price_update(1900);
+
+    // Repricing at the coordinate the mint used reproduces the SAME price the reply carried,
+    // unaffected by the later change: the coordinate pins a REPLAYABLE prefix, not "whatever the
+    // catalog says now".
+    let coordinate = domain::catalog_as_of::CatalogVersion::try_new(minted_coordinate).unwrap();
+    let as_of = fake.as_of(catalog_id, coordinate).await.expect("bounded re-read at the minted coordinate");
+    let reprice = as_of.price_of(ds::OfferId(uid(20)), &[]).expect("offer resolves at the minted coordinate");
+    assert_eq!(
+        reprice.unit_price.amount_cents.0, reply_price,
+        "repricing at the returned coordinate must reproduce the returned price"
+    );
+}
+
+/// D2: the mint is ONE catalog read — one call to [`AsOfPriceAuthority::at_head`] per priced read,
+/// never a second read to "get the coordinate" separately from "get the prices" (the exact
+/// mixed-authority mint every lens's STOP forbids).
+#[tokio::test]
+async fn the_priced_read_performs_exactly_one_catalog_read() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        true,
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    assert_eq!(
+        fake.reads.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the mint must call at_head exactly once per priced read"
+    );
+}
+
+/// D4: with the door CLOSED, the priced read is the projection read, PERIOD — the fold-priced
+/// authority is never touched (`fake.reads` stays 0), and the price comes from `TreeCatalogs`'
+/// projection fixture (15,00 EUR for offer 20), never from the fold's stream (which this test
+/// seeds with a DIFFERENT price to make a fold-shaped answer detectable).
+#[tokio::test]
+async fn with_the_door_closed_the_priced_read_is_the_projection_read_and_carries_no_coordinate() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    // If the closed arm ever fell through to the fold, THIS price (1900) would leak into the
+    // reply instead of the projection's 1500 -- a decoy, not merely an unread value.
+    fake.append_price_update(1900);
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        false, // CLOSED
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    assert_eq!(
+        data["current"]["lines"][0]["lineTotal"]["amountCents"],
+        json!(1500),
+        "the closed arm prices from the PROJECTION (TreeCatalogs), never the fold's stream"
+    );
+    assert_eq!(
+        fake.reads.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the closed arm must never call at_head -- it is the projection read, not a fold fallback"
+    );
+}
+
+/// D2: the mixed-authority mutant this whole slice exists to forbid — `at_head` called (so the fold
+/// IS read) but priced from the PROJECTION anyway (beck mutant C: `price_cart(&snapshot, ..)`
+/// instead of `price_cart_at(&snapshot, &as_of, ..)`). Every OTHER door-OPEN test seeds `FakeAsOf`
+/// and `TreeCatalogs` at the SAME 1500, so the two authorities never disagree and this mutant would
+/// survive them all; this test is the mirror of
+/// [`with_the_door_closed_the_priced_read_is_the_projection_read_and_carries_no_coordinate`], with
+/// the decoy price on the FOLD instead of the projection — the open arm must show the FOLD's 1900,
+/// never the projection's 1500.
+#[tokio::test]
+async fn the_open_arm_prices_from_the_fold_never_the_projection() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    // The fold's price moves to 1900 BEFORE the read -- the projection (`TreeCatalogs`) still
+    // reports 1500, so a mint that mixes authorities (fold coordinate + projection price) is
+    // directly observable as a leaked 1500 instead of the fold's 1900.
+    fake.append_price_update(1900);
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        true, // OPEN
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    assert_eq!(
+        data["current"]["lines"][0]["lineTotal"]["amountCents"],
+        json!(1900),
+        "the open arm must price from the FOLD (1900), never the projection (1500) -- the \
+         mixed-authority mint every lens's STOP forbids"
+    );
+    assert_eq!(
+        fake.last_returned_coordinate(),
+        4,
+        "the fourth event (the price update) is the fold's head coordinate"
+    );
+}
+
+/// D4: a fold failure with the door OPEN is a `technical_error` (the read ERRORS), NEVER a
+/// HEAD/projection fallback. `FailingAsOf` always refuses -- the catalog "does not exist" from the
+/// fold's point of view -- and `TreeCatalogs` still projects a perfectly good 15,00 EUR row, so any
+/// leak into the reply (a fallback) is directly observable as a priced, error-free response.
+#[tokio::test]
+async fn a_fold_failure_with_the_door_open_is_a_technical_error_never_a_head_price() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        std::sync::Arc::new(FailingAsOf),
+        true, // OPEN
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(
+        !resp.errors.is_empty(),
+        "a fold failure must ERROR the read, never fall back to a price, got data {:?}",
+        resp.data.into_json()
+    );
+    // The classification its own name promises: `technical_error`, never the business-shaped
+    // `PriceUnresolvable` rejection (`:1103`'s pattern, mirrored) — a fold failure is a repository
+    // failure, not a business decision that this specific offer is unresolvable.
+    assert!(
+        !resp.errors[0].message.contains("PriceUnresolvable"),
+        "a fold failure is technical_error, never the business PriceUnresolvable classification: {:?}",
+        resp.errors[0].message
+    );
+}
+
 // --- the PATH-level test (#469) ----------------------------------------------------------------
 //
 // Everything above executes the SCHEMA and injects `ReadScope` (and now `TenantScope`) by hand.
@@ -1014,6 +1525,8 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
         service_window_horizon: Default::default(),
         support_contact: None,
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+        as_of_price_authority: Arc::new(Empty),
+        run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         }),
         None,
         None,

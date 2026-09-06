@@ -173,6 +173,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
         support_contact: None,
+        as_of_price_authority: Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone())),
+        run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         }),
         None,

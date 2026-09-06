@@ -316,6 +316,26 @@ leg, not answered here:
 Questions, not answers — none of the four is resolved by this round; they extend the packet's
 funds/rate-leg gap already named above rather than opening a new one.
 
+### (f) NEW AT SLICE 3a — CQ-5 … CQ-6 (the proof burden and the freeze boundary)
+
+Named at the slice 3a briefing (2026-09-06, `legal`, PR #922): slice 3a mints a coordinate on the
+`cart.current` read but signs, carries and stores nothing — the record says plainly it does NOT
+discharge B1 and does NOT close #816. Two questions on what 3b's signed quote will need to satisfy,
+not answered here:
+
+- **CQ-5 — reproducible recomputation vs. a rendered artifact.** Does the L221-7-shape proof burden
+  accept a REPRODUCIBLE SERVER RECOMPUTATION at the stored coordinate (re-price at V, compare to the
+  charge) as sufficient evidence of what was displayed, or does it require an artifact of what the
+  SCREEN actually rendered (a snapshot of the rendered price, not merely a recomputable one)? Does
+  signing the coordinate (3b) change which of the two the burden accepts?
+- **CQ-6 — the freeze boundary's granularity.** Must the delivery fee and the platform fee freeze
+  INSIDE the same coordinate as the catalog lines (one single frozen total), or is a PER-COMPONENT
+  freeze defensible — each fee/line frozen at its own coordinate/moment, with only the displayed
+  TOTAL being the customer-facing commitment?
+
+Questions, not answers — carried forward to 3b/4's design, where the signed quote and its stored
+shape are decided.
+
 ---
 
 ## 8. Sequencing — and this is the practical output of QT-8 / QT-9

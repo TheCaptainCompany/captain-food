@@ -12,10 +12,11 @@
 //! total, all fee/split legs zero, restaurant_payout = total. The real ADR-0016/0017 fee/split policy
 //! plugs in here without changing any caller.
 
+use domain::catalog_as_of::AsOfCatalog;
 use domain::generated::entities::{
     CartLineItem, Money, OrderLineItem, PaymentBreakdown, SelectedOption,
 };
-use domain::generated::scalars::{CartId, CurrencyCode, MoneyCents, OfferId, RestaurantId};
+use domain::generated::scalars::{CartId, CatalogId, CurrencyCode, MoneyCents, OfferId, RestaurantId};
 use domain::shared::errors::DomainError;
 use serde_json::json;
 
@@ -101,8 +102,16 @@ pub async fn price_cart(
         return Err(DomainError::rejected("CartEmpty", json!({ "cartId": cart_id })));
     };
     let total_amount = Money { amount_cents: MoneyCents(total_cents), currency: currency.clone() };
+    let breakdown = degenerate_breakdown(&total_amount, currency);
+    Ok(PricedCart { items, total_amount, breakdown })
+}
+
+/// The V0 degenerate breakdown shared by every pricer on this seam: articles = total, every
+/// fee/split leg zero, restaurant_payout = total (ADR-0016/0017 plugs the real policy in here
+/// without changing either caller).
+fn degenerate_breakdown(total_amount: &Money, currency: CurrencyCode) -> PaymentBreakdown {
     let zero = Money { amount_cents: MoneyCents(0), currency };
-    let breakdown = PaymentBreakdown {
+    PaymentBreakdown {
         articles: total_amount.clone(),
         delivery: zero.clone(),
         service_fee: zero.clone(),
@@ -111,7 +120,88 @@ pub async fn price_cart(
         restaurant_payout: total_amount.clone(),
         rider_payout: zero.clone(),
         captain_net: zero,
+    }
+}
+
+/// The fold-priced counterpart to [`price_cart`] (PROP-20260831-134539 slice 3a, D2): EQUAL to
+/// `price_cart` on the same lines, but sourcing UNIT/OPTION prices from an already-resolved
+/// [`AsOfCatalog`] — one range read, at a fixed coordinate — instead of the live catalog projection.
+///
+/// `catalogs` supplies ONLY display metadata (product id, name, offer name) here — never a price:
+/// the as-of fold is deliberately price-only and carries no labels (`catalog_as_of` module doc:
+/// "HEAD's business, never this capability's"), so this function is the one place a priced line
+/// recombines a coordinate's prices with HEAD's names. This is NOT a second catalog READ on the
+/// money path: `catalogs` is expected to be the SAME already-loaded [`CatalogSnapshot`] the caller
+/// used to resolve `as_of`'s `catalogId` (an in-memory walk, no further I/O) — `as_of` itself is the
+/// ONE stream read this function's caller performs.
+///
+/// FAIL-CLOSED, same posture as `price_cart`: an offer/option absent from EITHER source (HEAD's
+/// metadata or the coordinate's prices) — or a currency clash — rejects with `PriceUnresolvable`.
+pub async fn price_cart_at(
+    catalogs: &dyn CatalogReadRepository,
+    as_of: &AsOfCatalog,
+    cart_id: CartId,
+    restaurant_id: RestaurantId,
+    lines: &[CartLineItem],
+) -> Result<PricedCart, DomainError> {
+    let mut items: Vec<OrderLineItem> = Vec::with_capacity(lines.len());
+    let mut total_cents: i64 = 0;
+    let mut currency: Option<CurrencyCode> = None;
+
+    for line in lines {
+        // HEAD's business: display metadata only, never a price (the fold carries no labels).
+        let Some(offer) = catalogs.offer_by_id(restaurant_id, line.offer_id).await? else {
+            return Err(unresolvable(cart_id, line.offer_id));
+        };
+        // The coordinate's business: unit + option prices, resolved through the SAME offer at the
+        // SAME coordinate — never mixed with HEAD's prices.
+        let Some(price) = as_of.price_of(line.offer_id, &line.selected_option_ids) else {
+            return Err(unresolvable(cart_id, line.offer_id));
+        };
+        let cur = currency.get_or_insert_with(|| price.unit_price.currency.clone());
+        if price.unit_price.currency != *cur {
+            return Err(unresolvable(cart_id, line.offer_id));
+        }
+        let mut selected_options: Vec<SelectedOption> = Vec::with_capacity(line.selected_option_ids.len());
+        let mut options_cents: i64 = 0;
+        // `AsOfCatalog::price_of` returns option prices in the SAME order as the requested ids, one
+        // per input option (`None` overall if any fails to resolve) — a direct zip, never a re-scan.
+        for (option_id, (_, option_price)) in line.selected_option_ids.iter().zip(price.option_prices.iter()) {
+            let Some((list_id, option_head)) = offer.option_lists.iter().find_map(|list| {
+                list.options.iter().find(|o| o.id == *option_id).map(|o| (list.id, o))
+            }) else {
+                return Err(unresolvable(cart_id, line.offer_id));
+            };
+            if option_price.currency != *cur {
+                return Err(unresolvable(cart_id, line.offer_id));
+            }
+            options_cents += option_price.amount_cents.0;
+            selected_options.push(SelectedOption {
+                option_id: *option_id,
+                option_list_id: Some(list_id),
+                name: option_head.name.clone(),
+                price: option_price.clone(),
+            });
+        }
+        let line_total_cents = (price.unit_price.amount_cents.0 + options_cents) * line.quantity;
+        total_cents += line_total_cents;
+        items.push(OrderLineItem {
+            offer_id: line.offer_id,
+            product_id: Some(offer.product_id),
+            name: offer.product_name.clone(),
+            offer_name: Some(offer.offer_name.clone()),
+            quantity: line.quantity,
+            unit_price: price.unit_price.clone(),
+            selected_options,
+            line_total: Money { amount_cents: MoneyCents(line_total_cents), currency: cur.clone() },
+        });
+    }
+
+    let Some(currency) = currency else {
+        return Err(DomainError::rejected("CartEmpty", json!({ "cartId": cart_id })));
     };
+    let total_amount = Money { amount_cents: MoneyCents(total_cents), currency: currency.clone() };
+    let breakdown = degenerate_breakdown(&total_amount, currency);
     Ok(PricedCart { items, total_amount, breakdown })
 }
 
@@ -138,6 +228,15 @@ impl CatalogSnapshot {
         restaurant_id: RestaurantId,
     ) -> Result<Self, DomainError> {
         Ok(Self { restaurant_id, row: catalogs.by_restaurant(restaurant_id).await? })
+    }
+
+    /// The restaurant's catalog id, from the SAME row this snapshot already loaded — no second
+    /// read (PROP-20260831-134539 slice 3a, D2): the open arm resolves `catalog_id` through this
+    /// snapshot's own `catalog_id` field before calling [`crate::ports::AsOfPriceAuthority::at_head`],
+    /// which is the ONE range read the fold-priced path performs. `None` before `CatalogCreated`,
+    /// exactly like every other reader of this snapshot.
+    pub fn catalog_id(&self) -> Option<CatalogId> {
+        self.row.as_ref().map(|r| r.catalog_id)
     }
 }
 
@@ -535,6 +634,32 @@ mod tests {
             priced.items[0].selected_options[0].price,
             as_of_price.option_prices[0].1,
             "totals differ on an options-bearing cart (option price)"
+        );
+
+        // Slice 3a, D2 — extended to the coordinate: the value carried IS head, non-Option.
+        assert_eq!(
+            as_of.coordinate(),
+            head,
+            "AsOfCatalog::coordinate must be the ceiling the fold was bounded at (HEAD here)"
+        );
+
+        // dba's TWO-FOLDS-AGREE gate (slice 3a deliverable 1): `price_cart_at` -- the fold-priced
+        // path -- must agree with `price_cart` on the FULL `PricedCart`, not merely on one price,
+        // for the SAME cart, SAME lines, at HEAD. Two independent pricers over the same events must
+        // never diverge into two totals.
+        let priced_at = price_cart_at(
+            &snapshot,
+            &as_of,
+            CartId(uid(99)),
+            restaurant,
+            &[cart_line(1, 20, 1, &[40])],
+        )
+        .await
+        .expect("the fold-priced path prices the same line");
+        assert_eq!(
+            priced, priced_at,
+            "price_cart and price_cart_at (the fold-priced path) disagree at the SAME coordinate \
+             (HEAD) for the SAME cart"
         );
     }
 }

@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 2596,
+  "recordedAt": "2026-09-06T18:33:56.636Z",
+  "branch": "816-s3-fold-priced-read",
+  "note": "816-s3 round 2: record-heavy fence carve-out + B-c/B-d/B-e mutant kills + payload_bytes lever"
+}
