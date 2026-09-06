@@ -50,10 +50,15 @@ fn field_argument_lists(sdl: &str) -> Vec<(String, String)> {
     re.captures_iter(sdl).map(|c| (c[1].trim_start_matches('@').to_string(), c[2].to_string())).collect()
 }
 
-pub(crate) fn check_catalog_version_never_on_the_wire(model: &Model, issues: &mut Vec<Issue>) {
-    let sdl = emit_schema(model);
+/// The pure VERDICT function, split from [`check_catalog_version_never_on_the_wire`] (own
+/// structural commit, B'.8): takes the already-rendered SDL and returns exactly the findings the
+/// rule reports, with no `Model` dependency at all. This is what a test must call to assert the
+/// rule actually FIRES on a genuine violation — the wrapper below only adds the `emit_schema`
+/// step, which the real-corpus test already exercises indirectly via the vacuous-pass case.
+fn findings(sdl: &str) -> Vec<Issue> {
+    let mut issues = Vec::new();
 
-    for (name, body) in input_blocks(&sdl) {
+    for (name, body) in input_blocks(sdl) {
         if body.contains(FORBIDDEN) {
             issues.push(err(
                 RULE,
@@ -68,7 +73,7 @@ pub(crate) fn check_catalog_version_never_on_the_wire(model: &Model, issues: &mu
         }
     }
 
-    for (field, args) in field_argument_lists(&sdl) {
+    for (field, args) in field_argument_lists(sdl) {
         if args.contains(FORBIDDEN) {
             issues.push(err(
                 RULE,
@@ -81,6 +86,13 @@ pub(crate) fn check_catalog_version_never_on_the_wire(model: &Model, issues: &mu
             ));
         }
     }
+
+    issues
+}
+
+pub(crate) fn check_catalog_version_never_on_the_wire(model: &Model, issues: &mut Vec<Issue>) {
+    let sdl = emit_schema(model);
+    issues.extend(findings(&sdl));
 }
 
 /// Every `deprecated: "<reason>"` source property across `commands.yaml`/`entities.yaml` — the two
@@ -176,6 +188,26 @@ mod tests {
         assert!(
             args.iter().any(|(field, list)| field == "cart" && list.contains(FORBIDDEN)),
             "the CatalogVersion-carrying argument list must be found: {args:?}"
+        );
+    }
+
+    /// RED-FIRST (ADR-20260906-192007:34, own structural commit): the VERDICT is asserted on a
+    /// PLANTED SDL, not just the lower-level `input_blocks`/`field_argument_lists` helpers the
+    /// three tests around this one exercise. Before the `findings`/`check_*` split, deleting the
+    /// `issues.push` call inside `check_catalog_version_never_on_the_wire` left all four other
+    /// tests in this module GREEN — none of them ever calls the function that actually produces an
+    /// `Issue`. Mutant: delete the `issues.push` inside `findings`'s input-block loop — observed
+    /// red: `findings(sdl).len()` is 0 where 1 is expected. Green: restore the push.
+    #[test]
+    fn the_wire_shape_rule_reports_a_planted_catalog_version_input() {
+        let sdl = "input PlaceOrderInput {\n  catalogVersion: CatalogVersion\n  cartId: CartId!\n}\n";
+        let issues = findings(sdl);
+        assert_eq!(issues.len(), 1, "expected exactly one finding: {:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(issues[0].rule, RULE, "wrong rule id: {}", issues[0].rule);
+        assert!(
+            issues[0].message.contains("PlaceOrderInput"),
+            "message must name the offending block: {}",
+            issues[0].message
         );
     }
 
