@@ -480,6 +480,24 @@ MERGED is the coordinator's too**, since it owns the flip that starts it — but
 push has ALREADY turned red, while you are still in the run, is yours to fix
 (`GET /commits/{sha}/check-runs`, read each `conclusion`); never end at "pushed, CI failing".
 
+**A CHILD container (the second concurrent chunk of
+[ADR-20260906-152024](../../adr/ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md)
+§3) is in the EXECUTOR's position here, not the parent coordinator's — it cannot perform the flip
+either**, confirmed 2026-09-06 on
+[#924](https://github.com/TheCaptainCompany/captain-food/pull/924): its GraphQL endpoint carries
+the same pin (`markPullRequestReadyForReview` and `enablePullRequestAutoMerge` both refused), it
+holds no `mcp__github__*` tools and no `gh`, REST `PUT /pulls/{n}/merge` answers 405 "Pull Request
+is still a draft", and `ListAgents`/`SendMessage` cannot reach the parent session from a child. The
+channel that worked: an Ask posted on the OTHER chunk's claimed issue
+([#816](https://github.com/TheCaptainCompany/captain-food/issues/816)), AND a one-shot Routine
+(`create_trigger` with `persistent_session_id` set to the parent, `run_once_at`) delivering the same
+Ask into the parent session — which flipped and armed within a minute of firing. So a Lane B
+chunk's closing step is **an Ask to the parent, by construction**, until a child container is
+given the GitHub MCP tools — stated here as the open remedy, no decision taken. Cost that earned
+it: two refused mutations, one refused REST merge, one unresolvable `SendMessage`, ~30 minutes of a
+green PR ([#914](https://github.com/TheCaptainCompany/captain-food/issues/914) items 2-6) waiting
+in draft.
+
 Unchanged by this, because it never depended on the executor's access: **a dispatch names an issue
 with its number AND its title verbatim** (the CLAUDE.md naming rule). It is one line to write and it
 survives a session that has no lookup path; the cost of skipping it was an unresolvable issue link
