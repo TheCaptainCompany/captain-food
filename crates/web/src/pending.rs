@@ -198,6 +198,23 @@ pub fn holds_place_order(store: &dyn PendingStore, order_id: Uuid) -> bool {
     })
 }
 
+/// The `message_id` of this client's OPEN `PlaceOrder` intent for `order_id`, if held (#816
+/// follow-up, "a live customer-facing lie today") — the value [`holds_place_order`]'s presence
+/// check discards. Lets the tracking page RESOLVE the intent's own terminal outcome
+/// (`DispatchHandle::resolve`) directly, instead of only re-polling `order.byId` — which a
+/// REJECTED checkout may never populate at all, since most business refusals (`PriceMismatch`,
+/// `PriceUnresolvable`, …) reject strictly before any `OrderCreated`.
+pub fn place_order_message_id(store: &dyn PendingStore, order_id: Uuid) -> Option<Uuid> {
+    store
+        .load()
+        .into_iter()
+        .find(|w| {
+            w.action == ActionKey::PlaceOrder
+                && w.input.get("orderId") == Some(&serde_json::json!(order_id))
+        })
+        .map(|w| w.message_id)
+}
+
 /// The in-memory store: the test double AND the native/SSR default (a server render never
 /// persists client intents — the browser owns the queue, same split as `session.rs`).
 #[derive(Default)]
