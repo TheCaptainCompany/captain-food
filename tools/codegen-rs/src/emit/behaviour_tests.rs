@@ -306,6 +306,11 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door's release gate, read
     // at the write door only -- no revoke command exists yet to be asymmetric with.
     ("GrantPlatformAccess", "RUN_PLATFORM_ACCESS_GRANT", "run_platform_access_grant"),
+    // #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door's release gate, read at
+    // BOTH mutation handlers (the RUN_MEMBER_SIGN_IN_DOOR shape) -- OFF refuses before the identity
+    // provider is touched at all.
+    ("RequestAdminSignInLink", "RUN_ADMIN_SIGN_IN_DOOR", "run_admin_sign_in_door"),
+    ("ConfirmAdminSignIn", "RUN_ADMIN_SIGN_IN_DOOR", "run_admin_sign_in_door"),
 ];
 
 /// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
@@ -423,6 +428,16 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         // never the 2a reservation table -- ADMIN is not a PrincipalKind) before appending.
         "GrantPlatformAccess" => {
             format!("crate::commands::{}(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await", snake)
+        }
+        // The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825): the
+        // ConfirmMemberSignIn shape, transposed -- the platform grant bridge instead of the
+        // Member bridge, both gated at BOTH handlers (the RestaurantMembership sign-in pair's
+        // own asymmetry-free shape).
+        "RequestAdminSignInLink" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor(), run_admin_sign_in_door).await", snake)
+        }
+        "ConfirmAdminSignIn" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor(), run_admin_sign_in_door).await", snake)
         }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }
@@ -752,6 +767,26 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
                     call = call.replace(
                         ", None, &support::actor(), run_member_sign_in_door)",
                         ", Some(sc::SessionId(support::uid(\"session-1\"))), &support::actor(), run_member_sign_in_door)",
+                    );
+                }
+            }
+            // The ADMIN confirm's session is ENVELOPE data too (#639 part C step 6-iii) -- the
+            // SAME shape as ConfirmMemberSignIn, withheld only for its own missing-session case.
+            if msg == "ConfirmAdminSignIn" {
+                let refuses_without_session = t
+                    .get("thrown")
+                    .and_then(|x| x.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.get("$ref").and_then(|x| x.as_str()))
+                            .filter_map(ref_name)
+                            .any(|name| name == "AdminSignInRequiresSession")
+                    })
+                    .unwrap_or(false);
+                if !refuses_without_session {
+                    call = call.replace(
+                        ", None, &support::actor(), run_admin_sign_in_door)",
+                        ", Some(sc::SessionId(support::uid(\"session-1\"))), &support::actor(), run_admin_sign_in_door)",
                     );
                 }
             }

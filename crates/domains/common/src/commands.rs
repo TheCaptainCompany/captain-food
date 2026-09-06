@@ -22,3 +22,18 @@ pub struct GrantPlatformAccess {
     pub auth_subject: AuthSubject,
     pub basis: PlatformAccessBasis,
 }
+
+/// Ask the auth provider to send an email magic link (the SAME `send_email_magic_link` port `RequestMemberSignInLink`/`RequestEmailVerification` use, and the SAME email send-abuse wall shape). Emits no event, and MUST NOT reveal whether the address holds a platform grant: the handler never consults the `PlatformMember` bridge, so the outcome is identical for a granted admin and a stranger's (no enumeration oracle) -- ADR-20260906-023825 SS1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestAdminSignInLink {
+    pub email: EmailAddress,
+    pub locale: Option<Locale>,
+}
+
+/// Verify the magic-link token with the auth provider, then IDENTIFY against the platform grant: the proved auth subject is looked up through `application::queries::PlatformMemberRepository` (the SAME read port `grant_platform_access`'s handler already consults, ADR-20260905-223957 SS1) -- no live grant -> the session is still parked (so a future sign-out control has a real cookie to act on) but NOTHING is stamped and `AdminAccessNotGranted` is thrown; a live grant -> the ADMIN role claim is stamped (`identity.stamp_admin_claim`, `{ role: ADMIN }` and nothing else) and the post-stamp provider session is parked for cookie pickup via POST /auth/session -- the credential is never in the GraphQL response. Emits no event. The stamped claim is a HINT the seam (`resolve_platform_scope`) RE-DERIVES on every subsequent request -- a stamped ADMIN claim with no live grant resolves `Identity::Unbound`, never `Identity::Admin` (ADR-20260906-023825 SS1, pinned from ADR-20260905-223957 SS2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmAdminSignIn {
+    pub token: EmailVerificationToken,
+}

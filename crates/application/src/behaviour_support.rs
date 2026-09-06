@@ -1564,6 +1564,26 @@ impl IdentityService for FakeIdentity {
         *stamped = Some(member_only);
         Ok(())
     }
+    async fn stamp_admin_claim(
+        &self,
+        input: crate::generated::services::IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The one-subject-one-role refusal, the `stamp_member_claim` precedent: a login the
+        // provider already holds with ANOTHER claim object is refused, never overwritten.
+        let mut stamped = self.stamped.lock().expect("fake identity mutex");
+        let admin_only = serde_json::json!({ "captain_food": { "role": "ADMIN" } });
+        let holds_other = input.auth_ref.0 == FAKE_CUSTOMER_STAMPED_SUBJECT
+            || stamped.as_ref().is_some_and(|held| *held != admin_only);
+        if holds_other {
+            return Err(DomainError::rejected(
+                "AuthSubjectHoldsAnotherRole",
+                serde_json::json!({ "authRef": input.auth_ref.0 }),
+            ));
+        }
+        *stamped = Some(admin_only);
+        Ok(())
+    }
 }
 
 /// GBP ownership double: any proof verifies except the spec's canonical bad one (`bad-token`).

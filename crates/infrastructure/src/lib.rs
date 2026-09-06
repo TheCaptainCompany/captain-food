@@ -13,6 +13,7 @@ pub mod generated;
 /// The HUMAN-OWNED mailbox router (#771) — the `match` half of the generated per-actor inbox
 /// enums. Never generate this module.
 pub mod inbox;
+pub mod admin_sign_in_reasons;
 pub mod integrations;
 pub mod mailbox;
 pub mod member_sign_in_reasons;

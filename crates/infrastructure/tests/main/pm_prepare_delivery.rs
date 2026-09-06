@@ -222,6 +222,7 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         run_member_sign_in_door: false,
         run_restaurant_invitation: false,
         run_platform_access_grant: false,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone())),
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
@@ -736,6 +737,7 @@ fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps 
         run_member_sign_in_door: false,
         run_restaurant_invitation: false,
         run_platform_access_grant: false,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone())),
         route_gates: application::generated::process_managers::RouteGates {
             order_placed_to_order: true,

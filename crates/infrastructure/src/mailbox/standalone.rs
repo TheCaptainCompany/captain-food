@@ -247,6 +247,10 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door, same
         // ENV-GATED posture, same default (OFF).
         run_platform_access_grant: env_flag("RUN_PLATFORM_ACCESS_GRANT", false),
+        // #639 part C step 6-iii (ADR-20260906-023825 §8 fence carve-out 2: one field plus its
+        // threading, the run_platform_access_grant precedent immediately above): the ADMIN
+        // sign-in door, same ENV-GATED posture, same default (OFF).
+        run_admin_sign_in_door: env_flag("RUN_ADMIN_SIGN_IN_DOOR", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -300,6 +304,14 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         deps.run_platform_access_grant,
     );
     telemetry::meters::admin_identity::grant_enforcing(deps.run_platform_access_grant);
+    // #639 part C step 6-iii (ADR-20260906-023825 §8 fence: the ONE permitted touch beyond the
+    // additive field/threading above, the SAME class as 6-v's `platform_access_grant_enforcing`
+    // sibling line): the ADMIN sign-in door's own fleet-parity declaration and liveness gauge.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_ADMIN_SIGN_IN_DOOR",
+        deps.run_admin_sign_in_door,
+    );
+    telemetry::meters::admin_sign_in::door_enforcing(deps.run_admin_sign_in_door);
     // farley's RUN_* fleet-parity codegen test (#639 part C step 6-v) found this key declared at
     // the monolith root (`crates/server/src/lib.rs`) but NOT here -- a pre-existing gap (step
     // 4-i/4-iii-A's own key), fixed in the same change per the test's own instruction ("it may be

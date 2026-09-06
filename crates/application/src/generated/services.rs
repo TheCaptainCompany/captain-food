@@ -216,6 +216,13 @@ pub struct IdentityStampMemberClaimInput {
     pub auth_ref: AuthSubject,
 }
 
+/// Input of `identity.stamp_admin_claim`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityStampAdminClaimInput {
+    pub auth_ref: AuthSubject,
+}
+
 /// Identity capability — passwordless auth wrapped behind our GraphQL (ADR-0015, Supabase ACL). Consumed by the Customer command handlers (VerifyPhone / email verification), not by a process manager; catalogued so the calling surface is one spec.
 #[async_trait]
 pub trait IdentityService: Send + Sync {
@@ -243,4 +250,7 @@ pub trait IdentityService: Send + Sync {
     /// Write the MEMBER role claim onto the provider-side auth user identified by `authRef` (#639 part C step 6-ii, ADR-20260905-101349 §7): sets `app_metadata.captain_food` = `{ role: MEMBER }` -- the role and NOTHING else. No `member_id`, no id of any kind (ADR-20260818-004646): the member's binding resolves on every request from OUR Postgres (`Member.auth_subject -> member_id`, step 6-i's bridge, then `ScopeMembership` for the restaurant scope), and a stamped id would be a cache the platform cannot invalidate. A THIRD stamper beside `stamp_customer_claim`/`stamp_rider_claim`, not a parameter on either (#437, ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time). The provider REPLACES the `captain_food` object wholesale (the shallow-merge rule of `stamp_customer_claim`), so stamping MEMBER on a subject that already carries another role's claim would ERASE that claim: a subject holding a non-MEMBER claim is REFUSED with `AuthSubjectHoldsAnotherRole` -- fail closed, never an overwrite. Idempotent on redelivery (already exactly `{ role: MEMBER }` -> no-op). FAIL-CLOSED on the credential like the other two stamps: without `SUPABASE_SECRET_KEY` it errors, and the caller then parks nothing (an unstamped token is never parked).
     /// Anticipated rejections: `errors.yaml#/AuthSubjectHoldsAnotherRole`.
     async fn stamp_member_claim(&self, input: IdentityStampMemberClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
+    /// Write the ADMIN role claim onto the provider-side auth user identified by `authRef` (#639 part C step 6-iii, ADR-20260906-023825): sets `app_metadata.captain_food` = `{ role: ADMIN }` -- the role and NOTHING else. No id of any kind (ADR-20260818-004646, ADR-20260830-234532): the admin's standing resolves on every request from OUR Postgres (`PlatformMember.auth_subject -> platformMembershipId`, step 6-v's bridge), and a stamped id would be a cache the platform cannot invalidate. A FOURTH stamper beside `stamp_customer_claim`/`stamp_rider_claim`/`stamp_member_claim`, not a parameter on any of them (#437, ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time). The provider REPLACES the `captain_food` object wholesale (the shallow-merge rule of `stamp_customer_claim`), so stamping ADMIN on a subject that already carries another role's claim would ERASE that claim: a subject holding a non-ADMIN claim is REFUSED with `AuthSubjectHoldsAnotherRole` -- fail closed, never an overwrite. Idempotent on redelivery (already exactly `{ role: ADMIN }` -> no-op). FAIL-CLOSED on the credential like the other three stamps: without `SUPABASE_SECRET_KEY` it errors, and the caller then parks nothing (an unstamped token is never parked).
+    /// Anticipated rejections: `errors.yaml#/AuthSubjectHoldsAnotherRole`.
+    async fn stamp_admin_claim(&self, input: IdentityStampAdminClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
 }

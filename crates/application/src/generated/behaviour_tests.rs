@@ -787,6 +787,16 @@ fn fx_platform_access_granted() -> DomainEvent {
     DomainEvent::PlatformAccessGranted(evs::PlatformAccessGranted { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-admin-1")), auth_subject: sc::AuthSubject("auth-admin-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING })
 }
 
+/// tests.yaml#/fixtures/platformAccessGrantedForSignIn — events.yaml#/PlatformAccessGranted
+fn fx_platform_access_granted_for_sign_in() -> DomainEvent {
+    DomainEvent::PlatformAccessGranted(evs::PlatformAccessGranted { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-supabase-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING })
+}
+
+/// tests.yaml#/fixtures/platformAccessGrantedOnCustomerLogin — events.yaml#/PlatformAccessGranted
+fn fx_platform_access_granted_on_customer_login() -> DomainEvent {
+    DomainEvent::PlatformAccessGranted(evs::PlatformAccessGranted { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-supabase-customer")), auth_subject: sc::AuthSubject("auth-supabase-customer".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING })
+}
+
 /// tests.yaml#/fixtures/restaurantInvitationSent — events.yaml#/RestaurantInvitationSent
 fn fx_restaurant_invitation_sent() -> DomainEvent {
     DomainEvent::RestaurantInvitationSent(evs::RestaurantInvitationSent { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), invited_email: sc::EmailAddress("johnny@example.com".into()), authority: sc::MemberAuthority::OPERATOR, member_id: sc::MemberId(support::uid("member-10")) })
@@ -5357,6 +5367,144 @@ async fn test_member_confirm_sign_in_door_closed() {
     let err = result.expect_err("TestMemberConfirmSignInDoorClosed: the spec expects a typed rejection");
     support::assert_thrown("TestMemberConfirmSignInDoorClosed", &err, &["MemberSignInDoorClosed"]);
     bed.assert_appended("TestMemberConfirmSignInDoorClosed", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminRequestSignInLink — "Sends an email magic link to a granted admin's address; emits nothing"
+/// rules: AdminSignInRequestLegNeverConsultsTheGrant
+#[tokio::test]
+async fn test_admin_request_sign_in_link() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-supabase-1")), vec![fx_platform_access_granted_for_sign_in()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestAdminSignInLink { email: sc::EmailAddress("admin@captain.food".into()), locale: Some(sc::Locale("fr-FR".into())) };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::request_admin_sign_in_link(&bed.store, &bed.identity, cmd, &support::actor(), run_admin_sign_in_door).await;
+    let _ = result.expect("TestAdminRequestSignInLink: the spec expects acceptance");
+    bed.assert_appended("TestAdminRequestSignInLink", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminRequestSignInLinkForStrangerIsIdentical — "Sends an email magic link to an address with no platform grant, identically; emits nothing"
+/// rules: AdminSignInRequestLegNeverConsultsTheGrant
+#[tokio::test]
+async fn test_admin_request_sign_in_link_for_stranger_is_identical() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestAdminSignInLink { email: sc::EmailAddress("stranger@example.com".into()), locale: None };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::request_admin_sign_in_link(&bed.store, &bed.identity, cmd, &support::actor(), run_admin_sign_in_door).await;
+    let _ = result.expect("TestAdminRequestSignInLinkForStrangerIsIdentical: the spec expects acceptance");
+    bed.assert_appended("TestAdminRequestSignInLinkForStrangerIsIdentical", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminRequestSignInLinkDoorClosed — "requestAdminSignInLink is refused by the door key while it is OFF (the production default), before the identity provider is touched"
+/// rules: AdminSignInDoorGatedBeforeProvider
+#[tokio::test]
+async fn test_admin_request_sign_in_link_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestAdminSignInLink { email: sc::EmailAddress("admin@captain.food".into()), locale: None };
+    let run_admin_sign_in_door: bool = false;
+    let result = crate::commands::request_admin_sign_in_link(&bed.store, &bed.identity, cmd, &support::actor(), run_admin_sign_in_door).await;
+    let err = result.expect_err("TestAdminRequestSignInLinkDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestAdminRequestSignInLinkDoorClosed", &err, &["AdminSignInDoorClosed"]);
+    bed.assert_appended("TestAdminRequestSignInLinkDoorClosed", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminConfirmSignInUngrantedEmailIsRejected — "Refuses admin sign-in for a verified email with no live platform grant; creates nothing"
+/// rules: AdminSignInIsIdentifyOnlyNeverRegister
+#[tokio::test]
+async fn test_admin_confirm_sign_in_ungranted_email_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmAdminSignIn { token: sc::EmailVerificationToken("sb-magic-token-ungranted".into()) };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::confirm_admin_sign_in(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_admin_sign_in_door).await;
+    let err = result.expect_err("TestAdminConfirmSignInUngrantedEmailIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestAdminConfirmSignInUngrantedEmailIsRejected", &err, &["AdminAccessNotGranted"]);
+    bed.assert_appended("TestAdminConfirmSignInUngrantedEmailIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminConfirmSignInIdentifies — "Verifying the magic-link token for a granted admin is accepted and appends nothing -- identify-only, never register"
+/// rules: AdminClaimStampedOnlyOnResolvedGrant
+#[tokio::test]
+async fn test_admin_confirm_sign_in_identifies() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-supabase-1")), vec![fx_platform_access_granted_for_sign_in()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmAdminSignIn { token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::confirm_admin_sign_in(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_admin_sign_in_door).await;
+    let _ = result.expect("TestAdminConfirmSignInIdentifies: the spec expects acceptance");
+    bed.assert_appended("TestAdminConfirmSignInIdentifies", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminConfirmSignInInvalidTokenIsRejected — "Rejects admin sign-in when the magic-link token is invalid or expired"
+/// rules: AdminSignInIsIdentifyOnlyNeverRegister
+#[tokio::test]
+async fn test_admin_confirm_sign_in_invalid_token_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-supabase-1")), vec![fx_platform_access_granted_for_sign_in()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmAdminSignIn { token: sc::EmailVerificationToken("bad-token".into()) };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::confirm_admin_sign_in(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_admin_sign_in_door).await;
+    let err = result.expect_err("TestAdminConfirmSignInInvalidTokenIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestAdminConfirmSignInInvalidTokenIsRejected", &err, &["InvalidVerificationToken", "VerificationCodeExpired"]);
+    bed.assert_appended("TestAdminConfirmSignInInvalidTokenIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminConfirmSignInSubjectHoldingAnotherRoleIsRejected — "Refuses admin sign-in when the verified login already holds another role's claim; overwrites nothing"
+/// rules: AdminSignInIsIdentifyOnlyNeverRegister
+#[tokio::test]
+async fn test_admin_confirm_sign_in_subject_holding_another_role_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-supabase-customer")), vec![fx_platform_access_granted_on_customer_login()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmAdminSignIn { token: sc::EmailVerificationToken("sb-magic-token-customer-login".into()) };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::confirm_admin_sign_in(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_admin_sign_in_door).await;
+    let err = result.expect_err("TestAdminConfirmSignInSubjectHoldingAnotherRoleIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestAdminConfirmSignInSubjectHoldingAnotherRoleIsRejected", &err, &["AuthSubjectHoldsAnotherRole"]);
+    bed.assert_appended("TestAdminConfirmSignInSubjectHoldingAnotherRoleIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminConfirmSignInWithoutSessionIsRejected — "Refuses admin sign-in when the request carries no session to own the parked credential; spends no token, parks nothing"
+/// rules: AdminSignInIsIdentifyOnlyNeverRegister
+#[tokio::test]
+async fn test_admin_confirm_sign_in_without_session_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-supabase-1")), vec![fx_platform_access_granted_for_sign_in()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmAdminSignIn { token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
+    let run_admin_sign_in_door: bool = true;
+    let result = crate::commands::confirm_admin_sign_in(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor(), run_admin_sign_in_door).await;
+    let err = result.expect_err("TestAdminConfirmSignInWithoutSessionIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestAdminConfirmSignInWithoutSessionIsRejected", &err, &["AdminSignInRequiresSession"]);
+    bed.assert_appended("TestAdminConfirmSignInWithoutSessionIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminConfirmSignInDoorClosed — "confirmAdminSignIn is refused by the door key while it is OFF (the production default), before the identity provider is touched"
+/// rules: AdminSignInDoorGatedBeforeProvider
+#[tokio::test]
+async fn test_admin_confirm_sign_in_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-supabase-1")), vec![fx_platform_access_granted_for_sign_in()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmAdminSignIn { token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
+    let run_admin_sign_in_door: bool = false;
+    let result = crate::commands::confirm_admin_sign_in(&bed.store, &bed.identity, &bed.platform_members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_admin_sign_in_door).await;
+    let err = result.expect_err("TestAdminConfirmSignInDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestAdminConfirmSignInDoorClosed", &err, &["AdminSignInDoorClosed"]);
+    bed.assert_appended("TestAdminConfirmSignInDoorClosed", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPaymentAuthorizationOrphanIsFlagged — "An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)"

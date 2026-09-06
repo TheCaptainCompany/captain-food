@@ -190,4 +190,7 @@ impl IdentityService for HttpIdentityService {
     async fn stamp_member_claim(&self, input: IdentityStampMemberClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/stamp-member-claim", input, meta).await
     }
+    async fn stamp_admin_claim(&self, input: IdentityStampAdminClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/identity/stamp-admin-claim", input, meta).await
+    }
 }

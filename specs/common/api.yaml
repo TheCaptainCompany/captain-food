@@ -245,6 +245,23 @@ mutations:
     slice: V0
 
 
+  # --- The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) -- both PUBLIC
+  # mutations (the `verifyPhone`/`requestMemberSignInLink` precedent: a door absent from the SDL
+  # does not exist for a client; the caller has no credential yet, so no OTHER role could ever
+  # apply). `roles: [PUBLIC]` is KEPT, never omitted -- omitted is MORE public than `[PUBLIC]`.
+  # Ships DARK behind RUN_ADMIN_SIGN_IN_DOOR (default false). No public QUERY anywhere reflects
+  # platform-staff state -- graphql-architect's STOP condition at the 2026-09-06 briefing.
+  requestAdminSignInLink:
+    command: { $ref: 'commands.yaml#/RequestAdminSignInLink' }
+    roles: [PUBLIC]
+    slice: V0
+
+  confirmAdminSignIn:
+    command: { $ref: 'commands.yaml#/ConfirmAdminSignIn' }
+    roles: [PUBLIC]
+    slice: V0
+
+
 subscriptions:
 
 

@@ -287,3 +287,46 @@ PlatformMembershipIdMismatch:
   messages:
     en: "This platform membership id does not match the required derivation for this login."
     fr: "Cet identifiant d'adhésion plateforme ne correspond pas à la dérivation requise pour cette identité de connexion."
+
+
+# --- The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) -------------------------
+
+AdminSignInDoorClosed:
+  description: >
+    `RUN_ADMIN_SIGN_IN_DOOR` is OFF (`configuration.yaml`, default false) -- the ADMIN sign-in door
+    refuses BEFORE touching the identity provider (the `MemberSignInDoorClosed` shape): the writer
+    key flips only after the preconditions in `decisions/ADMIN-DOOR-PRECONDITIONS.yaml` are met.
+  context: {}
+  messages:
+    en: "Platform sign-in is not yet available."
+    fr: "La connexion à la plateforme n'est pas encore disponible."
+
+
+AdminSignInRequiresSession:
+  description: >
+    The sign-in confirmation arrived with no `X-SESSION-ID` (the rider/member door's #852 B1
+    precedent). The credential it would mint is parked for `POST /auth/session` under the OWNING
+    anonymous session (envelope data, ADR-0041), and a session parked with no owner could be
+    claimed by any header-less caller holding the acceptance messageId. So the door refuses BEFORE
+    the token is spent (the link stays usable for a correct retry) and nothing is verified, stamped
+    or parked. Carries nothing: the remedy is the client's.
+  context: {}
+  messages:
+    en: "Sign-in needs a browser session. Reload the page and try again."
+    fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez."
+
+
+AdminAccessNotGranted:
+  description: >
+    The magic-link token verified (the email is genuinely proven), but no LIVE `PlatformMembership`
+    grant exists for this auth subject in the `PlatformMember` bridge (ADR-20260906-023825 SS1/SS3).
+    NEVER "linked" and never `MemberNotLinked` reused (evans: "linked" implies two pre-existing
+    things -- a login and a bound row -- and on the platform side there is nothing to link, no
+    pending state, and no self-service path). NOTHING is stamped and NOTHING is created; the session
+    is still parked. `email` carries the VERIFIED address (the token's output, never client input).
+  context:
+    email: { $ref: 'scalars.yaml#/EmailAddress' }
+    supportContact: { $ref: 'scalars.yaml#/EmailAddress' }
+  messages:
+    en: "This space is reserved for people with platform access. Write to {supportContact}."
+    fr: "Cet espace est réservé aux personnes disposant d'un accès plateforme. Écrivez-nous à {supportContact}."

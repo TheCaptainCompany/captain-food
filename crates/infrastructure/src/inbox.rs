@@ -57,6 +57,9 @@ use application::generated::inboxes::RestaurantMembershipInbox;
 // #639 part C step 6-v (ADR-20260905-223957): a SEPARATE `use` line, additive-only (the fence
 // self-check greps for a removed line in this file) rather than editing the block above.
 use application::generated::inboxes::PlatformMembershipInbox;
+// #639 part C step 6-iii (ADR-20260906-023825): a SEPARATE `use` line, additive-only (the fence
+// self-check greps for a removed line in this file) rather than editing the block above.
+use application::generated::inboxes::AdminSignInInbox;
 use application::ports::Actor;
 use domain::shared::errors::DomainError;
 
@@ -149,8 +152,15 @@ pub struct CommandDeps {
     /// The `PlatformMember` bridge's write-side arbiter (#639 part C step 6-v, ADR-20260905-223957
     /// §1) -- the `members` port's precedent, transposed: `grant_platform_access`'s handler
     /// consults it BEFORE appending, since ADMIN is NOT a `PrincipalKind` (PRINCIPALS-MEMBER) and
-    /// reuses no reservation table.
+    /// reuses no reservation table. Reused (never a second port) by `confirm_admin_sign_in`
+    /// (#639 part C step 6-iii, ADR-20260906-023825): the SAME read the write-side arbiter needs.
     pub platform_members: Arc<dyn application::queries::PlatformMemberRepository>,
+    /// #639 part C step 6-iii (ADR-20260906-023825): `configuration.yaml#/RUN_ADMIN_SIGN_IN_DOOR`
+    /// -- the ADMIN sign-in door's release gate, resolved ONCE at the composition root exactly
+    /// like `run_member_sign_in_door` above (carve-out 2, ADR-20260904-081527 §8). OFF (the
+    /// default) refuses BOTH `requestAdminSignInLink` and `confirmAdminSignIn` with the typed
+    /// `AdminSignInDoorClosed` BEFORE the identity provider is touched at all.
+    pub run_admin_sign_in_door: bool,
 }
 
 
@@ -219,6 +229,7 @@ pub async fn route(
     env: &RouterEnv,
 ) -> InboxOutcome {
     match message {
+        ActorInbox::AdminSignIn(m) => admin_sign_in(deps, m, actor, env).await,
         ActorInbox::Cart(m) => cart(deps, m, actor, env).await,
         ActorInbox::Catalog(m) => catalog(deps, m, actor, env).await,
         ActorInbox::Conversation(m) => conversation(deps, m, actor, env).await,
@@ -658,6 +669,54 @@ async fn platform_membership(
             .await;
             if matches!(&outcome, InboxOutcome::Handled(Ok(()))) {
                 telemetry::meters::admin_identity::granted(&basis);
+            }
+            outcome
+        }
+    }
+}
+
+/// The `AdminSignIn` lane (#639 part C step 6-iii, `admin-sign-in-door` contract): the member
+/// sign-in door's shape (`restaurant_membership` above), transposed to the platform context.
+/// Both messages are gated at BOTH handlers by `RUN_ADMIN_SIGN_IN_DOOR`; the gate-liveness gauge
+/// is RE-ASSERTED here, at the dispatch seam where the gate is actually decided (the #895 lesson).
+/// The two spans and their `business.result` are opened HERE, at the infrastructure dispatch
+/// seam, never inside `application::commands` (telemetry-SDK-free by construction, ADR-0035).
+async fn admin_sign_in(
+    deps: &CommandDeps,
+    message: AdminSignInInbox,
+    actor: &Actor,
+    env: &RouterEnv,
+) -> InboxOutcome {
+    use crate::admin_sign_in_reasons::{admin_sign_in_confirm_result, admin_sign_in_reason};
+    match message {
+        AdminSignInInbox::RequestAdminSignInLink(cmd) => {
+            use tracing::Instrument as _;
+            telemetry::meters::admin_sign_in::door_enforcing(deps.run_admin_sign_in_door);
+            let span = telemetry::spans::admin_signin_link_request(&actor.correlation_id.to_string());
+            let outcome = run(async { application::commands::request_admin_sign_in_link(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor, deps.run_admin_sign_in_door).await }).instrument(span).await;
+            if let InboxOutcome::Handled(Err(e)) = &outcome {
+                telemetry::meters::admin_sign_in::refused(admin_sign_in_reason(e));
+            }
+            outcome
+        }
+        AdminSignInInbox::ConfirmAdminSignIn(cmd) => {
+            use tracing::Instrument as _;
+            telemetry::meters::admin_sign_in::door_enforcing(deps.run_admin_sign_in_door);
+            let span = telemetry::spans::admin_signin_confirm(&actor.correlation_id.to_string());
+            let span_clone = span.clone();
+            let outcome = run(async { application::commands::confirm_admin_sign_in(deps.store.as_ref(), deps.auth.as_ref(), deps.platform_members.as_ref(), deps.sessions.as_ref(), deps.support_contact.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), actor, deps.run_admin_sign_in_door).await }).instrument(span).await;
+            let result = match &outcome {
+                InboxOutcome::Handled(Ok(())) => "linked",
+                InboxOutcome::Handled(Err(e)) => admin_sign_in_confirm_result(e),
+                // `run(async { confirm_admin_sign_in(..) })` only ever produces `Handled`; the
+                // other three `InboxOutcome` variants are unreachable here, but named rather than
+                // absorbed by a wildcard per this file's own no-catch-all rule.
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => "lookup_failed",
+            };
+            telemetry::spans::record_admin_signin_confirm_result(&span_clone, result);
+            telemetry::meters::admin_sign_in::confirmed(result);
+            if result != "linked" && result != "not_granted" {
+                telemetry::meters::admin_sign_in::refused(result);
             }
             outcome
         }

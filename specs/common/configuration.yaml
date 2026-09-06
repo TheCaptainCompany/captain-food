@@ -437,6 +437,36 @@ keys:
       staging: "false"
 
 
+  # #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door, mirroring
+  # RUN_MEMBER_SIGN_IN_DOOR's shape exactly. Consumed at BOTH mutation handlers
+  # (`request_admin_sign_in_link`, `confirm_admin_sign_in`): OFF refuses BEFORE the identity
+  # provider is touched at all, with the typed `AdminSignInDoorClosed`. `decisionRow` binds this
+  # key to `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` explicitly, so
+  # `decision-row-open-key-must-be-off` refuses any `deploy.production` value other than `"false"`
+  # while that row stays open. Routing the System host is a SEPARATE, always-on concern from this
+  # key (ADR-20260906-023825 SS4): the sign-in shell renders whether or not the door is flipped.
+  # No new secret: the request leg reuses the SAME email send-abuse wall as the member door
+  # (`EMAIL_QUOTA_KEY_HMAC_SECRET`).
+  RUN_ADMIN_SIGN_IN_DOOR:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: ADMIN-DOOR-PRECONDITIONS
+    gates: >
+      The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825). ON, both
+      `requestAdminSignInLink` and `confirmAdminSignIn` run their identify/stamp/park flow as
+      designed. OFF, BOTH refuse BEFORE touching the identity provider with the typed
+      `AdminSignInDoorClosed` rejection -- a supervisable row, never a silent no-op. Preconditions
+      gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): items
+      (6)/(7) -- the System sign-in/refusal screens (landed with this key) and the `?next=`/silent
+      -refresh dependency (#904, own issue) -- plus `RUN_PLATFORM_ACCESS_GRANT` flipped first (a
+      sign-in door with no grant path ever behind it is a refusal machine).
+    deploy:
+      production: "false"
+      staging: "false"
+
+
   # ===================================================================
   # Actor mailbox + projection runtime (ADR-20260730-231500; PROP-20260728-152752 /
   # PROP-20260730-230803). Declared AHEAD of their readers — the drift gate is one-directional

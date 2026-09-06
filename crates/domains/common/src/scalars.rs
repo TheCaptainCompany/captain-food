@@ -88,6 +88,10 @@ pub struct Tag(pub String);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EmailAddress(pub String);
 
+/// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EmailVerificationToken(pub String);
+
 /// Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PhoneNumber(pub String);

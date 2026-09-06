@@ -7,7 +7,6 @@ use crate::scalars::*;
 use crate::entities::*;
 use domain_common::entities::*;
 use domain_common::scalars::*;
-use domain_customer::scalars::*;
 
 /// Admin creates a restaurant ACCOUNT (HubRise: restaurant) that will own one or more locations. Account-level facts (legal entity, billing contact, currency, default tax, timezone) live here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
