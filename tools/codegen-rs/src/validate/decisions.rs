@@ -2187,3 +2187,71 @@ pub(crate) fn validate_decision_row_gated_config_keys(
         }
     }
 }
+
+// ─── config-prose-says-stopped-without-row (#917, ADR-20260904-152807 §7) ──────────────────────
+//
+// `decision-row-open-key-must-be-off` above can only see a key that ALREADY carries `decisionRow:`
+// — it is silent about the key #917 found, which carried none at all: `RUN_SIRENE_WORKER`'s own
+// `gates:` prose said "STOPPED since 2026-07-28" while `deploy.production` said `"true"`, and
+// nothing executable ever compared the two, because there was no `decisionRow:` for the open-row
+// rule to bind to in the first place. This rule closes THAT gap, one level up: a `bool` toggle
+// key whose `gates:` prose contains the word `STOPPED` or `PAUSED` (case-insensitive, whole word)
+// and carries NO `decisionRow:` is an error on its own — a key may not say stopped in prose and
+// run in deploy with nothing recorded, regardless of what its deploy value actually is. Binding
+// `decisionRow:` (which then hands the deploy-value check to the rule above) is the fix.
+//
+// SCOPED TO `type: bool`, DELIBERATELY (#917 dispatch card did not name this, so it is recorded
+// here as the executor's own scope decision — see the hand-back's `New grammar / invented
+// exemption:` line): only a bool toggle "runs" or "does not run" in the sense the sibling rule's
+// `deploy.production` == `"false"` pin means. Running the un-scoped rule over the real corpus hits
+// two keys that are not RUN_* toggles at all: `SIRENE_BUDGET_MINUTES` ("the run resumes where it
+// **stopped** on the next invocation" — describing one sweep's normal cadence, never a paused
+// key) and `LOG_LEVEL` ("how a **paused** pipeline becomes invisible" — citing SIRENE_BUDGET's own
+// pause as an example, not declaring ITSELF stopped). Binding either to a decision row would be
+// nonsensical (what closes "the log level is paused"?) and out of THIS card's scope (`docs/
+// decisions/SIRENE-RESTART.yaml` and `RUN_SIRENE_WORKER` only) — the STOP condition "any change to
+// ... any other key's value" would otherwise force touching two unrelated keys to keep `make
+// validate` at 0 errors. Verified against the real corpus: with the `bool` filter, exactly two
+// keys carry the word at all (`RUN_RIDER_RESTRICTION_DOOR`, already `decisionRow`-bound, and
+// `RUN_SIRENE_WORKER`, the target) — both RUN_* toggles, confirming the filter tracks the rule's
+// actual subject rather than being a convenience narrowing.
+
+fn prose_says_stopped_or_paused(gates: &str) -> Option<&'static str> {
+    // `\b` is ASCII-word-boundary in the `regex` crate's default (non-unicode-word) mode, which is
+    // exactly what is wanted here: prose is English, and the two words are plain ASCII.
+    for word in ["STOPPED", "PAUSED"] {
+        let re = regex::Regex::new(&format!(r"(?i)\b{word}\b")).expect("static pattern compiles");
+        if re.is_match(gates) {
+            return Some(word);
+        }
+    }
+    None
+}
+
+/// #917. `model` is read directly (not `rows`/`by_stem`) — this rule fires on the ABSENCE of
+/// `decisionRow:`, so it has nothing to look up in the decision corpus.
+pub(crate) fn validate_config_prose_says_stopped_without_row(model: &Model, issues: &mut Vec<Issue>) {
+    for k in parse_config_keys(model) {
+        if k.ty != "bool" {
+            continue; // not a toggle — see the scoping note above
+        }
+        if k.decision_row.is_some() {
+            continue; // already bound — `decision-row-open-key-must-be-off` covers it
+        }
+        if let Some(word) = prose_says_stopped_or_paused(&k.gates) {
+            issues.push(err(
+                "config-prose-says-stopped-without-row",
+                format!("configuration.yaml/{}", k.name),
+                format!(
+                    "`{}`'s `gates:` prose says \"{word}\" but the key carries no `decisionRow:` — a key may \
+                     not say stopped in prose and run in deploy with nothing recorded (the RUN_SIRENE_WORKER \
+                     lesson, #917, ADR-20260904-152807 §7). Declare a `docs/decisions/<KEY>.yaml` row naming \
+                     what must be true before it restarts, and bind it with `decisionRow: <KEY>` — \
+                     `decision-row-open-key-must-be-off` then holds `deploy.production` to \"false\" while \
+                     that row stays open.",
+                    k.name
+                ),
+            ));
+        }
+    }
+}

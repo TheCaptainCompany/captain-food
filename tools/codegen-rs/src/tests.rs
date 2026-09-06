@@ -11227,6 +11227,115 @@ mod decision_row_gated_config_keys {
     }
 }
 
+// ─── #917 (ADR-20260904-152807 §7) — config-prose-says-stopped-without-row ─────────────────────
+//
+// `decision_row_gated_config_keys` above can only see a key that ALREADY carries `decisionRow:` —
+// it was silent about `RUN_SIRENE_WORKER`, which carried none at all: prose said "STOPPED since
+// 2026-07-28" while `deploy.production` said `"true"`, unreconciled, because there was no
+// `decisionRow:` for that rule to bind to in the first place (#917). This module tests the rule
+// that closes that gap one level up.
+mod config_prose_says_stopped_without_row {
+    use crate::*;
+
+    fn config_model(key_yaml: &str) -> Model {
+        let spec = format!("keys:\n  TEST_KEY:\n{key_yaml}");
+        Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("parses"),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    fn hits(model: &Model) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_config_prose_says_stopped_without_row(model, &mut issues);
+        issues
+    }
+
+    /// The named case: `STOPPED` in prose, no `decisionRow:` at all — an error on its own, with no
+    /// dependency on the deploy value (unlike the row-bound rule above).
+    #[test]
+    fn a_key_whose_prose_says_stopped_without_a_decision_row_is_an_error() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"STOPPED since 2026-07-28, nobody restarted it.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "expected exactly one finding: {:?}", found.iter().map(|i| i.rule).collect::<Vec<_>>());
+        assert_eq!(found[0].rule, "config-prose-says-stopped-without-row");
+    }
+
+    /// The word `PAUSED` trips the same rule.
+    #[test]
+    fn paused_trips_the_same_rule() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"PAUSED with the sweep, issue #220.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rule, "config-prose-says-stopped-without-row");
+    }
+
+    /// A `decisionRow:`-bound key is untouched by THIS rule even if its prose says STOPPED — that
+    /// case is `decision-row-open-key-must-be-off`'s job, checked against the row's actual status.
+    #[test]
+    fn a_key_with_a_decision_row_is_untouched() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"STOPPED since 2026-07-28.\"\n    deploy:\n      production: \"false\"\n",
+        );
+        assert!(hits(&model).is_empty());
+    }
+
+    /// Word-boundary, not substring: a word glued to other letters on either side ("STOPPEDLY",
+    /// "UNPAUSED") must not false-trip — only the standalone word does.
+    #[test]
+    fn a_substring_match_does_not_trip_the_rule() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"This worker is STOPPEDLY unstoppable and never UNPAUSED.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model);
+        assert!(found.is_empty(), "a substring hit must not trip the rule: {:?}", found.iter().map(|i| i.rule).collect::<Vec<_>>());
+    }
+
+    /// SCOPED TO `type: bool` — a non-toggle key whose prose happens to use the word in an
+    /// unrelated, ordinary sense (a sweep "stopping" cleanly, a "paused" pipeline cited as an
+    /// example) must not trip this rule; it makes no sense to bind such a key to a decision row.
+    #[test]
+    fn a_non_bool_key_is_untouched_even_with_the_word_present() {
+        let model = config_model(
+            "    type: string\n    default: \"\"\n    gates: \"the run resumes where it stopped on the next invocation.\"\n    deploy:\n      production: \"x\"\n",
+        );
+        assert!(hits(&model).is_empty());
+    }
+
+    /// Ordinary prose with neither word, no `decisionRow:` — silent, as most keys are today.
+    #[test]
+    fn ordinary_prose_is_silent() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    gates: \"Enables the feature.\"\n    deploy:\n      production: \"true\"\n",
+        );
+        assert!(hits(&model).is_empty());
+    }
+
+    /// THE MOTIVATING CASE. The real corpus, run through this rule directly: `RUN_SIRENE_WORKER`
+    /// must be clean, i.e. it must carry `decisionRow:` — exactly what #917's D2 (bind + reconcile)
+    /// supplies. RED before D2 (the SIRENE key trips it — no `decisionRow:`, prose says STOPPED);
+    /// GREEN after D2 (the key gains `decisionRow: SIRENE-RESTART`, so this rule is silent about it
+    /// and `decision-row-open-key-must-be-off` takes over).
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let found = hits(&model);
+        assert!(
+            found.is_empty(),
+            "the real corpus must be clean: {:?}",
+            found.iter().map(|i| format!("{}: {} ({})", i.rule, i.message, i.location)).collect::<Vec<_>>()
+        );
+    }
+}
+
 mod record_resolution {
     use crate::*;
 
