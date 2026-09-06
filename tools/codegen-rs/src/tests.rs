@@ -8603,16 +8603,17 @@ fn only_the_explicitly_declared_optional_secret_is_optional() {
         optional_keys,
         vec![
             "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT".to_string(),
-            "QUOTE_SIGNING_KEY_HMAC_SECRET".to_string(),
             "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET".to_string(),
         ],
-        "exactly three production secret keys may be optional at deploy -- an absent `required:` \
+        "exactly two production secret keys may be optional at deploy -- an absent `required:` \
          must stay fatal, only an EXPLICIT `required: []` on a `secret: true` key may declare \
-         `missing-optional`; got {optional_keys:?}"
+         `missing-optional`; got {optional_keys:?}. QUOTE_SIGNING_KEY_HMAC_SECRET was promoted to \
+         `required: [staging, production]` (ADR-20260906-192007 D-H) in the SAME change that \
+         landed the write door's boot-time refusal -- it is no longer in this list."
     );
 
     // The generated contract must agree: `secret-keys.json` carries `optional: true` on exactly
-    // those three keys.
+    // those two keys.
     let pins = read_image_pins(&root).expect("pins parse");
     let tree = emit_deploy_tree(&model, &pins);
     let secret_keys_json = tree
@@ -8632,10 +8633,9 @@ fn only_the_explicitly_declared_optional_secret_is_optional() {
         optional_in_json,
         vec![
             "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT",
-            "QUOTE_SIGNING_KEY_HMAC_SECRET",
             "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET",
         ],
-        "secret-keys.json must carry `optional: true` on exactly these three keys"
+        "secret-keys.json must carry `optional: true` on exactly these two keys"
     );
 }
 
