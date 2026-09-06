@@ -34,6 +34,7 @@ pub enum DomainEvent {
     PaymentIntentCreated(PaymentIntentCreated),
     RefundApproved(RefundApproved),
     MailboxMessageRequeued(MailboxMessageRequeued),
+    PlatformAccessGranted(PlatformAccessGranted),
     ConversationOpened(ConversationOpened),
     MessagePosted(MessagePosted),
     MessageTranslationAdded(MessageTranslationAdded),

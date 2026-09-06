@@ -78,6 +78,7 @@ scalar GatewayStatusCode
 scalar DialingCode
 scalar NationalPhoneNumber
 scalar OtpCode
+scalar PlatformMembershipId
 scalar ConversationMessageId
 scalar MessageBody
 scalar MuteReason
@@ -310,6 +311,10 @@ enum CommandFailureReason {
   PAYLOAD_UNDECODABLE
   UNCATALOGUED_INVARIANT
   TRANSIENT_INFRASTRUCTURE
+}
+
+enum PlatformAccessBasis {
+  CAPTAIN_ONBOARDING
 }
 
 enum MessageVisibility {
@@ -1233,6 +1238,12 @@ input ImportCatalogInput {
 
 input RequeueMailboxMessageInput {
   targetMessageId: MessageId!
+}
+
+input GrantPlatformAccessInput {
+  platformMembershipId: PlatformMembershipId!
+  authSubject: AuthSubject!
+  basis: PlatformAccessBasis!
 }
 
 input OpenConversationInput {
@@ -2160,6 +2171,7 @@ type Mutation {
   updateOfferStock(input: UpdateOfferStockInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOfferStock")
   importCatalog(input: ImportCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "ImportCatalog")
   requeueMailboxMessage(input: RequeueMailboxMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RequeueMailboxMessage")
+  grantPlatformAccess(input: GrantPlatformAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantPlatformAccess")
   openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
   postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
   recordMessageTranslation(input: RecordMessageTranslationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "RecordMessageTranslation")

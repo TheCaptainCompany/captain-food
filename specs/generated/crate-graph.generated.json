@@ -146,6 +146,14 @@
       ],
       "path": "crates/bins/actor-payment"
     },
+    "actor-platform-membership": {
+      "actor": "PlatformMembership",
+      "kind": "aggregate",
+      "domain_crates": [
+        "domain-common"
+      ],
+      "path": "crates/bins/actor-platform-membership"
+    },
     "actor-prospect": {
       "actor": "Prospect",
       "kind": "aggregate",

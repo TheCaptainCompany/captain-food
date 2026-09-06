@@ -12,8 +12,8 @@
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
     CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, MembershipId,
-    MessageId, OrderId, ReclamationId, RestaurantAccountId, RestaurantId, RestaurantInvitationId,
-    RiderId,
+    MessageId, OrderId, PlatformMembershipId, ReclamationId, RestaurantAccountId, RestaurantId,
+    RestaurantInvitationId, RiderId,
 };
 // A Conversation is keyed by the OrderId (its identity IS its order, #129) — same id type as Order, distinct stream.
 
@@ -94,6 +94,15 @@ impl_aggregate!(
     RestaurantInvitationId,
     "RestaurantInvitation",
     crate::restaurant_invitation::fold
+);
+// #639 part C step 6-v (ADR-20260905-223957 §1): platform standing is its OWN relationship, its
+// own aggregate, its own stream, keyed by its own minted PlatformMembershipId — distinct from
+// RestaurantMembership and from any ScopeType instance (PRINCIPALS-MEMBER: untouched).
+impl_aggregate!(
+    crate::platform_membership::PlatformMembershipState,
+    PlatformMembershipId,
+    "PlatformMembership",
+    crate::platform_membership::fold
 );
 
 #[cfg(test)]

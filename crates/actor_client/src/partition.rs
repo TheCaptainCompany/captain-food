@@ -143,6 +143,9 @@ mod tests {
             let expected: u16 = match *actor_type {
                 // Operator actions are rare and human-paced (specs/common/actors.yaml).
                 "MailboxSupervision" => 1,
+                // Platform grants are rare and human-paced too, population 1-3 admins (#639 part
+                // C step 6-v, ADR-20260905-223957 §1, specs/common/actors.yaml).
+                "PlatformMembership" => 1,
                 _ => 5,
             };
             assert_eq!(

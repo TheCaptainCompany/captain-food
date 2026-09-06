@@ -27,6 +27,7 @@ pub mod restaurant;
 pub mod restaurant_account;
 pub mod restaurant_invitation;
 pub mod restaurant_membership;
+pub mod platform_membership;
 pub mod service_window;
 pub mod rider;
 pub mod shared;

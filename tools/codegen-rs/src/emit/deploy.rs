@@ -149,14 +149,23 @@ pub(crate) fn bin_config_scopes(b: &BinSpec, model: &Model) -> BTreeSet<String> 
 }
 
 /// Every production secret-sourced env key: `(env key, origin scope, consumer, github repo
-/// secret)`. Non-secret keys are BAKED into the binary per profile (PROP-20260729-014500 D5)
-/// and never appear in manifests. The CONSUMER rides along since #393: a non-`server` consumer's
-/// key reaches ONLY the pod that declares it hosts that consumer (`BinSpec::consumers` — the
-/// worker bins' widening); a key nothing hosts reaches no pod, exactly as before. NOTE the
-/// SIRENE ingestion keys (`consumer: sirene_ingest`) deliberately declare NO production
-/// `from_secret` today — GitHub Actions injects them directly — so the worker-sirene-sync pod
-/// env stays without them until the #358 cutover gives them a deploy source (recorded there).
-pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, String, String)> {
+/// secret, optional)`. Non-secret keys are BAKED into the binary per profile
+/// (PROP-20260729-014500 D5) and never appear in manifests. The CONSUMER rides along since #393:
+/// a non-`server` consumer's key reaches ONLY the pod that declares it hosts that consumer
+/// (`BinSpec::consumers` — the worker bins' widening); a key nothing hosts reaches no pod, exactly
+/// as before. NOTE the SIRENE ingestion keys (`consumer: sirene_ingest`) deliberately declare NO
+/// production `from_secret` today — GitHub Actions injects them directly — so the
+/// worker-sirene-sync pod env stays without them until the #358 cutover gives them a deploy
+/// source (recorded there). `optional` is `k.secret && k.required_declared && k.required.is_empty()`
+/// — round 3, R3-1: an ABSENT `required:` and an EXPLICIT `required: []` used to fold into the
+/// same empty `Vec`, so this gate could not tell "never declared" from "declared optional" and 14
+/// secrets nobody ever marked optional silently flipped fatal->non-fatal. The declared posture
+/// (ADR-20260815-015422) is now spelled out: a key is optional at deploy ONLY when the spec
+/// EXPLICITLY writes `required: []` on it (like `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` — never
+/// required at boot, so it must not be able to block the release path the way a genuinely
+/// required secret does); a key that never mentions `required:` at all stays fatal, exactly as a
+/// key `required: [staging, production]` does.
+pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, String, String, bool)> {
     parse_config_keys(model)
         .into_iter()
         .filter_map(|k| {
@@ -169,7 +178,8 @@ pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, Stri
                 .or_else(|| model.origins.get(&("configuration.yaml".to_string(), k.name.clone())))
                 .cloned()
                 .unwrap_or_else(|| KERNEL_SCOPE.to_string());
-            Some((k.name, scope, k.consumer, repo_secret))
+            let optional = k.secret && k.required_declared && k.required.is_empty();
+            Some((k.name, scope, k.consumer, repo_secret, optional))
         })
         .collect()
 }
@@ -180,11 +190,11 @@ pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, Stri
 pub(crate) fn bin_secret_env_keys(
     b: &BinSpec,
     model: &Model,
-    secret_keys: &[(String, String, String, String)],
+    secret_keys: &[(String, String, String, String, bool)],
 ) -> Vec<String> {
     let scopes = bin_config_scopes(b, model);
     let mut out = Vec::new();
-    for (key, scope, consumer, _) in secret_keys {
+    for (key, scope, consumer, _, _optional) in secret_keys {
         if consumer != "server" && !b.consumers.contains(consumer) {
             continue; // #393: a non-server consumer's key reaches only its hosting worker's pod
         }
@@ -206,20 +216,32 @@ pub(crate) fn bin_secret_env_keys(
 }
 
 /// The env block of one bin: APP_PROFILE + PORT explicit, then each secret-sourced key of the
-/// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`.
+/// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`. A key with
+/// `required: []` (never required at boot, e.g. `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`) gets
+/// `optional: true` on its `secretKeyRef` — k8s then starts the pod even when the sealed Secret
+/// has no such key, and `tools/secret-gate` reads the SAME flag from `secret-keys.json` to report
+/// its absence as non-fatal (round 2, R2-1: a dark feature's secret must never trip the release
+/// path).
 fn env_yaml(
     b: &BinSpec,
     model: &Model,
-    secret_keys: &[(String, String, String, String)],
+    secret_keys: &[(String, String, String, String, bool)],
     indent: &str,
 ) -> String {
+    let optional_by_key: std::collections::BTreeMap<&str, bool> =
+        secret_keys.iter().map(|(k, _, _, _, optional)| (k.as_str(), *optional)).collect();
     let mut out = String::new();
     out.push_str(&format!(
         "{indent}- name: APP_PROFILE\n{indent}  value: production\n{indent}- name: PORT\n{indent}  value: \"{HTTP_PORT}\"\n"
     ));
     for key in bin_secret_env_keys(b, model, secret_keys) {
+        let optional_line = if optional_by_key.get(key.as_str()).copied().unwrap_or(false) {
+            format!("{indent}      optional: true\n")
+        } else {
+            String::new()
+        };
         out.push_str(&format!(
-            "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n"
+            "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n{optional_line}"
         ));
     }
     out
@@ -256,7 +278,7 @@ fn cron_manifest_yaml(
     b: &BinSpec,
     model: &Model,
     pin: Option<&ImagePin>,
-    secret_keys: &[(String, String, String, String)],
+    secret_keys: &[(String, String, String, String, bool)],
 ) -> String {
     let image = image_ref(&b.name, pin);
     let schedule = b.schedule.as_deref().expect("cron manifest requires a declared schedule");
@@ -334,7 +356,7 @@ metadata:
 
 /// One bin's manifest file: Deployment (+ Service for the HTTP families), or a CronJob for a
 /// periodic worker (declared `schedule:` — ADR-20260808-062933).
-fn bin_manifest_yaml(b: &BinSpec, model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String, String)]) -> String {
+fn bin_manifest_yaml(b: &BinSpec, model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String, String, bool)]) -> String {
     if b.schedule.is_some() {
         return cron_manifest_yaml(b, model, pin, secret_keys);
     }
@@ -661,16 +683,17 @@ pub(crate) fn monolith_container(model: &Model) -> Option<Container> {
 /// process is every scope, holds the write path, the read models and every integration ACL at
 /// once. That breadth is exactly what the bin split exists to end; describing it accurately here
 /// is what makes the difference visible.
-fn monolith_env_yaml(secret_keys: &[(String, String, String, String)], indent: &str) -> String {
+fn monolith_env_yaml(secret_keys: &[(String, String, String, String, bool)], indent: &str) -> String {
     let mut out = format!(
         "{indent}- name: APP_PROFILE\n{indent}  value: production\n{indent}- name: PORT\n{indent}  value: \"{HTTP_PORT}\"\n"
     );
-    for (key, _scope, consumer, _) in secret_keys {
+    for (key, _scope, consumer, _, optional) in secret_keys {
         if consumer != "server" {
             continue;
         }
+        let optional_line = if *optional { format!("{indent}      optional: true\n") } else { String::new() };
         out.push_str(&format!(
-            "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n"
+            "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n{optional_line}"
         ));
     }
     out
@@ -682,7 +705,7 @@ fn monolith_labels_yaml(indent: &str) -> String {
     )
 }
 
-fn monolith_workload_yaml(model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String, String)]) -> String {
+fn monolith_workload_yaml(model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String, String, bool)]) -> String {
     let unpinned_note = if pin.and_then(|p| p.digest.as_ref()).is_none() {
         "\n# UNPINNED: deploy/pins/server.json has no digest yet -- CI's pin-bump writes it and\n# regenerates this file; the :unpinned tag is deliberately undeployable, never a default."
     } else {
@@ -999,7 +1022,7 @@ fn secret_keys_json(model: &Model, topology: &[BinSpec]) -> String {
     );
     let mut keys = serde_json::Map::new();
     let hosted: BTreeSet<&String> = topology.iter().flat_map(|b| b.consumers.iter()).collect();
-    for (key, scope, consumer, repo_secret) in production_secret_keys(model) {
+    for (key, scope, consumer, repo_secret, optional) in production_secret_keys(model) {
         // The contract lists exactly what some pod's env references (#393): `server`-consumed
         // keys plus any consumer a worker bin declares it hosts. A non-server consumer's key
         // with NO hosting pod stays out — today that is every SIRENE key anyway, since they
@@ -1010,6 +1033,13 @@ fn secret_keys_json(model: &Model, topology: &[BinSpec]) -> String {
         let mut entry = serde_json::Map::new();
         entry.insert("scope".into(), serde_json::Value::String(scope));
         entry.insert("from_github_secret".into(), serde_json::Value::String(repo_secret));
+        // round 2, R2-1: a key with `required: []` (never required at boot) is OPTIONAL in the
+        // Secret contract too -- `tools/secret-gate` reads this flag to report the key's absence
+        // as `missing-optional` (non-fatal) instead of failing every deploy dispatch, rollback
+        // included, on a dark feature's unprovisioned secret (the #899/#900-item-18 class).
+        if optional {
+            entry.insert("optional".into(), serde_json::Value::Bool(true));
+        }
         keys.insert(key, serde_json::Value::Object(entry));
     }
     map.insert("keys".into(), serde_json::Value::Object(keys));

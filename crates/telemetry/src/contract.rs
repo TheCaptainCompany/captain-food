@@ -397,6 +397,21 @@ pub mod metric {
     /// enforces its refusal on a request, 0 the moment the composition root boots with the key OFF.
     pub const MEMBER_SIGN_IN_DOOR_ENFORCING: &str = "member_sign_in_door_enforcing";
 
+    // --- admin-sign-in (#639 part C step 6-v, ADR-20260905-223957 §5) ----------------------------
+
+    /// The ADMIN/platform seam's own resolution outcome -- ONE bounded counter (card F), never a
+    /// per-role widening of `member_identity_resolve_ms`/`rider_identity_resolve_ms`'s histogram
+    /// shape: the platform population (1-3) is too small for a latency distribution to mean
+    /// anything. Attribute `result` (resolved | not_found | lookup_failed).
+    pub const ADMIN_IDENTITY_RESOLVE_TOTAL: &str = "admin_identity_resolve_total";
+    /// `GrantPlatformAccess`'s outcome, attribute `basis` (bounded, `PlatformAccessBasis` -- one
+    /// value today).
+    pub const PLATFORM_ACCESS_GRANTED_TOTAL: &str = "platform_access_granted_total";
+    /// GATE LIVENESS (the `member_sign_in_door_enforcing` shape): 1 while
+    /// `RUN_PLATFORM_ACCESS_GRANT` enforces its refusal, 0 the moment the composition root boots
+    /// with the key OFF -- registered at BOTH composition roots unconditionally.
+    pub const PLATFORM_ACCESS_GRANT_ENFORCING: &str = "platform_access_grant_enforcing";
+
     // --- restaurant-invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3) ----------------
     /// `inviteRestaurantMember`'s outcome, attribute `authority` (the INVITED authority, never the
     /// caller's).

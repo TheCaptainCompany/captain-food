@@ -204,6 +204,8 @@ pub struct Config {
     pub otel_traces_sample_ratio: String,
     /// DEFAULT `info`. Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default.
     pub log_level: String,
+    /// DEFAULT `false`. The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON, `GrantPlatformAccess` appends `PlatformAccessGranted` as normal (subject to the accepted-basis check). OFF, the handler refuses BEFORE touching the store with the typed `PlatformAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. NO revoke command exists yet to be asymmetric with (ADR-20260905-223957 §3). Preconditions gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): the one-shot bootstrap landed and idempotent, the seam refusing an unbound ADMIN token proven red-first, the Art. 13/Art. 30 items (founder's, external), the labour posture (founder's), the `admin-sign-in` contract and both dead-man gauges live, and 6-iii's System routing items.
+    pub run_platform_access_grant: bool,
     /// DEFAULT `30`. How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
     pub mailbox_lease_seconds: i64,
     /// DEFAULT `10`. Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
@@ -363,6 +365,10 @@ impl Config {
         let otel_traces_sample_ratio = otel_traces_sample_ratio.unwrap_or_else(|| "1.0".to_string());
         let log_level = raw("LOG_LEVEL").or_else(|| baked("LOG_LEVEL", profile).map(str::to_string));
         let log_level = log_level.unwrap_or_else(|| "info".to_string());
+        let run_platform_access_grant = raw("RUN_PLATFORM_ACCESS_GRANT")
+            .or_else(|| baked("RUN_PLATFORM_ACCESS_GRANT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_PLATFORM_ACCESS_GRANT", &v, false))
+            .unwrap_or(false);
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
@@ -516,6 +522,7 @@ impl Config {
                 honeycomb_dataset,
                 otel_traces_sample_ratio,
                 log_level,
+                run_platform_access_grant,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activations,
@@ -590,6 +597,7 @@ impl Config {
         out.push_str(&format!("  HONEYCOMB_DATASET          = {}\n", self.honeycomb_dataset));
         out.push_str(&format!("  OTEL_TRACES_SAMPLE_RATIO   = {}\n", self.otel_traces_sample_ratio));
         out.push_str(&format!("  LOG_LEVEL                  = {}\n", self.log_level));
+        out.push_str(&format!("  RUN_PLATFORM_ACCESS_GRANT  = {}\n", self.run_platform_access_grant));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
@@ -636,7 +644,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 52;
+pub const KEY_COUNT: usize = 53;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -652,6 +660,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "HONEYCOMB_DATASET",
     "OTEL_TRACES_SAMPLE_RATIO",
     "LOG_LEVEL",
+    "RUN_PLATFORM_ACCESS_GRANT",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATIONS",
@@ -714,6 +723,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("OTEL_TRACES_SAMPLE_RATIO", "staging", "1.0"),
     ("LOG_LEVEL", "production", "info"),
     ("LOG_LEVEL", "staging", "info"),
+    ("RUN_PLATFORM_ACCESS_GRANT", "production", "false"),
+    ("RUN_PLATFORM_ACCESS_GRANT", "staging", "false"),
     ("RUN_PROJECTOR", "production", "true"),
     ("RUN_PROJECTOR", "staging", "true"),
     ("RUN_PROCESS_MANAGERS", "production", "true"),

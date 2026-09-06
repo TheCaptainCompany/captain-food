@@ -23,9 +23,9 @@ use std::time::Duration;
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
     project_member, project_order_conversation, project_order_tracking,
-    project_prospection_pipeline, project_restaurant, project_restaurant_invitation_list,
-    project_restaurant_roster, project_rider, project_rider_restriction,
-    project_rider_roster, project_slug_alias, Envelope,
+    project_platform_member, project_prospection_pipeline, project_restaurant,
+    project_restaurant_invitation_list, project_restaurant_roster, project_rider,
+    project_rider_restriction, project_rider_roster, project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
@@ -34,6 +34,7 @@ use application::projectors::customer_credit_balance::CustomerCreditBalanceProje
 use application::projectors::member::MemberProjector;
 use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
+use application::projectors::platform_member::PlatformMemberProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
 use application::projectors::restaurant_invitation_list::RestaurantInvitationListProjector;
@@ -45,8 +46,8 @@ use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{
-    CartId, CatalogId, CustomerId, MemberId, MembershipId, OrderId, RestaurantId,
-    RestaurantInvitationId, RiderId,
+    CartId, CatalogId, CustomerId, MemberId, MembershipId, OrderId, PlatformMembershipId,
+    RestaurantId, RestaurantInvitationId, RiderId,
 };
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
@@ -57,8 +58,8 @@ use application::projectors::scope_membership;
 use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
-    member_store, order_conversation_store, order_tracking_store, prospection_store,
-    restaurant_invitation_list_store, restaurant_roster_store, restaurant_store,
+    member_store, order_conversation_store, order_tracking_store, platform_member_store,
+    prospection_store, restaurant_invitation_list_store, restaurant_roster_store, restaurant_store,
     rider_restriction_store, rider_roster_store, rider_store,
     scope_membership_store, slug_alias_store,
 };
@@ -183,6 +184,13 @@ enum ReadModelProjector {
     /// source. Keyed on `invitationId`, matching the `RestaurantInvitation-{invitationId}` stream.
     /// Its OWN checkpoint group, born at 0.
     RestaurantInvitationList,
+    /// The platform grant bridge (#639 part C step 6-v, ADR-20260905-223957 §1/§2): one row per
+    /// `authSubject` ever granted platform access. Keyed on the STREAM's own aggregate id
+    /// (`PlatformMembership-{platformMembershipId}` names the grant, and unlike `Member` there is
+    /// no separate person-id scalar to key on instead — ADMIN carries no domain claim) — the
+    /// `Rider`/`RestaurantRoster` fast-path shape, NOT `Member`'s cross-stream one. Its OWN
+    /// checkpoint group, born at 0, never a prefix on `ScopeMembership` or any other group (dba).
+    PlatformMember,
     /// SET-shaped (#144): one event GRANTS/REVOKES N membership rows, so there is no
     /// `load -> project -> upsert` triple; the pure fold lives in
     /// `application::projectors::scope_membership`, and this arm resolves its lookups and applies
@@ -378,6 +386,22 @@ impl ReadModelProjector {
                 let state = member_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_member(&MemberProjector, state, env) {
                     member_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                }
+            }
+            Self::PlatformMember => {
+                // platformMembershipId matches the stream's own aggregate id -- the fast path
+                // (unlike `Member`, ADMIN has no separate person-id scalar to key on instead).
+                let id = PlatformMembershipId(aggregate_uuid_of(
+                    env,
+                    "PlatformMembership-",
+                    "platformMembershipId",
+                )?);
+                let state =
+                    platform_member_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                if let Some(next) = project_platform_member(&PlatformMemberProjector, state, env) {
+                    platform_member_store::upsert(&mut *conn, &next)
+                        .await
+                        .map_err(FoldFault::Database)?;
                 }
             }
             Self::RestaurantRoster => {
@@ -689,6 +713,17 @@ const REGISTRY: &[ProjectorGroup] = &[
         stream_prefixes: &["RestaurantMembership-"],
         projectors: &[ReadModelProjector::Member],
         scope: "network",
+    },
+    // The platform grant bridge (#639 part C step 6-v, ADR-20260905-223957 §1/§2): its OWN
+    // checkpoint, its OWN group, starting at 0 (the `Member` #424 lesson, generalised again) -- a
+    // table born after the log is backfilled by replay, never a migration-time copy. Rebuild by
+    // resetting the `PlatformMember` checkpoint, NEVER TRUNCATE (the table's own `rules:`). NO
+    // `PLATFORM` prefix on `ScopeMembership` or its group -- entirely standalone.
+    ProjectorGroup {
+        checkpoint: "PlatformMember",
+        stream_prefixes: &["PlatformMembership-"],
+        projectors: &[ReadModelProjector::PlatformMember],
+        scope: "common",
     },
     // The restaurant's own team roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
     // amendment, PROP-20260831-180622 §6.4): its OWN checkpoint group, born at 0 -- the `Member`

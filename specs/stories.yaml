@@ -328,6 +328,10 @@ admin:
       steps:
         GrantAccess: { $ref: 'api.yaml#/mutations/grantRestaurantAccess' }
         RevokeAccess: { $ref: 'api.yaml#/mutations/revokeRestaurantAccess' }
+    ManagePlatformMembership:
+      description: As an admin, I hand-issue platform access to a NEW admin — the platform grant and the ADMIN seam binding, ships dark behind RUN_PLATFORM_ACCESS_GRANT (#639 part C step 6-v, ADR-20260905-223957 §1-§3). The FIRST admin never walks this step — a one-shot bootstrap dispatches the same command through the mailbox directly; every SUBSEQUENT admin is hand-issued through it. No revoke step exists yet (deferred until a second admin exists).
+      steps:
+        GrantAccess: { $ref: 'api.yaml#/mutations/grantPlatformAccess' }
     ArbitrateRefunds:
       description: As an admin, I arbitrate pending refund requests when the restaurant does not decide (RefundProcess).
       steps:

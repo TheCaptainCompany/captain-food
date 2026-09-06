@@ -2388,6 +2388,70 @@ impl PlaceOrderProcessInbox {
     }
 }
 
+/// GENERATED from `actors.yaml#/PlatformMembership/receives` — the CLOSED set of messages the `PlatformMembership`
+/// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
+/// each variant carrying its typed payload.
+///
+/// Adding a `receives:` entry adds a variant here, and the human-owned `match` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides what the new
+/// message DOES. That compile error is the whole point: before #771 the same omission shipped
+/// green and surfaced as a `FAILED "unroutable command type"` row in production.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlatformMembershipInbox {
+    /// COMMAND `GrantPlatformAccess`.
+    GrantPlatformAccess(domain::generated::commands::GrantPlatformAccess),
+}
+
+impl PlatformMembershipInbox {
+    /// The actors.yaml key this inbox belongs to — the `inbound_messages.actor_type` a row
+    /// must carry to be parseable here.
+    pub const ACTOR_TYPE: &'static str = "PlatformMembership";
+
+    /// Every message type this actor DECLARES it receives, in emission order — the
+    /// operator-facing answer to "is this row's type one we know?" without constructing a value.
+    pub const DECLARED: &'static [&'static str] = &["GrantPlatformAccess"];
+
+    /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
+    /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
+    ///
+    /// An UNDECLARED message type is NOT an error about this payload — during a rolling deploy an
+    /// old consumer legitimately meets a message type a newer producer already emits. The caller
+    /// must treat it as TRANSIENT (retry, then park loudly), never as a terminal failure:
+    /// terminal-failing it buries a paid order.
+    pub fn parse(
+        message_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Self, InboxParseError> {
+        match message_type {
+            "GrantPlatformAccess" => serde_json::from_value::<domain::generated::commands::GrantPlatformAccess>(payload.clone())
+                .map(Self::GrantPlatformAccess)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "GrantPlatformAccess",
+                    detail: e.to_string(),
+                }),
+            other => Err(InboxParseError::UndeclaredMessage {
+                actor_type: Self::ACTOR_TYPE,
+                message_type: other.to_string(),
+            }),
+        }
+    }
+
+    /// The wire `message_type` this value came from — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::GrantPlatformAccess(_) => "GrantPlatformAccess",
+        }
+    }
+
+    /// The message kind — a total projection of the variant set.
+    pub fn kind(&self) -> InboxKind {
+        match self {
+            Self::GrantPlatformAccess(_) => InboxKind::Command,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Prospect/receives` — the CLOSED set of messages the `Prospect`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -3518,6 +3582,8 @@ pub enum ActorInbox {
     Payment(PaymentInbox),
     /// A row on a `PlaceOrderProcess` lane.
     PlaceOrderProcess(PlaceOrderProcessInbox),
+    /// A row on a `PlatformMembership` lane.
+    PlatformMembership(PlatformMembershipInbox),
     /// A row on a `Prospect` lane.
     Prospect(ProspectInbox),
     /// A row on a `Reclamation` lane.
@@ -3557,6 +3623,7 @@ impl ActorInbox {
             "Order" => OrderInbox::parse(message_type, payload).map(Self::Order),
             "Payment" => PaymentInbox::parse(message_type, payload).map(Self::Payment),
             "PlaceOrderProcess" => PlaceOrderProcessInbox::parse(message_type, payload).map(Self::PlaceOrderProcess),
+            "PlatformMembership" => PlatformMembershipInbox::parse(message_type, payload).map(Self::PlatformMembership),
             "Prospect" => ProspectInbox::parse(message_type, payload).map(Self::Prospect),
             "Reclamation" => ReclamationInbox::parse(message_type, payload).map(Self::Reclamation),
             "RefundProcess" => RefundProcessInbox::parse(message_type, payload).map(Self::RefundProcess),
@@ -3583,6 +3650,7 @@ impl ActorInbox {
             Self::Order(_) => OrderInbox::ACTOR_TYPE,
             Self::Payment(_) => PaymentInbox::ACTOR_TYPE,
             Self::PlaceOrderProcess(_) => PlaceOrderProcessInbox::ACTOR_TYPE,
+            Self::PlatformMembership(_) => PlatformMembershipInbox::ACTOR_TYPE,
             Self::Prospect(_) => ProspectInbox::ACTOR_TYPE,
             Self::Reclamation(_) => ReclamationInbox::ACTOR_TYPE,
             Self::RefundProcess(_) => RefundProcessInbox::ACTOR_TYPE,
@@ -3608,6 +3676,7 @@ impl ActorInbox {
             Self::Order(m) => m.message_type(),
             Self::Payment(m) => m.message_type(),
             Self::PlaceOrderProcess(m) => m.message_type(),
+            Self::PlatformMembership(m) => m.message_type(),
             Self::Prospect(m) => m.message_type(),
             Self::Reclamation(m) => m.message_type(),
             Self::RefundProcess(m) => m.message_type(),
@@ -3633,6 +3702,7 @@ impl ActorInbox {
             Self::Order(m) => m.kind(),
             Self::Payment(m) => m.kind(),
             Self::PlaceOrderProcess(m) => m.kind(),
+            Self::PlatformMembership(m) => m.kind(),
             Self::Prospect(m) => m.kind(),
             Self::Reclamation(m) => m.kind(),
             Self::RefundProcess(m) => m.kind(),
@@ -3755,6 +3825,8 @@ impl ActorInbox {
             Self::Order(m) => m.into_fact().map(ActorFactInbox::Order),
             Self::Payment(m) => m.into_fact().map(ActorFactInbox::Payment),
             Self::PlaceOrderProcess(m) => m.into_fact().map(ActorFactInbox::PlaceOrderProcess),
+            // The `PlatformMembership` lane declares no fact.
+            Self::PlatformMembership(_) => None,
             // The `Prospect` lane declares no fact.
             Self::Prospect(_) => None,
             // The `Reclamation` lane declares no fact.

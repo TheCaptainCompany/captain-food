@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1220,
+  "recordedAt": "2026-09-06T02:20:45.424Z",
+  "branch": "639-staff-auth-platform-grant",
+  "note": "Round 3 (ceiling): R3-1 secret-gate optional declared-posture fix + codegen test, R3-2 SPEC-LOG amendment"
+}

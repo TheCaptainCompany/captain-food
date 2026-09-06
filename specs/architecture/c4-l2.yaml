@@ -56,9 +56,10 @@ boundedContexts:
       - { $ref: 'processmanager.yaml#/RefundProcess' }
       - { $ref: 'processmanager.yaml#/ReclamationProcess' }
   platform:
-    description: "Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI."
+    description: "Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957). No customer-facing surface; the system.captain.food ops screens are its UI."
     aggregates:
       - { $ref: 'actors.yaml#/MailboxSupervision' }
+      - { $ref: 'actors.yaml#/PlatformMembership' }
   customer:
     description: "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding."
     roles: [CUSTOMER, PUBLIC]
@@ -251,6 +252,11 @@ containers:
     description: "Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT."
     realizes:
       - { $ref: 'actors.yaml#/RestaurantMembership' }
+  actor-platform-membership:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains PlatformMembership lanes (#639 part C step 6-v, ADR-20260905-223957); appends its domain events. Ships dark behind RUN_PLATFORM_ACCESS_GRANT."
+    realizes:
+      - { $ref: 'actors.yaml#/PlatformMembership' }
   actor-restaurant-invitation:
     technology: "Rust — mailbox worker bin"
     description: "Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION."
@@ -474,6 +480,7 @@ relationships:
   - { from: actor-payment, to: event-store, description: "Lease Payment lanes; append Payment events" }
   - { from: actor-catalog, to: event-store, description: "Lease Catalog lanes; append Catalog events" }
   - { from: actor-mailbox-supervision, to: event-store, description: "Lease supervision lanes; record operator facts" }
+  - { from: actor-platform-membership, to: event-store, description: "Lease PlatformMembership lanes; append PlatformAccessGranted" }
   # PM bins: same drain/append + their outbound ports
   - { from: pm-place-order, to: event-store, description: "Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced" }
   - { from: pm-place-order, to: stripe, description: "Create manual-capture PaymentIntents (outbound payment port)" }

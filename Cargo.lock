@@ -137,6 +137,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "actor-platform-membership"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "domain-common",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "actor-prospect"
 version = "0.1.0"
 dependencies = [
@@ -1137,6 +1149,17 @@ dependencies = [
 
 [[package]]
 name = "client-place-order-process"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-platform-membership"
 version = "0.1.0"
 dependencies = [
  "actor_client",
@@ -4822,6 +4845,7 @@ dependencies = [
  "client-mailbox-supervision",
  "client-order",
  "client-place-order-process",
+ "client-platform-membership",
  "client-prospect",
  "client-reclamation",
  "client-refund-process",

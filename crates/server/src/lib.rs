@@ -76,6 +76,7 @@ mod auth_routes;
 /// Composition support for the `graphql-{scope}` subgraph bins (#385 API-tier wiring, D8): the
 /// monolith's GraphQL surface, same DI ([`build_graphql_di`]), restricted to one scope's slice.
 pub mod bin_support;
+pub mod bootstrap_platform_admin;
 mod web_ssr;
 /// The expose-gated `/services/*` surface + module index, GENERATED from specs/services.yaml
 /// (issue #26, ADR-20260719-214500).
@@ -134,9 +135,11 @@ pub use auth::ActingRole;
 pub use auth::{
     resolve_read_scope, CustomerIdentityResolution, CustomerIdentitySource, IdentityResolution,
     IdentitySources, LookupFailureReason, MemberIdentityResolution, MemberIdentitySource,
-    NoDatabaseMemberIdentity, NoDatabaseRiderIdentity, PgCustomerIdentity, PgMemberIdentity,
-    PgRiderIdentity, ResolveCustomerIdentity, ResolveMemberIdentity, ResolveRiderIdentity,
-    RiderIdentityResolution, RiderIdentitySource,
+    NoDatabaseMemberIdentity, NoDatabasePlatformIdentity, NoDatabaseRiderIdentity,
+    PgCustomerIdentity, PgMemberIdentity, PgPlatformIdentity, PgRiderIdentity,
+    PlatformIdentityResolution, PlatformIdentitySource, ResolveCustomerIdentity,
+    ResolveMemberIdentity, ResolvePlatformIdentity, ResolveRiderIdentity, RiderIdentityResolution,
+    RiderIdentitySource,
 };
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
@@ -225,7 +228,13 @@ pub fn wire() -> HealthDto {
 /// ADR-20260905-101349): the `member` table backs the `Member` projector arm on
 /// `RestaurantAccessGranted`, so a build without it would fail every staff-access grant projection
 /// with `relation "member" does not exist` (42P01) the moment `RUN_MEMBER_ACCESS_GRANT` flips on.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260905130000;
+///
+/// `20260905150000` = `platform_member_bridge` (#639 part C step 6-v, ADR-20260905-223957): the
+/// `platform_member` table backs the `PlatformMember` projector arm on `PlatformAccessGranted` and
+/// the ADMIN seam's `resolve_platform_scope` lookup, so a build without it would fail every
+/// platform-access grant projection with `relation "platform_member" does not exist` (42P01) the
+/// moment `RUN_PLATFORM_ACCESS_GRANT` flips on, and would 500 the ADMIN seam's own read.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260905150000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -697,6 +706,12 @@ pub async fn router() -> Router {
     // The MEMBER seam (#639 part C step 6-ii) has no claim path either, the SAME reasoning.
     let mut member_identity_source =
         auth::MemberIdentitySource::new(Arc::new(auth::NoDatabaseMemberIdentity));
+    // The ADMIN/platform seam (#639 part C step 6-v, ADR-20260905-223957 §2) has no claim path
+    // either, the SAME reasoning: without a database it answers `LookupFailed` (fail closed,
+    // PAGE-class), and the pool branch below replaces it with the Postgres resolver over the
+    // `PlatformMember` bridge.
+    let mut platform_identity_source =
+        auth::PlatformIdentitySource::new(Arc::new(auth::NoDatabasePlatformIdentity));
     // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
     // fail-closed no-op (parking succeeds, claiming yields nothing → no cookie, anonymous still works).
     let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
@@ -819,6 +834,14 @@ pub async fn router() -> Router {
                     Arc::new(infrastructure::persistence::scope_membership_store::PgScopeMembershipRepository::new(pool.clone()));
                 member_identity_source = auth::MemberIdentitySource::new(Arc::new(
                     auth::PgMemberIdentity::new(member_repository.clone(), member_scopes),
+                ));
+                // #639 part C step 6-v (ADR-20260905-223957 §2): the ADMIN/platform seam's bridge
+                // (`platform_member` table) -- the SAME shared repository `CommandDeps.platform_members`
+                // below reuses (vernon/evans: reuse the port, never re-derive it).
+                let platform_member_repository: Arc<dyn application::queries::PlatformMemberRepository> =
+                    Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone()));
+                platform_identity_source = auth::PlatformIdentitySource::new(Arc::new(
+                    auth::PgPlatformIdentity::new(platform_member_repository.clone()),
                 ));
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
@@ -1131,6 +1154,12 @@ pub async fn router() -> Router {
                         run_member_sign_in_door: config.run_member_sign_in_door,
                         // #639 part C step 6-iv: the invitation door, the SAME shape.
                         run_restaurant_invitation: config.run_restaurant_invitation,
+                        // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door,
+                        // the SAME shape.
+                        run_platform_access_grant: config.run_platform_access_grant,
+                        // The PlatformMember bridge's write-side arbiter (ADR-20260905-223957 §1)
+                        // -- the SAME shared repository the seam above reuses.
+                        platform_members: platform_member_repository.clone(),
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1635,6 +1664,14 @@ pub async fn router() -> Router {
         config.run_restaurant_invitation,
     );
     telemetry::meters::restaurant_invitation::door_enforcing(config.run_restaurant_invitation);
+    // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door's own fleet-parity
+    // declaration and liveness gauge, unconditional at BOTH composition roots from birth (the
+    // `RUN_MEMBER_SIGN_IN_DOOR` precedent above -- never left inside an `if let Some(pool)` branch).
+    telemetry::meters::runtime::declare_flag(
+        "RUN_PLATFORM_ACCESS_GRANT",
+        config.run_platform_access_grant,
+    );
+    telemetry::meters::admin_identity::grant_enforcing(config.run_platform_access_grant);
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
     // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside
@@ -1651,6 +1688,7 @@ pub async fn router() -> Router {
             customer: customer_identity_source,
             rider: rider_identity_source,
             member: member_identity_source,
+            platform: platform_identity_source,
         },
         graphql::rider_socket::RunRiderRestrictionSocketClose(
             config.run_rider_restriction_socket_close,

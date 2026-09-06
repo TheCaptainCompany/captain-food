@@ -2287,6 +2287,60 @@ member-sign-in:
   error_budget: { max_error_rate_pct: 1.0 }
 
 # =====================================================================
+# admin-sign-in -- #639 part C step 6-v (ADR-20260905-223957 §5): the ADMIN seam binding. A NEW
+# contract, never a widening of `member-sign-in` -- the platform population is 1-3, orders of
+# magnitude below the restaurant population, and pre-aggregation cannot be decomposed back apart.
+# NO `email`/`sub`/`admin_id`/`on_roster` label anywhere: any label on a population this small is
+# near-identifying. Two dead-man gauges live with this contract: `platform_access_grant_enforcing`
+# here; the System-host door gauge arrives with 6-iii.
+# =====================================================================
+admin-sign-in:
+  feature: admin-sign-in
+  criticality: high
+  workflow:
+    surface: graphql   # read-path binding, request seam -- no single command/saga/aggregate (the rider-identity precedent)
+
+  run_identity:
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    # ONE per ADMIN-path resolution through the platform seam, the `rider.identity.resolve`/
+    # `member.identity.resolve` shape transposed -- INSIDE auth.read_scope's span, never emitted
+    # for any other role.
+    - name: "admin.identity.resolve"
+      kind: INTERNAL
+      required: false   # only an ADMIN-path caller opens it
+      attributes:
+        - { key: "business.result", type: string, required: true }   # resolved | not_found | lookup_failed
+        - { key: "business.correlation_id", type: string, required: true }
+        - { key: "business.failure_reason", type: string, required: false }
+
+  metrics:
+    # The ADMIN seam's own resolution outcome -- ONE bounded counter (card F), never a per-role
+    # widening of `member_identity_resolve_ms`/`rider_identity_resolve_ms`'s histogram shape: the
+    # platform population is too small for a latency distribution to mean anything.
+    - { name: "admin_identity_resolve_total", type: counter, attributes: ["result"] }
+    # `platformAccessGranted`'s outcome -- `basis` is bounded (PlatformAccessBasis, one value today).
+    - { name: "platform_access_granted_total", type: counter, attributes: ["basis"] }
+    # GATE LIVENESS (the `member_sign_in_door_enforcing`/`otp_send_guard_enforcing` shape,
+    # ADR-20260810-231300): 1 while RUN_PLATFORM_ACCESS_GRANT enforces its refusal, 0 the moment
+    # the composition root boots with the key OFF -- registered at BOTH composition roots
+    # unconditionally (farley's RUN_* parity codegen test).
+    - { name: "platform_access_grant_enforcing", type: gauge, attributes: [] }
+
+  status_rules:
+    success:
+      required_spans: []   # the span is opened only on the ADMIN path
+    technical_error:
+      any_span_errors: true
+
+  # One probe on `platform_member.auth_subject`'s UNIQUE index -- the rider/member seam's own
+  # budget, and for the same reason: if it drifts, something started scanning a population of 1-3.
+  latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
+  error_budget: { max_error_rate_pct: 0.1 }
+
+# =====================================================================
 # restaurant-invitation -- #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the roster and the
 # invitation. Spans on BOTH legs of the two-lane accept; counters carry NO email/token/invitationId
 # label (PII/opaque-credential-free, the member-sign-in contract's own posture). The mail-hop

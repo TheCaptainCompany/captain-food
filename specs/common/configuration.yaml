@@ -21,8 +21,18 @@ description: >
     - type      : bool | string | int | enum. `bool` accepts true/1/yes/on and false/0/no/off,
                   case-insensitive, trimmed, quotes stripped (ADR-20260728-224500) — an unrecognised
                   value falls back to `default` AND logs that it did.
-    - required  : list of PROFILES in which the key MUST be present. Absent/[] = never required.
-                  A missing required key is reported WITH EVERY OTHER missing key and the app STOPS.
+    - required  : list of PROFILES in which the key MUST be present at BOOT. A missing required key
+                  is reported WITH EVERY OTHER missing key and the app STOPS. Absent (never
+                  written) and explicit `[]` mean the SAME thing for boot — never required — but
+                  they mean two different things for the DEPLOY secret gate (round 3, R3-1,
+                  ADR-20260815-015422): an ABSENT `required:` still demands the secret be
+                  PROVISIONED before release (the ordinary, fatal-if-missing case); an EXPLICIT
+                  `required: []` on a `secret: true` key additionally DECLARES the secret may be
+                  absent at deploy too (a genuinely optional, dark-feature secret like
+                  `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`) — the gate then reports its absence as
+                  `missing-optional`, non-fatal, instead of failing the release. Writing `[]` on a
+                  key that is not actually dark-feature-optional silently widens a blocking gate;
+                  say so in the key's `gates:` prose when you do.
     - default   : value when unset. Required keys must not declare one (it would mask the requirement).
     - secret    : true = the value is NEVER rendered — logs and status surfaces report `set`/`unset`.
     - gates     : WHAT BREAKS without it, in one sentence. This is not a comment: it is printed next to
@@ -368,6 +378,63 @@ keys:
       from_secret:
         production: INTERNAL_TRIGGER_TOKEN
         staging: INTERNAL_TRIGGER_TOKEN
+
+
+  # #639 part C step 6-v (ADR-20260905-223957 §3, register check: no record names this key or the
+  # bootstrap's trigger -- declared here with an `UNVERIFIED input` default posture, ADR-20260817-105845):
+  # the first admin's login credential, read by the ONE-SHOT `bootstrap-platform-admin` subcommand
+  # -- a Tours human's identifier in git would be immutable and unerasable (farley), so it travels
+  # as a SECRET, never a repo value and never a GraphQL input. NOT `required:` for ANY profile: the
+  # bootstrap is a deliberately-invoked subcommand, never part of the server's ordinary startup
+  # path, so an absent value must never stop the ordinary server from booting
+  # (ADMIN-DOOR-PRECONDITIONS item 1) -- the founder provisions it only when the bootstrap is
+  # actually run.
+  PLATFORM_BOOTSTRAP_ADMIN_SUBJECT:
+    type: string
+    secret: true
+    required: []
+    gates: >
+      The one-shot `bootstrap-platform-admin` subcommand's ONLY input: the first admin's verified
+      Supabase auth subject. Read once, at invocation, never logged, never a command payload from a
+      GraphQL client -- the command it dispatches (`GrantPlatformAccess`) is `roles: [ADMIN]` in
+      steady state and unreachable from any public surface. Absent, the subcommand refuses to run
+      and exits non-zero before touching the mailbox; the ordinary server boot never reads this key
+      at all and is never blocked by its absence.
+    deploy:
+      from_secret:
+        production: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
+        staging: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
+
+
+  # #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door, mirroring
+  # RUN_MEMBER_ACCESS_GRANT's shape exactly. Consumed at the WRITE door only
+  # (`grant_platform_access`'s handler, the `RestrictRider`/`RUN_MEMBER_ACCESS_GRANT` shape): OFF
+  # returns the typed refusal `PlatformAccessGrantDoorClosed` BEFORE the store is touched -- for
+  # BOTH the hand-issued GraphQL door and the one-shot bootstrap, which dispatches the SAME command
+  # through the SAME handler. `decisionRow` binds this key to
+  # `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` explicitly, so `decision-row-open-key-must-be-off`
+  # refuses any `deploy.production` value other than `"false"` while that row stays open. Kernel-
+  # homed beside `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` (round 2, R2-6): platform keys live in
+  # `specs/common/`, mirroring the `PlatformMembership` aggregate's own kernel placement.
+  RUN_PLATFORM_ACCESS_GRANT:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: ADMIN-DOOR-PRECONDITIONS
+    gates: >
+      The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON,
+      `GrantPlatformAccess` appends `PlatformAccessGranted` as normal (subject to the accepted-basis
+      check). OFF, the handler refuses BEFORE touching the store with the typed
+      `PlatformAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. NO
+      revoke command exists yet to be asymmetric with (ADR-20260905-223957 §3). Preconditions
+      gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): the
+      one-shot bootstrap landed and idempotent, the seam refusing an unbound ADMIN token proven
+      red-first, the Art. 13/Art. 30 items (founder's, external), the labour posture (founder's),
+      the `admin-sign-in` contract and both dead-man gauges live, and 6-iii's System routing items.
+    deploy:
+      production: "false"
+      staging: "false"
 
 
   # ===================================================================

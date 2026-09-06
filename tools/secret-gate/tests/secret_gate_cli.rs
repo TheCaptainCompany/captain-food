@@ -30,13 +30,35 @@ fn declared_github_secrets() -> Vec<String> {
     names
 }
 
+/// The declared repo-secret names carrying NO `optional: true` (round 2, R2-1) — the ones an
+/// absence must still FAIL the gate on. `missing_declared_secret_fails_the_gate_and_names_it` must
+/// drop one of THESE, never an optional one (an optional secret's absence is `missing-optional`,
+/// non-fatal by design, and would make that test vacuous or flaky as the catalog changes).
+fn declared_required_github_secrets() -> Vec<String> {
+    let path = repo_root().join("deploy/generated/secret-keys.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let v: serde_json::Value = serde_json::from_str(&text).expect("secret-keys.json is valid JSON");
+    let mut names: Vec<String> = v["keys"]
+        .as_object()
+        .expect("keys object")
+        .values()
+        .filter(|e| !e["optional"].as_bool().unwrap_or(false))
+        .map(|e| e["from_github_secret"].as_str().expect("from_github_secret is a string").to_string())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// A declared secret ABSENT from the present set is FATAL and the binary NAMES it. Runs the real
 /// binary with the real `--declared` artifact and a present set built from it minus one name.
 #[test]
 fn missing_declared_secret_fails_the_gate_and_names_it() {
     let names = declared_github_secrets();
-    assert!(!names.is_empty(), "the real artifact must declare at least one repo secret");
-    let dropped = names[0].clone();
+    let required = declared_required_github_secrets();
+    assert!(!required.is_empty(), "the real artifact must declare at least one REQUIRED repo secret");
+    let dropped = required[0].clone();
     // Present set = every declared name non-empty EXCEPT the dropped one -> exactly one missing.
     let present: serde_json::Map<String, serde_json::Value> = names
         .iter()
@@ -93,5 +115,75 @@ fn all_declared_present_passes_the_gate() {
         out.status.success(),
         "all declared secrets present -> gate passes; stderr was:\n{}",
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn run_gate(present: &serde_json::Value) -> std::process::Output {
+    let declared = repo_root().join("deploy/generated/secret-keys.json");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_secret-gate"))
+        .args(["--declared", declared.to_str().unwrap(), "--present", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn secret-gate");
+    child.stdin.take().unwrap().write_all(present.to_string().as_bytes()).unwrap();
+    child.wait_with_output().expect("wait secret-gate")
+}
+
+/// Round 2, R2-1, quote 1: the gate PASSES with `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` absent from the
+/// deploy target — its `secret-keys.json` entry carries `"optional": true` (spec-derived from
+/// `required: []`, never required at boot), so its absence is `missing-optional`, non-fatal. Every
+/// OTHER declared secret is present, so this isolates the one key's effect.
+#[test]
+fn platform_bootstrap_admin_subject_absent_passes_the_gate() {
+    let names = declared_github_secrets();
+    assert!(
+        names.iter().any(|n| n == "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT"),
+        "the real artifact must still declare PLATFORM_BOOTSTRAP_ADMIN_SUBJECT"
+    );
+    let present: serde_json::Map<String, serde_json::Value> = names
+        .iter()
+        .filter(|n| **n != "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT")
+        .map(|n| (n.clone(), serde_json::Value::String("present".into())))
+        .collect();
+    let out = run_gate(&serde_json::Value::Object(present));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT absent must NOT fail the gate (a dark feature's secret \
+         must never trip the release path); stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("missing-optional") && stderr.contains("PLATFORM_BOOTSTRAP_ADMIN_SUBJECT"),
+        "the absence must still be REPORTED as missing-optional; stderr was:\n{stderr}"
+    );
+}
+
+/// Round 2, R2-1, quote 2: the gate FAILS with `EMAIL_QUOTA_KEY_HMAC_SECRET` absent — it is
+/// `required: [staging, production]`, so its `secret-keys.json` entry carries no `optional` flag,
+/// and its absence stays fatal exactly as it did before this round.
+#[test]
+fn email_quota_key_hmac_secret_absent_fails_the_gate() {
+    let names = declared_github_secrets();
+    assert!(
+        names.iter().any(|n| n == "EMAIL_QUOTA_KEY_HMAC_SECRET"),
+        "the real artifact must still declare EMAIL_QUOTA_KEY_HMAC_SECRET"
+    );
+    let present: serde_json::Map<String, serde_json::Value> = names
+        .iter()
+        .filter(|n| **n != "EMAIL_QUOTA_KEY_HMAC_SECRET")
+        .map(|n| (n.clone(), serde_json::Value::String("present".into())))
+        .collect();
+    let out = run_gate(&serde_json::Value::Object(present));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "EMAIL_QUOTA_KEY_HMAC_SECRET (required in staging/production) absent MUST fail the gate; \
+         stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("EMAIL_QUOTA_KEY_HMAC_SECRET"),
+        "the failure must NAME the required missing secret; stderr was:\n{stderr}"
     );
 }

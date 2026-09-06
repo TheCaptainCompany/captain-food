@@ -66,6 +66,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       ct_actor_restaurant_membership = container "actor-restaurant-membership" "Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT." "Rust — mailbox worker bin" {
         a_RestaurantMembership = component "RestaurantMembership" "" "Aggregate"
       }
+      ct_actor_platform_membership = container "actor-platform-membership" "Drains PlatformMembership lanes (#639 part C step 6-v, ADR-20260905-223957); appends its domain events. Ships dark behind RUN_PLATFORM_ACCESS_GRANT." "Rust — mailbox worker bin" {
+        a_PlatformMembership = component "PlatformMembership" "" "Aggregate"
+      }
       ct_actor_restaurant_invitation = container "actor-restaurant-invitation" "Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION." "Rust — mailbox worker bin" {
         a_RestaurantInvitation = component "RestaurantInvitation" "" "Aggregate"
       }
@@ -207,6 +210,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_actor_payment -> ct_event_store "Lease Payment lanes; append Payment events"
     ct_actor_catalog -> ct_event_store "Lease Catalog lanes; append Catalog events"
     ct_actor_mailbox_supervision -> ct_event_store "Lease supervision lanes; record operator facts"
+    ct_actor_platform_membership -> ct_event_store "Lease PlatformMembership lanes; append PlatformAccessGranted"
     ct_pm_place_order -> ct_event_store "Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced"
     ct_pm_place_order -> x_stripe "Create manual-capture PaymentIntents (outbound payment port)"
     ct_pm_payment_settlement -> ct_event_store "Drain fulfilment/abort triggers; record PaymentCaptureFailed on a declined capture"
@@ -315,6 +319,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       autolayout lr
     }
     component ct_actor_restaurant_membership "ActorRestaurantMembershipComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_actor_platform_membership "ActorPlatformMembershipComponents" {
       include *
       autolayout lr
     }

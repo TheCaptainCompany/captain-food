@@ -219,6 +219,7 @@ A platform operator who onboards accounts and oversees the platform.
 |  | ReinstateRider | [✏️ `reinstateRider`](#mutation-reinstaterider) |
 | 🧭 **ManageRestaurantMembership** | GrantAccess | [✏️ `grantRestaurantAccess`](#mutation-grantrestaurantaccess) |
 |  | RevokeAccess | [✏️ `revokeRestaurantAccess`](#mutation-revokerestaurantaccess) |
+| 🧭 **ManagePlatformMembership** | GrantAccess | [✏️ `grantPlatformAccess`](#mutation-grantplatformaccess) |
 | 🧭 **ArbitrateRefunds** | ReviewPendingRefunds | [🔎 `pendingRefunds`](#query-pendingrefunds) |
 |  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
 |  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
@@ -8702,9 +8703,9 @@ _criticality: **medium**_
 <a id="sec-ctx-platform"></a>
 ## 🔲 4. platform
 
-_Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI._
+_Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957). No customer-facing surface; the system.captain.food ops screens are its UI._
 
-### 🧰 API operations _(1)_
+### 🧰 API operations _(2)_
 
 <a id="mutation-requeuemailboxmessage"></a>
 #### ✏️ Mutation: `requeueMailboxMessage`
@@ -8713,7 +8714,14 @@ _Platform operations (cross-cutting, ADMIN-performed): supervision of the write-
 - **Roles**: ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-### 🎭 Actors _(1)_
+<a id="mutation-grantplatformaccess"></a>
+#### ✏️ Mutation: `grantPlatformAccess`
+
+- **Command**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess) → handled by [🎭 `PlatformMembership`](#actor-platformmembership)
+- **Roles**: ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+### 🎭 Actors _(2)_
 
 <a id="actor-mailboxsupervision"></a>
 #### 🎭 Actor: `MailboxSupervision`
@@ -8725,7 +8733,34 @@ _🧩 aggregate_ — Operator supervision actions over the actor mailbox itself 
 | --- | --- | --- |
 | [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) | [⚡ `MailboxMessageRequeued`](#event-mailboxmessagerequeued) | [⛔ `MailboxMessageNotFound`](#error-mailboxmessagenotfound), [⛔ `MailboxMessageNotRequeueable`](#error-mailboxmessagenotrequeueable) |
 
-### 📩 Commands _(1)_
+<a id="actor-platformmembership"></a>
+#### 🎭 Actor: `PlatformMembership`
+
+_🧩 aggregate_ — The platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957 §1-§3): one `authSubject`'s access to the PLATFORM ITSELF. Its OWN aggregate, its OWN stream (`PlatformMembership-{platformMembershipId}`), its OWN lane -- platform standing is its OWN relationship, never a `ScopeType` widening (PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and never `RestaurantAccessGranted` reused (that event's `scopeId` is `$ref RestaurantId`, a platform grant on it would be permanently false history). The FIRST admin is a recorded ACT through the ordinary mailbox enqueue path (the one-shot bootstrap, ADR-20260905-223957 §3), never a row, never SQL, never a data migration; every SUBSEQUENT admin is hand-issued by an existing one through the ordinary `roles: [ADMIN]` GraphQL door. NO revoke command in this slice (§3): deferred until a second admin exists -- a named follow-up, not a hidden gap.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `GrantPlatformAccess`](#command-grantplatformaccess) | [⚡ `PlatformAccessGranted`](#event-platformaccessgranted) | [⛔ `PlatformAccessGrantDoorClosed`](#error-platformaccessgrantdoorclosed), [⛔ `PlatformAccessAlreadyGranted`](#error-platformaccessalreadygranted), [⛔ `PlatformMembershipIdMismatch`](#error-platformmembershipidmismatch) |
+
+### 🗄️ Views (read models) _(1)_
+
+<a id="view-platformmember"></a>
+#### 🗄️ View: `PlatformMember`
+
+- **Source**: [🎭 `PlatformMembership`](#actor-platformmembership) · 🛶 V0 · 🔒 internal
+- **Note**: The bridge an ADMIN-stamped request resolves through (`resolve_platform_scope`, 6-v): one row per `authSubject` who has ever been granted platform access. Deliberately holds NOTHING ELSE -- no `display_name`, no `basis` duplicate (that lives on `PlatformAccessGranted` in `domain_events` alone) -- the seam's read is EXISTS-shaped (a live grant or not), never a read of grant metadata. 
+- **Rules**: Rebuild = checkpoint reset, never TRUNCATE (the `Member` precedent, PROP-20260831-180622 §6.4): upsert keyed on `platform_membership_id` with ONE creating arm (`PlatformAccessGranted`), so a from-zero replay rewrites every row in place and no admin is denied mid-rebuild. TRUNCATE + reset locks every admin out for the length of the drain -- for a population of 1-3 that is the entire platform's back office. `auth_subject` is UNIQUE, not merely indexed, and the difference is a security property (the `Member.auth_subject`/`Rider.auth_ref` precedent): the seam's lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- the constraint converts a silent breach into a visible denial. It is the SOLE arbiter of the one-subject-one-platform-membership invariant (PRINCIPALS-MEMBER: ADMIN is not a PrincipalKind, so this reuses no reservation table) -- the write-side handler consults this SAME bridge, read-before-append, as its own first line; see `rules.yaml#/PlatformAuthSubjectResolvesToOneMembership` for the honesty limit of that ordering. No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `Member`/`RiderRoster` precedent): a stray value fails the ONE row's projection rather than halting the whole group. ERASURE, named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips (the `Member`/`Rider` precedent): `auth_subject` and `platform_membership_id` are a natural person's data held OUTSIDE the stream. The `PlatformMembership` aggregate declares no `deletion:` block today (no revoke command exists yet, ADR-20260905-223957 §3) -- a tombstone fold is owed the moment one is declared.
+- **Fed by**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `platform_membership_id` | [🔤 `PlatformMembershipId`](#scalar-platformmembershipid) | [⚡ `PlatformAccessGranted`.`platformMembershipId`](#event-platformaccessgranted--platformmembershipid) | PK | Keyed on the grant relationship's OWN minted id -- unlike `Member`, ADMIN has no separate person-id scalar distinct from the grant, so the row's PK IS the aggregate's own identity (the stream is `PlatformMembership-{platformMembershipId}`, same value). |
+| `auth_subject` | [🔤 `AuthSubject`](#scalar-authsubject) | [⚡ `PlatformAccessGranted`.`authSubject`](#event-platformaccessgranted--authsubject) | unique | The login credential this admin resolves through (the seam, `resolve_platform_scope`). UNIQUE, no other index (deliberately no `index: true` beside `unique:`, the `Member.auth_subject` precedent) -- see the table rule. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+### 📩 Commands _(2)_
 
 <a id="command-requeuemailboxmessage"></a>
 #### 📩 Command: `RequeueMailboxMessage`
@@ -8740,7 +8775,22 @@ ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause
 | --- | --- | --- | --- |
 | <a id="command-requeuemailboxmessage--targetmessageid"></a>`targetMessageId` | [🔤 `MessageId`](#scalar-messageid) | ✅ |  |
 
-### ⚡ Events _(1)_
+<a id="command-grantplatformaccess"></a>
+#### 📩 Command: `GrantPlatformAccess`
+
+Grant one `authSubject` access to the PLATFORM itself (ADR-20260905-223957 §1/§2/§3). Handled by `PlatformMembership`, its own aggregate, its own stream, its own lane -- platform standing is its OWN relationship, never a `ScopeType` widening (PRINCIPALS-MEMBER untouched) and never `RestaurantAccessGranted` reused (that event's `scopeId` is restaurant-typed). `roles: [ADMIN]` in steady state (§3): the ordinary GraphQL door for a SECOND admin, hand-issued by an existing one. The FIRST admin is never reached through this GraphQL door at all -- the one-shot bootstrap dispatches this SAME command through the ordinary mailbox enqueue path, with an actor envelope naming the bootstrap as the acting principal, so no public "claim the first admin" path ever exists (ADR-20260905-223957 §3, the rejected alternative). `platformMembershipId` is REQUIRED and CALLER-MINTED, the `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to route at all. But it is not FREELY minted (round 2, R2-5, ADR-20260905-223957 §1/§2): the caller MUST derive it as `UUIDv5(PLATFORM_MEMBERSHIP_NAMESPACE, authSubject)` -- the SAME formula the one-shot bootstrap already uses (`platform_membership_id_for`, `crates/application/src/commands.rs`) -- and the handler REFUSES any other value with the typed `PlatformMembershipIdMismatch`. This collapses "one platform membership per subject" into stream identity: two grants for the same subject always target the SAME stream, so the fold's own exists-once check is the arbiter, not a projection read racing a UNIQUE constraint. Submitting an already-granted `platformMembershipId` is an idempotent no-op (`rules.yaml#/PlatformAccessGrantIsIdempotent`) -- never a second event for the same stream. The `PlatformMember` bridge's `auth_subject UNIQUE` stays as a BELT, not the arbiter: a grant whose `authSubject` already holds a LIVE platform membership is refused with the typed `PlatformAccessAlreadyGranted` (ADMIN is not a `PrincipalKind`, so this reuses no reservation table, unlike the MEMBER arm) -- this can only be observed on the vanishingly rare id-collision path, since the id-derivation check above already makes id and subject deterministic. The handler accepts only `basis: CAPTAIN_ONBOARDING` -- the only value `PlatformAccessBasis` declares (evans: an operational act, never a corporate status). Gated by `configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT`, checked BEFORE the store is touched (the `RUN_MEMBER_ACCESS_GRANT` shape): every platform grant is the irreversible moment that starts a real Tours human's legal clock. NO revoke command exists yet (ADR-20260905-223957 §3): revocation of platform access is deferred until a second admin exists -- a named follow-up, not a hidden gap.
+
+- **Dispatched by**: [✏️ `grantPlatformAccess`](#mutation-grantplatformaccess) · **handled by** [🎭 `PlatformMembership`](#actor-platformmembership)
+- **Emits**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **Throws**: [⛔ `PlatformAccessGrantDoorClosed`](#error-platformaccessgrantdoorclosed), [⛔ `PlatformAccessAlreadyGranted`](#error-platformaccessalreadygranted), [⛔ `PlatformMembershipIdMismatch`](#error-platformmembershipidmismatch)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-grantplatformaccess--platformmembershipid"></a>`platformMembershipId` | [🔤 `PlatformMembershipId`](#scalar-platformmembershipid) | ✅ |  |
+| <a id="command-grantplatformaccess--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
+| <a id="command-grantplatformaccess--basis"></a>`basis` | [🔤 `PlatformAccessBasis`](#scalar-platformaccessbasis) | ✅ |  |
+
+### ⚡ Events _(2)_
 
 <a id="event-mailboxmessagerequeued"></a>
 #### ⚡ Event: `MailboxMessageRequeued`
@@ -8756,22 +8806,42 @@ An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delive
 | <a id="event-mailboxmessagerequeued--targetmessageid"></a>`targetMessageId` | [🔤 `MessageId`](#scalar-messageid) | ✅ |  |
 | <a id="event-mailboxmessagerequeued--actortype"></a>`actorType` | [🔤 `MailboxActorType`](#scalar-mailboxactortype) | ✅ |  |
 
-### 🔤 Scalars _(3)_
+<a id="event-platformaccessgranted"></a>
+#### ⚡ Event: `PlatformAccessGranted`
+
+One `authSubject` was granted access to the PLATFORM itself (#639 part C step 6-v, ADR-20260905-223957 §1) -- own relationship, own stream, own event: NEVER `events.yaml#/RestaurantAccessGranted` (that event's `scopeId` is `$ref RestaurantId`, so a platform grant on it would be permanently false history) and NEVER a `ScopeType` widening (PRINCIPALS-MEMBER: untouched; RLS-SEQ finding (3): no widening). Business payload only (ADR-0041): the acting principal (a hand-issuing admin, or the one-shot bootstrap) is envelope `domain_events.user_id`, never a field here. No `principalKind`/`scopeType`/`scopeId` -- ADMIN carries no domain claim, its scope IS the role (ADR-20260905-223957 §2), so there is nothing here to bind to. No provider term (`sub`, `app_metadata`, `accessToken`) rides in this payload -- `authSubject` is the kernel `AuthSubject` scalar.
+
+- **Emitted by**: [🎭 `PlatformMembership`](#actor-platformmembership)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `PlatformMember`](#view-platformmember)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-platformaccessgranted--platformmembershipid"></a>`platformMembershipId` | [🔤 `PlatformMembershipId`](#scalar-platformmembershipid) | ✅ |  |
+| <a id="event-platformaccessgranted--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
+| <a id="event-platformaccessgranted--basis"></a>`basis` | [🔤 `PlatformAccessBasis`](#scalar-platformaccessbasis) | ✅ |  |
+
+### 🔤 Scalars _(5)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-messageid"></a>🔤 `MessageId` | string _uuid_ | Unique id of one command submission — the idempotency key of the write path (inbound_messages pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.  |
 | <a id="scalar-inboundmessagestatus"></a>🔤 `InboundMessageStatus` | enum (SCHEDULED \| CANCELLED \| RECEIVED \| SUCCEEDED \| REJECTED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.  |
 | <a id="scalar-mailboxactortype"></a>🔤 `MailboxActorType` | string | The actor type a mailbox lane belongs to — one of the actors.yaml keys with a declared `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type / mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader sees WHICH lane's row an operator requeued without dereferencing the id.  |
+| <a id="scalar-platformmembershipid"></a>🔤 `PlatformMembershipId` | string _uuid_ | Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names "one protected instance" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.  |
+| <a id="scalar-platformaccessbasis"></a>🔤 `PlatformAccessBasis` | enum (CAPTAIN_ONBOARDING) | WHY a `PlatformAccessGranted` fact was recorded -- a NEW closed scalar, deliberately NOT `network.yaml#/AccessBasis` (ADR-20260905-223957 §1, evans): that scalar's four values are RESTAURANT-worded (`OWNER_DECLARATION`, `MEMBER_INVITATION`, …) and reusing it here would let a platform grant carry a value that means nothing for the platform relationship, or worse, invite a future restaurant-only value onto this door by accident. One value today -- the grant records an operational ACT (Captain onboards its own person), never a corporate/governance status (business: SAS today, SCIC conversion deferred to M18; ASSOCIE/COOPERATEUR/MANDATAIRE/SALARIE are forbidden values, on this scalar as on `AccessBasis`). Closed and additive-only, same discipline as every other basis scalar in this scope.  |
 
-### ⛔ Errors _(2)_
+### ⛔ Errors _(5)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
 | <a id="error-mailboxmessagenotfound"></a>⛔ `MailboxMessageNotFound` | No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row). | 🇬🇧 Mailbox message not found. | 🇫🇷 Message de boîte aux lettres introuvable. | [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) |
 | <a id="error-mailboxmessagenotrequeueable"></a>⛔ `MailboxMessageNotRequeueable` | The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError): handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/ DUPLICATE rows already ran — requeueing any of them would re-execute something the system decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).  | 🇬🇧 This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued. | 🇫🇷 Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file. | [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) |
+| <a id="error-platformaccessgrantdoorclosed"></a>⛔ `PlatformAccessGrantDoorClosed` | The platform grant door is closed by `configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT` (#639 part C step 6-v, ADR-20260905-223957 §5) -- a declared, supervisable refusal while the preconditions (`docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml`) are open, never a silent no-op. Every platform grant, hand-issued or bootstrap-dispatched, is an irreversible act about a real Tours human that starts every legal clock -- the store is never touched while this is off.  | 🇬🇧 Granting platform access is not yet enabled in this environment. | 🇫🇷 L'octroi d'accès à la plateforme n'est pas encore activé dans cet environnement. | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) |
+| <a id="error-platformaccessalreadygranted"></a>⛔ `PlatformAccessAlreadyGranted` | This `authSubject` already holds a LIVE `PlatformMembership` on a DIFFERENT `platformMembershipId` (#639 part C step 6-v, ADR-20260905-223957 §1): the `PlatformMember` bridge's `auth_subject UNIQUE` is the arbiter, checked by the handler before appending (ADMIN is NOT a `PrincipalKind`, PRINCIPALS-MEMBER, so this reuses no reservation table). A resubmission of the SAME `platformMembershipId` is a DIFFERENT outcome -- the idempotent no-op the fold already grants, never this refusal.  | 🇬🇧 This login already holds platform access under a different membership. | 🇫🇷 Cette identité de connexion dispose déjà d'un accès plateforme sous une autre adhésion. | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) |
+| <a id="error-platformmembershipidmismatch"></a>⛔ `PlatformMembershipIdMismatch` | Round 2, R2-5 (young + vernon, ADR-20260905-223957 §1/§2): `platformMembershipId` is CALLER-MINTED (ADR-0034) but not FREELY so -- it must equal `UUIDv5(PLATFORM_MEMBERSHIP_ NAMESPACE, authSubject)`, the SAME formula the one-shot bootstrap already uses (`platform_membership_id_for` in `crates/application/src/commands.rs`). Collapsing the id into stream identity turns "one platform membership per subject" from a projection-read-plus-UNIQUE arbiter (which fires at projection time under `DbFaultPolicy::Skip` and can wedge the read model on a genuine race) into a set invariant the fold's own exists-once check enforces for free: two grants for one subject ALWAYS target the SAME stream. The bridge/`PlatformAccessAlreadyGranted` read stays as a belt, not the arbiter (see the comment on `grant_platform_access`).  | 🇬🇧 This platform membership id does not match the required derivation for this login. | 🇫🇷 Cet identifiant d'adhésion plateforme ne correspond pas à la dérivation requise pour cette identité de connexion. | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) |
 
-### 📐 Business rules _(1)_
+### 📐 Business rules _(6)_
 
 <a id="rule-onlycappoisonedmailboxrowsarerequeueable"></a>
 #### 📐 Rule: `OnlyCapPoisonedMailboxRowsAreRequeueable`
@@ -8780,7 +8850,42 @@ _An admin requeue returns a POISONED mailbox row — one the delivery-attempts c
 
 - **Verified by**: [🧪 `TestMailboxMessageRequeued`](#test-testmailboxmessagerequeued), [🧪 `TestRequeueOfNonPoisonedRowIsRejected`](#test-testrequeueofnonpoisonedrowisrejected), [🧪 `TestRequeueOfUnknownMessageIsRejected`](#test-testrequeueofunknownmessageisrejected)
 
-### 🧪 Tests _(1)_
+<a id="rule-platformaccessgrantisidempotent"></a>
+#### 📐 Rule: `PlatformAccessGrantIsIdempotent`
+
+_GrantPlatformAccess on an EXISTING platformMembershipId is an idempotent no-op (no second event) -- a caller retry, or a re-run of the one-shot bootstrap targeting the SAME deterministic id, never mints a duplicate relationship (#639 part C step 6-v, ADR-20260905-223957 §1/§3)._
+
+- **Verified by**: [🧪 `TestGrantPlatformAccessTwiceIsIdempotent`](#test-testgrantplatformaccesstwiceisidempotent)
+
+<a id="rule-platformauthsubjectresolvestoonemembership"></a>
+#### 📐 Rule: `PlatformAuthSubjectResolvesToOneMembership`
+
+_A GrantPlatformAccess whose authSubject already holds a LIVE PlatformMembership on a DIFFERENT platformMembershipId is rejected before any fact is recorded (PlatformAccessAlreadyGranted) -- the PlatformMember bridge's auth_subject UNIQUE constraint is a BELT the handler consults before appending, since ADMIN is NOT a PrincipalKind and reuses no reservation table (#639 part C step 6-v, ADR-20260905-223957 §1, PRINCIPALS-MEMBER). Round 2, R2-5: the PRIMARY arbiter is now PlatformMembershipIdMustBeDerivedFromAuthSubject below -- this bridge check can only fire on a genuine UUIDv5 collision once that invariant holds._
+
+- **Verified by**: [🧪 `TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected`](#test-testgrantplatformaccessauthsubjectalreadygrantedisrejected)
+
+<a id="rule-platformmembershipidmustbederivedfromauthsubject"></a>
+#### 📐 Rule: `PlatformMembershipIdMustBeDerivedFromAuthSubject`
+
+_GrantPlatformAccess's platformMembershipId must equal UUIDv5(PLATFORM_MEMBERSHIP_NAMESPACE, authSubject) -- the SAME formula the one-shot bootstrap uses (platform_membership_id_for) -- refused with the typed PlatformMembershipIdMismatch otherwise, BEFORE any store read (#639 part C step 6-v round 2, R2-5, ADR-20260905-223957 §1/§2, young + vernon). Collapses 'one platform membership per subject' into stream identity: two grants for one subject always target the SAME stream, so the fold's own exists-once check is the arbiter._
+
+- **Verified by**: [🧪 `TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected`](#test-testgrantplatformaccessplatformmembershipidmismatchisrejected)
+
+<a id="rule-grantplatformaccessisahumanact"></a>
+#### 📐 Rule: `GrantPlatformAccessIsAHumanAct`
+
+_GrantPlatformAccess is roles: [ADMIN] with requires: acting: { ADMIN: any } and no EXTERNAL key -- every subsequent admin is hand-issued by an existing one, and the FIRST is a recorded act dispatched through the mailbox by the one-shot bootstrap, never a public claim-the-first-admin path (#639 part C step 6-v, ADR-20260905-223957 §3); no process manager may `send` it (validator pm-sends-human-only-command)._
+
+- **Verified by**: [🧪 `TestPlatformAccessGranted`](#test-testplatformaccessgranted)
+
+<a id="rule-platformaccessgrantgatedbeforestore"></a>
+#### 📐 Rule: `PlatformAccessGrantGatedBeforeStore`
+
+_GrantPlatformAccess refuses with the typed PlatformAccessGrantDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT is off, for BOTH the hand-issued GraphQL door and the one-shot bootstrap dispatching the same command (#639 part C step 6-v, ADR-20260905-223957 §5)._
+
+- **Verified by**: [🧪 `TestGrantPlatformAccessDoorClosed`](#test-testgrantplatformaccessdoorclosed)
+
+### 🧪 Tests _(2)_
 
 **[🎭 `MailboxSupervision`](#actor-mailboxsupervision)**
 
@@ -8813,6 +8918,58 @@ _Refuses to requeue a mailbox row that does not exist_
 - **When**: [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage)
 - **Thrown**: [⛔ `MailboxMessageNotFound`](#error-mailboxmessagenotfound)
 - **Verifies**: [📐 `OnlyCapPoisonedMailboxRowsAreRequeueable`](#rule-onlycappoisonedmailboxrowsarerequeueable)
+
+**[🎭 `PlatformMembership`](#actor-platformmembership)**
+
+<a id="test-testplatformaccessgranted"></a>
+#### 🧪 Test: `TestPlatformAccessGranted`
+
+_An existing admin hand-issues platform access to a new authSubject_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess)
+- **Then**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **Verifies**: [📐 `GrantPlatformAccessIsAHumanAct`](#rule-grantplatformaccessisahumanact)
+
+<a id="test-testgrantplatformaccessdoorclosed"></a>
+#### 🧪 Test: `TestGrantPlatformAccessDoorClosed`
+
+_grantPlatformAccess is refused by the door key while it is OFF (the production default), before the store is even read_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess)
+- **Thrown**: [⛔ `PlatformAccessGrantDoorClosed`](#error-platformaccessgrantdoorclosed)
+- **Verifies**: [📐 `PlatformAccessGrantGatedBeforeStore`](#rule-platformaccessgrantgatedbeforestore)
+
+<a id="test-testgrantplatformaccesstwiceisidempotent"></a>
+#### 🧪 Test: `TestGrantPlatformAccessTwiceIsIdempotent`
+
+_Granting the same platformMembershipId twice is a no-op (idempotent) -- the same shape a re-run of the one-shot bootstrap relies on_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `PlatformAccessGrantIsIdempotent`](#rule-platformaccessgrantisidempotent)
+
+<a id="test-testgrantplatformaccessauthsubjectalreadygrantedisrejected"></a>
+#### 🧪 Test: `TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected`
+
+_Granting a NEW platformMembershipId with a login already holding platform access is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess)
+- **Thrown**: [⛔ `PlatformAccessAlreadyGranted`](#error-platformaccessalreadygranted)
+- **Verifies**: [📐 `PlatformAuthSubjectResolvesToOneMembership`](#rule-platformauthsubjectresolvestoonemembership)
+
+<a id="test-testgrantplatformaccessplatformmembershipidmismatchisrejected"></a>
+#### 🧪 Test: `TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected`
+
+_A platformMembershipId that does not derive from authSubject is refused before any store read_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess)
+- **Thrown**: [⛔ `PlatformMembershipIdMismatch`](#error-platformmembershipidmismatch)
+- **Verifies**: [📐 `PlatformMembershipIdMustBeDerivedFromAuthSubject`](#rule-platformmembershipidmustbederivedfromauthsubject)
 
 <a id="sec-ctx-customer"></a>
 ## 🔲 5. customer
@@ -12909,7 +13066,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in here yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(17)_
+### 📡 Observability _(18)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -13332,6 +13489,31 @@ _criticality: **high**_
 - **Metrics**: `member_identity_resolve_ms` _(histogram)_, `member_identity_not_found_total` _(counter)_, `member_identity_lookup_failed_total` _(counter)_, `member_identity_lookup_source_total` _(counter)_, `member_sign_in_link_requested_total` _(counter)_, `member_sign_in_confirmed_total` _(counter)_, `member_claim_stamp_failed_total` _(counter)_, `member_sign_in_refused_total` _(counter)_, `member_sign_in_door_enforcing` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
 - **SLOs**: p95 ≤ 400ms · p99 ≤ 1200ms · error rate ≤ 1%
+
+<a id="obs-admin-sign-in"></a>
+#### 📡 Contract: `admin-sign-in`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `admin.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason` |
+
+- **Metrics**: `admin_identity_resolve_total` _(counter)_, `platform_access_granted_total` _(counter)_, `platform_access_grant_enforcing` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 
 <a id="obs-restaurant-invitation"></a>
 #### 📡 Contract: `restaurant-invitation`
@@ -14796,7 +14978,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `RestaurantMembership`](#actor-restaurantmembership), [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess) |
-| 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
+| 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision), [🎭 `PlatformMembership`](#actor-platformmembership) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
 | 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess) |
 
@@ -14841,6 +15023,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `actor-restaurant` | Rust — mailbox worker bin | Drains Restaurant lanes; appends its domain events.<br>realizes: [🎭 `Restaurant`](#actor-restaurant) |
 | 🧱 `actor-prospect` | Rust — mailbox worker bin | Drains Prospect lanes; appends its domain events.<br>realizes: [🎭 `Prospect`](#actor-prospect) |
 | 🧱 `actor-restaurant-membership` | Rust — mailbox worker bin | Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT.<br>realizes: [🎭 `RestaurantMembership`](#actor-restaurantmembership) |
+| 🧱 `actor-platform-membership` | Rust — mailbox worker bin | Drains PlatformMembership lanes (#639 part C step 6-v, ADR-20260905-223957); appends its domain events. Ships dark behind RUN_PLATFORM_ACCESS_GRANT.<br>realizes: [🎭 `PlatformMembership`](#actor-platformmembership) |
 | 🧱 `actor-restaurant-invitation` | Rust — mailbox worker bin | Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION.<br>realizes: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) |
 | 🧱 `actor-catalog` | Rust — mailbox worker bin | Drains Catalog lanes (incl. HubRise imports); appends its domain events.<br>realizes: [🎭 `Catalog`](#actor-catalog) |
 | 🧱 `actor-customer` | Rust — mailbox worker bin | Drains Customer lanes; appends its domain events.<br>realizes: [🎭 `Customer`](#actor-customer) |
@@ -14939,6 +15122,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | `actor-payment` → `event-store` | Lease Payment lanes; append Payment events |
 | `actor-catalog` → `event-store` | Lease Catalog lanes; append Catalog events |
 | `actor-mailbox-supervision` → `event-store` | Lease supervision lanes; record operator facts |
+| `actor-platform-membership` → `event-store` | Lease PlatformMembership lanes; append PlatformAccessGranted |
 | `pm-place-order` → `event-store` | Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced |
 | `pm-place-order` → `stripe` | Create manual-capture PaymentIntents (outbound payment port) |
 | `pm-payment-settlement` → `event-store` | Drain fulfilment/abort triggers; record PaymentCaptureFailed on a declined capture |

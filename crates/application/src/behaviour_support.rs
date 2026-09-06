@@ -44,8 +44,8 @@ use crate::ports::{Actor, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier
 use crate::process_managers::test_support::MemStore;
 use crate::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, MemberIdentityRepository,
-    OfferView, OrderFilter, OrderReadRepository, ProspectFilter, ProspectionReadRepository,
-    RestaurantFilter, RestaurantReadRepository, RiderIdentityRepository,
+    OfferView, OrderFilter, OrderReadRepository, PlatformMemberRepository, ProspectFilter,
+    ProspectionReadRepository, RestaurantFilter, RestaurantReadRepository, RiderIdentityRepository,
 };
 use crate::repository::Repository;
 
@@ -70,6 +70,13 @@ pub fn uid(s: &str) -> uuid::Uuid {
             domain::generated::scalars::RestaurantInvitationId(uid(&format!("invitation-{label}"))),
         )
         .0;
+    }
+    // Round 2, R2-5 (#639 part C step 6-v): `platformMembershipId` must equal
+    // `platform_membership_id_for(authSubject)` -- the SAME formula the handler now enforces --
+    // so the fixture pool computes the SAME derivation for ANY `platform-membership-for-{subject}`,
+    // generically, the `membership-from-invitation-` precedent above.
+    if let Some(subject) = s.strip_prefix("platform-membership-for-") {
+        return crate::commands::platform_membership_id_for(subject).0;
     }
     match s {
         "deliv-1" => {
@@ -139,6 +146,10 @@ pub struct TestBed {
     /// 6-ii) the member sign-in door identifies through — fed by seeded `RestaurantAccessGranted`
     /// facts.
     pub members: SpecMembers,
+    /// The `PlatformMember` bridge (`auth_subject -> platformMembershipId`, #639 part C step 6-v,
+    /// ADR-20260905-223957 §1) `grant_platform_access`'s "two arbiters" check consults -- fed by
+    /// seeded `PlatformAccessGranted` facts, sentinel-seeded like `SpecAuthSubjectReservations`.
+    pub platform_members: SpecPlatformMembers,
     /// `SUPPORT_CONTACT` as the composition root resolves it (required, no default —
     /// ADR-20260830-213135); the bed carries the decided string so the refusal can name it.
     pub support_contact: SpecSupportContact,
@@ -280,6 +291,10 @@ impl TestBed {
             // --- Member identity bridge (#639 part C step 6-ii) -----------------------------
             DomainEvent::RestaurantAccessGranted(e) => {
                 self.members.bind(&e.auth_subject.0, e.member_id);
+            }
+            // --- Platform member bridge (#639 part C step 6-v, ADR-20260905-223957 §1) -----
+            DomainEvent::PlatformAccessGranted(e) => {
+                self.platform_members.bind(&e.auth_subject.0, e.platform_membership_id);
             }
             DomainEvent::CustomerRegistered(e) => {
                 self.customers.upsert(crate::queries::CustomerRow {
@@ -1041,6 +1056,54 @@ impl SpecMembers {
         let mut rows = self.rows.lock().unwrap();
         rows.retain(|(a, _)| a != auth_subject);
         rows.push((auth_subject.to_string(), member_id));
+    }
+}
+
+/// The `PlatformMember` bridge as a fake (#639 part C step 6-v, ADR-20260905-223957 §1):
+/// `auth_subject -> platformMembershipId`, bound by seeded `PlatformAccessGranted` facts. The
+/// `SpecAuthSubjectReservations` sentinel-seeding precedent: `"already-granted-admin"` is held by
+/// a FOREIGN `platformMembershipId` (`uid("platform-membership-existing")`, never
+/// `platform_membership_id_for("already-granted-admin")`, the CORRECTLY-DERIVED id the colliding
+/// test dispatches post round-2 R2-5), which is what makes
+/// `TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected` a real assertion reaching the
+/// bridge check at all (the id-derivation check now runs FIRST) -- without the seeded holder,
+/// `grant_platform_access`'s bridge lookup alone would find nothing and accept.
+pub struct SpecPlatformMembers {
+    rows: Mutex<Vec<(String, PlatformMembershipId)>>,
+}
+
+impl Default for SpecPlatformMembers {
+    fn default() -> Self {
+        Self {
+            rows: Mutex::new(vec![(
+                "already-granted-admin".to_string(),
+                PlatformMembershipId(uid("platform-membership-existing")),
+            )]),
+        }
+    }
+}
+
+impl SpecPlatformMembers {
+    fn bind(&self, auth_subject: &str, platform_membership_id: PlatformMembershipId) {
+        let mut rows = self.rows.lock().unwrap();
+        rows.retain(|(a, _)| a != auth_subject);
+        rows.push((auth_subject.to_string(), platform_membership_id));
+    }
+}
+
+#[async_trait]
+impl PlatformMemberRepository for SpecPlatformMembers {
+    async fn platform_membership_id_by_auth_subject(
+        &self,
+        auth_subject: AuthSubject,
+    ) -> Result<Option<PlatformMembershipId>, DomainError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(a, _)| *a == auth_subject.0)
+            .map(|(_, id)| *id))
     }
 }
 

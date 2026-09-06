@@ -99,7 +99,9 @@ pub fn role_allows(ctx: &Context<'_>, allowed: &[RequestRole]) -> bool {
 
 /// Execution guard on the generated QueryRoot/MutationRoot fields: rejects the request with a
 /// `FORBIDDEN` error (extension `code`) when the path role is not in the operation's allowed set.
-/// This is PATH-role authorization (ADR-0006) — identity/authentication is a separate workstream.
+/// It authorizes against [`request_role`]'s `ActingRole` (#639 part B), not the raw path/host
+/// role directly — this comment used to say "PATH-role authorization (ADR-0006)", which stopped
+/// being accurate once `request_role` started reading `ActingRole`.
 pub struct RoleGuard {
     allowed: &'static [RequestRole],
 }

@@ -29,7 +29,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
 
-/// One declared secret the deploy target does not satisfy — a FATAL finding.
+/// One declared secret the deploy target does not satisfy. FATAL unless every env key it backs
+/// declared `required: []` (round 2, R2-1) — then it is `missing-optional`, a report, not a
+/// failure: a dark feature's never-required-at-boot secret must never trip the release path
+/// (the #899/#900-item-18 class — `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` blocking every deploy
+/// dispatch, rollback included, until the founder provisions a secret for a feature nothing
+/// reaches yet).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct MissingSecret {
     /// The GitHub repo-secret NAME the config DSL declares as the source (`from_github_secret`).
@@ -40,6 +45,10 @@ pub struct MissingSecret {
     /// The env key(s) this repo secret backs — carried for the operator-facing message only.
     pub env_key: String,
     pub reason: MissingReason,
+    /// `secret-keys.json`'s own `optional` flag for this repo secret — `true` only when EVERY env
+    /// key it backs declared `required: []` in `configuration.yaml`. Read from the spec-derived
+    /// artifact, never re-decided here (the codegen owns that boundary, #329).
+    pub optional: bool,
 }
 
 /// Why a declared secret counts as missing.
@@ -64,8 +73,12 @@ pub enum MissingReason {
 /// The result of comparing the declared secrets against the present ones.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub struct SecretDrift {
-    /// Declared-but-unsatisfied (absent OR empty). FATAL — deploy must not proceed.
+    /// Declared-but-unsatisfied, backing at least one REQUIRED key. FATAL — deploy must not
+    /// proceed.
     pub missing: Vec<MissingSecret>,
+    /// Declared-but-unsatisfied, backing ONLY keys with `required: []` (round 2, R2-1).
+    /// NON-FATAL report: `missing-optional`, logged, never blocking.
+    pub missing_optional: Vec<MissingSecret>,
     /// Present-but-undeclared. NON-FATAL report: `RENDER_API_KEY`, `GITHUB_TOKEN`,
     /// `RENDER_DEPLOY_HOOK_URL`, `MKS_KUBECONFIG` are legitimately present and declared by no
     /// deployed key — treating these as fatal would false-positive on every real repo.
@@ -73,66 +86,88 @@ pub struct SecretDrift {
 }
 
 impl SecretDrift {
-    /// The gate's verdict: only `missing` fails the deploy. `extra` is informational.
+    /// The gate's verdict: only `missing` fails the deploy. `missing_optional` and `extra` are
+    /// informational.
     pub fn is_fatal(&self) -> bool {
         !self.missing.is_empty()
     }
 }
 
+/// One declared repo secret: the env key(s) it backs (message-only) and whether it is optional
+/// (every backing env key declared `required: []`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredSecret {
+    pub env_key: String,
+    pub optional: bool,
+}
+
 /// THE pure comparison — the whole reason this is a binary and not a heredoc.
 ///
-/// `declared`: `from_github_secret` NAME -> the env key(s) it backs (value is message-only).
+/// `declared`: `from_github_secret` NAME -> the env key(s) it backs + its optional flag.
 /// `present`:  secret NAME -> its value (empty string = present-but-blank, which is `Empty`).
 ///
-/// Deterministic ordering: both inputs are `BTreeMap`s, so `missing` and `extra` come out sorted by
-/// name with no explicit sort — stable output, stable tests.
+/// Deterministic ordering: both inputs are `BTreeMap`s, so `missing`/`missing_optional`/`extra`
+/// come out sorted by name with no explicit sort — stable output, stable tests.
 pub fn compare_secrets(
-    declared: &BTreeMap<String, String>,
+    declared: &BTreeMap<String, DeclaredSecret>,
     present: &BTreeMap<String, String>,
 ) -> SecretDrift {
     let mut missing = Vec::new();
-    for (github_secret, env_key) in declared {
+    let mut missing_optional = Vec::new();
+    for (github_secret, decl) in declared {
         let reason = match present.get(github_secret) {
             None => Some(MissingReason::Absent),
             Some(v) if v.is_empty() => Some(MissingReason::Empty),
             Some(_) => None,
         };
         if let Some(reason) = reason {
-            missing.push(MissingSecret {
+            let entry = MissingSecret {
                 github_secret: github_secret.clone(),
-                env_key: env_key.clone(),
+                env_key: decl.env_key.clone(),
                 reason,
-            });
+                optional: decl.optional,
+            };
+            if decl.optional {
+                missing_optional.push(entry);
+            } else {
+                missing.push(entry);
+            }
         }
     }
     let declared_names: BTreeSet<&String> = declared.keys().collect();
     let extra: Vec<String> =
         present.keys().filter(|n| !declared_names.contains(n)).cloned().collect();
-    SecretDrift { missing, extra }
+    SecretDrift { missing, missing_optional, extra }
 }
 
 /// Parse the declared repo-secret map from `deploy/generated/secret-keys.json`, keyed on the
-/// `from_github_secret` NAME (never the env key). Value = the env key(s) that name backs, joined
-/// when more than one deployed key sources the same repo secret (so no env key is silently
-/// dropped on a collision).
-pub fn declared_from_secret_keys_json(json: &str) -> Result<BTreeMap<String, String>, String> {
+/// `from_github_secret` NAME (never the env key). `optional` is the spec-derived flag the codegen
+/// writes (round 2, R2-1) — `true` only when EVERY env key sourced from this repo secret declared
+/// `optional: true` on its own entry (i.e. `required: []` in `configuration.yaml`); ANY required
+/// backer makes the whole repo secret required, since it is the same k8s Secret name either way.
+pub fn declared_from_secret_keys_json(json: &str) -> Result<BTreeMap<String, DeclaredSecret>, String> {
     let v: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("secret-keys.json: invalid JSON: {e}"))?;
     let keys = v
         .get("keys")
         .and_then(|k| k.as_object())
         .ok_or("secret-keys.json: missing `keys` object")?;
-    let mut by_secret: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut by_secret: BTreeMap<String, (BTreeSet<String>, bool)> = BTreeMap::new();
     for (env_key, entry) in keys {
         let gh = entry
             .get("from_github_secret")
             .and_then(|s| s.as_str())
             .ok_or_else(|| format!("secret-keys.json: key '{env_key}' has no string from_github_secret"))?;
-        by_secret.entry(gh.to_string()).or_default().insert(env_key.clone());
+        let key_optional = entry.get("optional").and_then(|o| o.as_bool()).unwrap_or(false);
+        let slot = by_secret.entry(gh.to_string()).or_insert_with(|| (BTreeSet::new(), true));
+        slot.0.insert(env_key.clone());
+        slot.1 &= key_optional; // ANY required backer makes the repo secret required.
     }
     Ok(by_secret
         .into_iter()
-        .map(|(gh, envs)| (gh, envs.into_iter().collect::<Vec<_>>().join(", ")))
+        .map(|(gh, (envs, optional))| {
+            (gh, DeclaredSecret { env_key: envs.into_iter().collect::<Vec<_>>().join(", "), optional })
+        })
         .collect())
 }
 
@@ -209,6 +244,22 @@ fn main() -> ExitCode {
         }
     }
 
+    if !drift.missing_optional.is_empty() {
+        // NON-FATAL (round 2, R2-1): a repo secret backing ONLY `required: []` keys — a dark
+        // feature's secret must never trip the release path, rollback included.
+        eprintln!(
+            "::warning::secret-gate: {} declared-but-optional secret(s) missing (missing-optional, non-fatal)",
+            drift.missing_optional.len()
+        );
+        for m in &drift.missing_optional {
+            let why = match m.reason {
+                MissingReason::Absent => "ABSENT",
+                MissingReason::Empty => "EMPTY (present but blank)",
+            };
+            eprintln!("  missing-optional {why}  repo secret '{}'  (backs env key {}, required: [] — never required at boot)", m.github_secret, m.env_key);
+        }
+    }
+
     if drift.is_fatal() {
         eprintln!("::error::secret-gate: {} declared secret(s) missing from the deploy target:", drift.missing.len());
         for m in &drift.missing {
@@ -235,13 +286,22 @@ mod tests {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
 
+    /// `declared` fixtures in these tests, unless a test says otherwise, are all REQUIRED
+    /// (`optional: false`) — the pre-existing behaviour this round must not disturb.
+    fn declared_required(pairs: &[(&str, &str)]) -> BTreeMap<String, DeclaredSecret> {
+        pairs
+            .iter()
+            .map(|(gh, env)| (gh.to_string(), DeclaredSecret { env_key: env.to_string(), optional: false }))
+            .collect()
+    }
+
     /// THE keying property: the gate keys on `from_github_secret`, NOT the env key. A renamed pair
     /// (env `STRIPE_SECRET_KEY` sourced from repo secret `STRIPE_SECRET_KEY_PROD`) whose repo secret
     /// is absent must be fatal AND name `STRIPE_SECRET_KEY_PROD` — the name the deploy target holds,
     /// not the env key. If the gate keyed on the env key it would look up the wrong name and pass.
     #[test]
     fn renamed_pair_absent_is_fatal_and_names_the_github_secret() {
-        let declared = map(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
+        let declared = declared_required(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
         // The DECOY (mutation-kill, beck): the env key `STRIPE_SECRET_KEY` IS present. A mutant
         // that looked up `present.get(env_key)` would find "decoy" and wrongly pass. The gate keys
         // on the `from_github_secret` name (STRIPE_SECRET_KEY_PROD), which is absent -> fatal.
@@ -259,7 +319,7 @@ mod tests {
     /// Empty. Forces a map-valued present set — a SET could not distinguish this from present.
     #[test]
     fn empty_value_lands_in_missing() {
-        let declared = map(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
+        let declared = declared_required(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
         let present = map(&[("STRIPE_SECRET_KEY_PROD", "")]);
         let drift = compare_secrets(&declared, &present);
         assert!(drift.is_fatal());
@@ -271,7 +331,7 @@ mod tests {
     /// operational secrets (RENDER_API_KEY, GITHUB_TOKEN, RENDER_DEPLOY_HOOK_URL) live here.
     #[test]
     fn present_undeclared_is_extra_not_fatal() {
-        let declared = map(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
+        let declared = declared_required(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
         let present = map(&[
             ("STRIPE_SECRET_KEY_PROD", "sk_live_x"),
             ("RENDER_API_KEY", "rnd_x"),
@@ -287,7 +347,7 @@ mod tests {
     /// The green case: every declared repo secret present and non-empty, nothing undeclared.
     #[test]
     fn all_present_is_green() {
-        let declared = map(&[("A_PROD", "A"), ("B", "B")]);
+        let declared = declared_required(&[("A_PROD", "A"), ("B", "B")]);
         let present = map(&[("A_PROD", "va"), ("B", "vb")]);
         let drift = compare_secrets(&declared, &present);
         assert!(!drift.is_fatal());
@@ -309,8 +369,66 @@ mod tests {
         let declared = declared_from_secret_keys_json(json).expect("parses");
         assert!(declared.contains_key("STRIPE_SECRET_KEY_PROD"), "keyed on from_github_secret");
         assert!(!declared.contains_key("STRIPE_SECRET_KEY"), "must NOT be keyed on the env key");
-        assert_eq!(declared["STRIPE_SECRET_KEY_PROD"], "STRIPE_SECRET_KEY");
-        assert_eq!(declared["DATABASE_URL"], "DATABASE_URL");
+        assert_eq!(declared["STRIPE_SECRET_KEY_PROD"].env_key, "STRIPE_SECRET_KEY");
+        assert_eq!(declared["DATABASE_URL"].env_key, "DATABASE_URL");
+        assert!(!declared["STRIPE_SECRET_KEY_PROD"].optional, "no `optional` field in the fixture -> required");
+        assert!(!declared["DATABASE_URL"].optional);
+    }
+
+    /// Round 2, R2-1, quote 1: the gate PASSES with `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` absent —
+    /// its `secret-keys.json` entry carries `"optional": true` (spec-derived from `required: []`),
+    /// so an absent value is `missing-optional`, never fatal.
+    #[test]
+    fn optional_secret_absent_is_missing_optional_not_fatal() {
+        let json = r#"{
+          "keys": {
+            "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT": { "scope": "common", "from_github_secret": "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT", "optional": true }
+          }
+        }"#;
+        let declared = declared_from_secret_keys_json(json).expect("parses");
+        assert!(declared["PLATFORM_BOOTSTRAP_ADMIN_SUBJECT"].optional);
+        let present: BTreeMap<String, String> = BTreeMap::new(); // absent entirely
+        let drift = compare_secrets(&declared, &present);
+        assert!(!drift.is_fatal(), "an absent OPTIONAL secret must never fail the gate");
+        assert!(drift.missing.is_empty());
+        assert_eq!(drift.missing_optional.len(), 1);
+        assert_eq!(drift.missing_optional[0].github_secret, "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT");
+        assert_eq!(drift.missing_optional[0].reason, MissingReason::Absent);
+    }
+
+    /// Round 2, R2-1, quote 2: the gate FAILS with `EMAIL_QUOTA_KEY_HMAC_SECRET` absent — it is
+    /// `required: [staging, production]`, so its `secret-keys.json` entry carries no `optional`
+    /// field at all, and an absent value stays fatal exactly as before this round.
+    #[test]
+    fn required_secret_absent_stays_fatal() {
+        let json = r#"{
+          "keys": {
+            "EMAIL_QUOTA_KEY_HMAC_SECRET": { "scope": "common", "from_github_secret": "EMAIL_QUOTA_KEY_HMAC_SECRET" }
+          }
+        }"#;
+        let declared = declared_from_secret_keys_json(json).expect("parses");
+        assert!(!declared["EMAIL_QUOTA_KEY_HMAC_SECRET"].optional);
+        let present: BTreeMap<String, String> = BTreeMap::new();
+        let drift = compare_secrets(&declared, &present);
+        assert!(drift.is_fatal(), "an absent REQUIRED secret must still fail the gate");
+        assert_eq!(drift.missing.len(), 1);
+        assert_eq!(drift.missing[0].github_secret, "EMAIL_QUOTA_KEY_HMAC_SECRET");
+        assert!(drift.missing_optional.is_empty());
+    }
+
+    /// If two env keys share one repo secret and only ONE of them is required, the repo secret as
+    /// a whole is required — the k8s Secret name is shared, so a required backer cannot be
+    /// satisfied by treating the pair as optional.
+    #[test]
+    fn any_required_backer_makes_the_shared_repo_secret_required() {
+        let json = r#"{
+          "keys": {
+            "OPTIONAL_KEY": { "scope": "common", "from_github_secret": "SHARED_SECRET", "optional": true },
+            "REQUIRED_KEY": { "scope": "common", "from_github_secret": "SHARED_SECRET" }
+          }
+        }"#;
+        let declared = declared_from_secret_keys_json(json).expect("parses");
+        assert!(!declared["SHARED_SECRET"].optional, "one required backer must win");
     }
 
     /// A blank/non-string present secret is rejected at parse, and an empty string value survives

@@ -227,6 +227,20 @@ impl EventStore for UntouchableEventStore {
     }
 }
 
+/// #639 part C step 6-v: this door never touches the platform grant bridge -- the
+/// `UntouchableEventStore` precedent.
+struct UntouchablePlatformMembers;
+
+#[async_trait]
+impl application::queries::PlatformMemberRepository for UntouchablePlatformMembers {
+    async fn platform_membership_id_by_auth_subject(
+        &self,
+        _auth_subject: domain::generated::scalars::AuthSubject,
+    ) -> Result<Option<domain::generated::scalars::PlatformMembershipId>, DomainError> {
+        panic!("the member sign-in door must never consult the PlatformMember bridge");
+    }
+}
+
 // ─── The fixture: the production router + the production router's deps ──────────────────────────
 
 struct Door {
@@ -275,6 +289,7 @@ async fn door(identity: ScriptedIdentity, members: ScriptedMembers, seam: Member
             customer: CustomerIdentitySource::Claim,
             rider: RiderIdentitySource::new(Arc::new(server::NoDatabaseRiderIdentity)),
             member: MemberIdentitySource::new(Arc::new(ScriptedSeam(seam))),
+            platform: server::PlatformIdentitySource::new(Arc::new(server::NoDatabasePlatformIdentity)),
         },
     )
     .layer(axum::Extension(server::AuthContext::from_config(
@@ -313,6 +328,8 @@ async fn door(identity: ScriptedIdentity, members: ScriptedMembers, seam: Member
         run_member_access_grant: false,
         run_member_sign_in_door: door_open,
         run_restaurant_invitation: false,
+        run_platform_access_grant: false,
+        platform_members: Arc::new(UntouchablePlatformMembers),
     };
     Door { mailbox, identity, members, sessions, deps, app }
 }

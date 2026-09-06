@@ -72,6 +72,12 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: INTERNAL_TRIGGER_TOKEN
+            - name: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
+                  optional: true
             - name: OVH_APPLICATION_KEY
               valueFrom:
                 secretKeyRef:

@@ -106,6 +106,14 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
                 std::sync::Arc::new(infrastructure::persistence::scope_membership_store::PgScopeMembershipRepository::new(pool.clone())),
             ),
         )),
+        // The ADMIN/platform seam has no gate either (#639 part C step 6-v,
+        // ADR-20260905-223957 §2): Postgres, over the `PlatformMember` bridge, in every bin that
+        // mounts `/admin/graphql`.
+        platform: crate::auth::PlatformIdentitySource::new(std::sync::Arc::new(
+            crate::auth::PgPlatformIdentity::new(std::sync::Arc::new(
+                infrastructure::PgPlatformMemberRepository::new(pool.clone()),
+            )),
+        )),
     };
     let schema = crate::graphql_schema::build_schema_for_scope(
         Some(di.read),

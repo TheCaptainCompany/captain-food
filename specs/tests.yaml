@@ -805,6 +805,11 @@ fixtures:
     type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
     data: { membershipId: "membership-3", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-3", authSubject: "auth-supabase-customer", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
 
+  # #639 part C step 6-v (ADR-20260905-223957 §1): the platform grant fixture.
+  platformAccessGranted:
+    type: { $ref: 'events.yaml#/PlatformAccessGranted' }
+    data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+
   # #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the invitation fixtures. The FakeIdentity
   # double's `verify_email_token` always proves "johnny@example.com" for any token except
   # "bad-token" (behaviour_support::FakeIdentity) -- `invitedEmail` below matches it deliberately,
@@ -4363,6 +4368,86 @@ tests:
       data: { membershipId: "membership-1", ground: "ACCESS_NO_LONGER_NEEDED" }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }
+
+  # ----------------------- PlatformMembership: the platform grant and the ADMIN seam binding
+  # (#639 part C step 6-v, ADR-20260905-223957 §1-§3) -------------------------------------------
+  TestPlatformAccessGranted:
+    name: "An existing admin hand-issues platform access to a new authSubject"
+    rules:
+      - { $ref: 'rules.yaml#/GrantPlatformAccessIsAHumanAct' }
+    actor: { $ref: 'actors.yaml#/PlatformMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
+    then:
+      - { $ref: '#/fixtures/platformAccessGranted' }
+
+  # #639 part C step 6-v (ADR-20260905-223957 §5): the door defaults OFF (RUN_SIRENE_WORKER
+  # lesson), so every OTHER GrantPlatformAccess path must gate it ON explicitly to exercise its
+  # OWN assertion rather than the door's -- this is the OFF leg, and no seeded row is needed since
+  # the door check is the FIRST thing the handler does.
+  TestGrantPlatformAccessDoorClosed:
+    name: "grantPlatformAccess is refused by the door key while it is OFF (the production default), before the store is even read"
+    rules: [{ $ref: 'rules.yaml#/PlatformAccessGrantGatedBeforeStore' }]
+    actor: { $ref: 'actors.yaml#/PlatformMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+    thrown:
+      - { $ref: 'errors.yaml#/PlatformAccessGrantDoorClosed' }
+
+  TestGrantPlatformAccessTwiceIsIdempotent:
+    name: "Granting the same platformMembershipId twice is a no-op (idempotent) -- the same shape a re-run of the one-shot bootstrap relies on"
+    rules: [{ $ref: 'rules.yaml#/PlatformAccessGrantIsIdempotent' }]
+    actor: { $ref: 'actors.yaml#/PlatformMembership' }
+    given:
+      - { $ref: '#/fixtures/platformAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
+    then: []
+
+  # The bridge sentinel (behaviour_support::SpecPlatformMembers, the
+  # TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected precedent transposed): "already-
+  # granted-admin" is held by a FOREIGN platformMembershipId, so a second GrantPlatformAccess
+  # naming a DIFFERENT platformMembershipId on the same authSubject is rejected before any fact is
+  # recorded -- ADMIN reuses no reservation table (PRINCIPALS-MEMBER), so the bridge itself is the
+  # arbiter this test exercises.
+  TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected:
+    name: "Granting a NEW platformMembershipId with a login already holding platform access is rejected"
+    rules: [{ $ref: 'rules.yaml#/PlatformAuthSubjectResolvesToOneMembership' }]
+    actor: { $ref: 'actors.yaml#/PlatformMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      data: { platformMembershipId: "platform-membership-for-already-granted-admin", authSubject: "already-granted-admin", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/PlatformAccessAlreadyGranted' }
+
+  # Round 2, R2-5 (young + vernon): a caller-supplied platformMembershipId that does NOT equal
+  # UUIDv5(PLATFORM_MEMBERSHIP_NAMESPACE, authSubject) is refused BEFORE any store read -- a
+  # deliberately mismatched pair, distinct from both the idempotent-replay and already-granted
+  # cases above (neither of which is even reached: this check runs FIRST).
+  TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected:
+    name: "A platformMembershipId that does not derive from authSubject is refused before any store read"
+    rules: [{ $ref: 'rules.yaml#/PlatformMembershipIdMustBeDerivedFromAuthSubject' }]
+    actor: { $ref: 'actors.yaml#/PlatformMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      data: { platformMembershipId: "platform-membership-for-someone-else-entirely", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/PlatformMembershipIdMismatch' }
 
   # --- GrantRestaurantAccessByInvitation (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
   # amendment): the two-lane accept's SECOND, PUBLIC-only command, its own door -- cross-stream:

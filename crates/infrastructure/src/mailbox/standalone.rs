@@ -161,6 +161,10 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // #639 part C step 6-ii: the member sign-in door's identity bridge (the `member` table
         // the request seam reads too) -- the `riders` port's precedent, above.
         members: Arc::new(crate::PgMemberRepository::new(pool.clone())),
+        // #639 part C step 6-v (ADR-20260905-223957 §1): the platform grant's write-side arbiter
+        // (the `platform_member` table the ADMIN seam reads too) -- the `members` port's
+        // precedent, above.
+        platform_members: Arc::new(crate::PgPlatformMemberRepository::new(pool.clone())),
         support_contact: std::env::var("SUPPORT_CONTACT")
             .ok()
             .map(|v| v.trim().to_string())
@@ -240,6 +244,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the invitation door, same
         // ENV-GATED posture, same default (OFF).
         run_restaurant_invitation: env_flag("RUN_RESTAURANT_INVITATION", false),
+        // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door, same
+        // ENV-GATED posture, same default (OFF).
+        run_platform_access_grant: env_flag("RUN_PLATFORM_ACCESS_GRANT", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -286,6 +293,23 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         deps.run_restaurant_invitation,
     );
     telemetry::meters::restaurant_invitation::door_enforcing(deps.run_restaurant_invitation);
+    // #639 part C step 6-v (ADR-20260905-223957 §5), the same fleet-parity shape: the monolith
+    // declares the same key from its Config, so a fleet split is visible in `runtime_flag_state`.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_PLATFORM_ACCESS_GRANT",
+        deps.run_platform_access_grant,
+    );
+    telemetry::meters::admin_identity::grant_enforcing(deps.run_platform_access_grant);
+    // farley's RUN_* fleet-parity codegen test (#639 part C step 6-v) found this key declared at
+    // the monolith root (`crates/server/src/lib.rs`) but NOT here -- a pre-existing gap (step
+    // 4-i/4-iii-A's own key), fixed in the same change per the test's own instruction ("it may be
+    // red on an EXISTING key -- fix the root"). This standalone fleet never serves the WebSocket
+    // the gate closes, but the fleet-parity EVIDENCE (what value did THIS process resolve) is what
+    // `runtime_flag_state` needs to prove no process anywhere carries a stale value.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_RIDER_RESTRICTION_SOCKET_CLOSE",
+        env_flag("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", false),
+    );
     deps
 }
 

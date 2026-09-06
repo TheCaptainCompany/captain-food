@@ -33,6 +33,7 @@ pub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[
     ("Order", true, None),
     ("Payment", true, None),
     ("PlaceOrderProcess", true, None),
+    ("PlatformMembership", true, None),
     ("Prospect", true, None),
     ("Reclamation", true, None),
     ("RefundProcess", true, None),

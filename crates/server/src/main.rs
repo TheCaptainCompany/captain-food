@@ -36,6 +36,18 @@ async fn main() {
     // would shut the exporter down and silently lose every buffered span.
     let mut telemetry_guard = server::init_telemetry(&config);
 
+    // #639 part C step 6-v (ADR-20260905-223957 §3): the ONE-SHOT `bootstrap-platform-admin`
+    // subcommand — checked BEFORE the missing-config gate below (its own precondition, the
+    // secret, is deliberately `required: []`, never part of the ordinary boot's required set) and
+    // BEFORE the router/pool/port, exactly like the config gate itself. Runs inside this SAME
+    // OTLP-wired process (observability CATCH: never a bare script outside telemetry) and exits
+    // without ever binding a port — this is an operator-invoked command, not a server boot.
+    if std::env::args().nth(1).as_deref() == Some("bootstrap-platform-admin") {
+        let code = server::bootstrap_platform_admin::run(&config).await;
+        telemetry_guard.shutdown();
+        std::process::exit(code);
+    }
+
     if !problems.is_empty() {
         let report =
             server::generated::config::MissingConfig { profile: config.profile, problems };

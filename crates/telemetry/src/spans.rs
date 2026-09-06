@@ -361,6 +361,29 @@ pub fn record_member_identity_resolve_result(span: &Span, result: &str, reason: 
     }
 }
 
+/// `admin.identity.resolve` (`admin-sign-in` contract, #639 part C step 6-v,
+/// ADR-20260905-223957 §5), the [`member_identity_resolve`]/[`rider_identity_resolve`] shape
+/// transposed to the ADMIN/platform seam.
+pub fn admin_identity_resolve(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "admin.identity.resolve",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        business.failure_reason = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the platform seam's typed outcome — the [`record_member_identity_resolve_result`] shape.
+pub fn record_admin_identity_resolve_result(span: &Span, result: &str, reason: Option<&str>) {
+    span.record(attr::RESULT, result);
+    if let Some(reason) = reason {
+        span.record(attr::FAILURE_REASON, reason);
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 /// `graphql.limits.refused` (`graphql-limits` contract, #639 part C step 6-ii): opened ONLY when
 /// the per-role extension actually refuses a document, before any resolver runs. An accepted
 /// request never opens this span -- the histograms/gauge under the same contract cover it.

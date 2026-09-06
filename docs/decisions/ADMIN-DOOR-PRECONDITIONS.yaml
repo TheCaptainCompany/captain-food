@@ -15,8 +15,11 @@ question: 'What must exist before `RUN_PLATFORM_ACCESS_GRANT` (step 6-v, the pla
   mandataire under the SAS -- the SCIC conversion is deferred to M18) -- counsel + founder, upstream of the lawful
   basis (legal, business); (5) the `admin-sign-in` observability contract and the two dead-man gauges at BOTH
   composition roots, plus farley''s codegen test that every `RUN_*` key is declared unconditionally at both roots
-  with the same default; flip evidence: both gauges 1 across a deploy window, at least one `resolved`, zero
-  `admin_claim_stamp_failed_total`, `read_authorization_bridge_unresolved_total{role="ADMIN"}` flat (observability);
+  with the same default; flip evidence (metrics that actually ship with 6-v — the ADMIN path has no
+  claim stamp, so no such metric is named here): `admin_identity_resolve_total{result}` shows at
+  least one `resolved`; `read_authorization_bridge_unresolved_total{role="ADMIN"}` flat; the second
+  dead-man gauge arrives with 6-iii, so only `platform_access_grant_enforcing` is asserted 1 here
+  (observability);
   (6) for 6-iii: the System sign-in and both refusal screens exist as their OWN screens, the anonymous browser
   receives the sign-in shell and never the board (ux); (7) the `?next=` return-to-screen + silent refresh retry
   (#904) so the 19:40 lockout does not strand the only person who can make a customer whole (ux, business);
@@ -30,5 +33,16 @@ evidence: 'Today `crates/server/src/auth.rs:~308` mints `Identity::Admin { sub }
   a role claim is the only thing between an anonymous token and a cross-tenant read. Nothing flips while production
   is suspended (ADR-20260817-105844).'
 note: 'External items are the founder''s (controller entity, the Art. 30 register, the labour posture, the first
-  admin''s identifier held as a secret); no lens output is legal advice or clearance. Items (1)-(2) and (5) land
-  with 6-v; (6) with 6-iii; (3)-(4), (7)-(8) are flip preconditions, not code in these slices.'
+  admin''s identifier held as a secret); no lens output is legal advice or clearance. Items (1)-(2) and (5) LANDED
+  with 6-v (PR #907, DRAFT, ADR-20260905-223957): (1) the one-shot `bootstrap-platform-admin` dispatches
+  `GrantPlatformAccess` through the ordinary mailbox, subject from the declared secret
+  `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` (never the repo), deterministic id (idempotent), inside the OTLP-wired
+  server process, logging the Art. 5(2) artifact; (2) `crates/server/src/auth.rs`''s ADMIN seam
+  (`resolve_platform_scope`) makes `Identity::Admin` unspellable without a live `PlatformMembership` grant,
+  proven red-first (`an_admin_token_with_no_platform_grant_is_unbound.rs`); (5) the `admin-sign-in` contract and
+  `platform_access_grant_enforcing` at both composition roots, plus the new `RUN_*` fleet-parity codegen test
+  (`tools/codegen-rs/src/tests.rs::run_flag_parity`), landed. (6) with 6-iii; (3)-(4), (7)-(8) are flip
+  preconditions, not code in these slices — still open, still the founder''s external items.
+  Ordering, stated plainly: flip `RUN_PLATFORM_ACCESS_GRANT` and run `bootstrap-platform-admin`
+  BEFORE any environment relies on ADMIN — the seam ships fail-closed precisely so this ordering
+  cannot be skipped by accident, not because any environment today depends on it being followed.'

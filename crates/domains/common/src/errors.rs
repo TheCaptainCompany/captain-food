@@ -189,3 +189,27 @@ pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {
     message_en: "This login is already used for another kind of Captain.Food account and cannot sign in here yet.",
     message_fr: "Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici.",
 };
+
+/// The platform grant door is closed by `configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT` (#639 part C step 6-v, ADR-20260905-223957 §5) -- a declared, supervisable refusal while the preconditions (`docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml`) are open, never a silent no-op. Every platform grant, hand-issued or bootstrap-dispatched, is an irreversible act about a real Tours human that starts every legal clock -- the store is never touched while this is off.
+/// Context: `authSubject`.
+pub const PLATFORM_ACCESS_GRANT_DOOR_CLOSED: ErrorDef = ErrorDef {
+    code: "PlatformAccessGrantDoorClosed",
+    message_en: "Granting platform access is not yet enabled in this environment.",
+    message_fr: "L'octroi d'accès à la plateforme n'est pas encore activé dans cet environnement.",
+};
+
+/// This `authSubject` already holds a LIVE `PlatformMembership` on a DIFFERENT `platformMembershipId` (#639 part C step 6-v, ADR-20260905-223957 §1): the `PlatformMember` bridge's `auth_subject UNIQUE` is the arbiter, checked by the handler before appending (ADMIN is NOT a `PrincipalKind`, PRINCIPALS-MEMBER, so this reuses no reservation table). A resubmission of the SAME `platformMembershipId` is a DIFFERENT outcome -- the idempotent no-op the fold already grants, never this refusal.
+/// Context: `authSubject`.
+pub const PLATFORM_ACCESS_ALREADY_GRANTED: ErrorDef = ErrorDef {
+    code: "PlatformAccessAlreadyGranted",
+    message_en: "This login already holds platform access under a different membership.",
+    message_fr: "Cette identité de connexion dispose déjà d'un accès plateforme sous une autre adhésion.",
+};
+
+/// Round 2, R2-5 (young + vernon, ADR-20260905-223957 §1/§2): `platformMembershipId` is CALLER-MINTED (ADR-0034) but not FREELY so -- it must equal `UUIDv5(PLATFORM_MEMBERSHIP_ NAMESPACE, authSubject)`, the SAME formula the one-shot bootstrap already uses (`platform_membership_id_for` in `crates/application/src/commands.rs`). Collapsing the id into stream identity turns "one platform membership per subject" from a projection-read-plus-UNIQUE arbiter (which fires at projection time under `DbFaultPolicy::Skip` and can wedge the read model on a genuine race) into a set invariant the fold's own exists-once check enforces for free: two grants for one subject ALWAYS target the SAME stream. The bridge/`PlatformAccessAlreadyGranted` read stays as a belt, not the arbiter (see the comment on `grant_platform_access`).
+/// Context: `authSubject`, `platformMembershipId`.
+pub const PLATFORM_MEMBERSHIP_ID_MISMATCH: ErrorDef = ErrorDef {
+    code: "PlatformMembershipIdMismatch",
+    message_en: "This platform membership id does not match the required derivation for this login.",
+    message_fr: "Cet identifiant d'adhésion plateforme ne correspond pas à la dérivation requise pour cette identité de connexion.",
+};

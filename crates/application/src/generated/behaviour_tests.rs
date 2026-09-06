@@ -782,6 +782,11 @@ fn fx_restaurant_access_granted_on_customer_login() -> DomainEvent {
     DomainEvent::RestaurantAccessGranted(evs::RestaurantAccessGranted { membership_id: sc::MembershipId(support::uid("membership-3")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), principal_kind: sc::PrincipalKind::MEMBER, member_id: sc::MemberId(support::uid("member-3")), auth_subject: sc::AuthSubject("auth-supabase-customer".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING })
 }
 
+/// tests.yaml#/fixtures/platformAccessGranted — events.yaml#/PlatformAccessGranted
+fn fx_platform_access_granted() -> DomainEvent {
+    DomainEvent::PlatformAccessGranted(evs::PlatformAccessGranted { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-admin-1")), auth_subject: sc::AuthSubject("auth-admin-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING })
+}
+
 /// tests.yaml#/fixtures/restaurantInvitationSent — events.yaml#/RestaurantInvitationSent
 fn fx_restaurant_invitation_sent() -> DomainEvent {
     DomainEvent::RestaurantInvitationSent(evs::RestaurantInvitationSent { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), invited_email: sc::EmailAddress("johnny@example.com".into()), authority: sc::MemberAuthority::OPERATOR, member_id: sc::MemberId(support::uid("member-10")) })
@@ -4867,6 +4872,82 @@ async fn test_revoke_already_revoked_restaurant_membership_is_rejected() {
     let err = result.expect_err("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &err, &["RestaurantMembershipAlreadyRevoked"]);
     bed.assert_appended("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPlatformAccessGranted — "An existing admin hand-issues platform access to a new authSubject"
+/// rules: GrantPlatformAccessIsAHumanAct
+#[tokio::test]
+async fn test_platform_access_granted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantPlatformAccess { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-admin-1")), auth_subject: sc::AuthSubject("auth-admin-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING };
+    let run_platform_access_grant: bool = true;
+    let result = crate::commands::grant_platform_access(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await;
+    let _ = result.expect("TestPlatformAccessGranted: the spec expects acceptance");
+    bed.assert_appended("TestPlatformAccessGranted", &before, &[
+        (format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-admin-1")), fx_platform_access_granted()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestGrantPlatformAccessDoorClosed — "grantPlatformAccess is refused by the door key while it is OFF (the production default), before the store is even read"
+/// rules: PlatformAccessGrantGatedBeforeStore
+#[tokio::test]
+async fn test_grant_platform_access_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantPlatformAccess { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-admin-1")), auth_subject: sc::AuthSubject("auth-admin-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING };
+    let run_platform_access_grant: bool = false;
+    let result = crate::commands::grant_platform_access(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await;
+    let err = result.expect_err("TestGrantPlatformAccessDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantPlatformAccessDoorClosed", &err, &["PlatformAccessGrantDoorClosed"]);
+    bed.assert_appended("TestGrantPlatformAccessDoorClosed", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantPlatformAccessTwiceIsIdempotent — "Granting the same platformMembershipId twice is a no-op (idempotent) -- the same shape a re-run of the one-shot bootstrap relies on"
+/// rules: PlatformAccessGrantIsIdempotent
+#[tokio::test]
+async fn test_grant_platform_access_twice_is_idempotent() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("PlatformMembership-{}", support::uid("platform-membership-for-auth-admin-1")), vec![fx_platform_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantPlatformAccess { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-auth-admin-1")), auth_subject: sc::AuthSubject("auth-admin-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING };
+    let run_platform_access_grant: bool = true;
+    let result = crate::commands::grant_platform_access(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await;
+    let _ = result.expect("TestGrantPlatformAccessTwiceIsIdempotent: the spec expects acceptance");
+    bed.assert_appended("TestGrantPlatformAccessTwiceIsIdempotent", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected — "Granting a NEW platformMembershipId with a login already holding platform access is rejected"
+/// rules: PlatformAuthSubjectResolvesToOneMembership
+#[tokio::test]
+async fn test_grant_platform_access_auth_subject_already_granted_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantPlatformAccess { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-already-granted-admin")), auth_subject: sc::AuthSubject("already-granted-admin".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING };
+    let run_platform_access_grant: bool = true;
+    let result = crate::commands::grant_platform_access(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await;
+    let err = result.expect_err("TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected", &err, &["PlatformAccessAlreadyGranted"]);
+    bed.assert_appended("TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected — "A platformMembershipId that does not derive from authSubject is refused before any store read"
+/// rules: PlatformMembershipIdMustBeDerivedFromAuthSubject
+#[tokio::test]
+async fn test_grant_platform_access_platform_membership_id_mismatch_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantPlatformAccess { platform_membership_id: sc::PlatformMembershipId(support::uid("platform-membership-for-someone-else-entirely")), auth_subject: sc::AuthSubject("auth-admin-1".into()), basis: sc::PlatformAccessBasis::CAPTAIN_ONBOARDING };
+    let run_platform_access_grant: bool = true;
+    let result = crate::commands::grant_platform_access(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await;
+    let err = result.expect_err("TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected", &err, &["PlatformMembershipIdMismatch"]);
+    bed.assert_appended("TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestGrantRestaurantAccessFromInvitation — "The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from a client copy, and its membershipId is UUIDv5-derived"
