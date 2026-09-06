@@ -2,6 +2,108 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-06 — [#876 "Projection lag gauges never read 0 when caught up: drain_group returns on
+> a short page and the idle gate never re-records"](https://github.com/TheCaptainCompany/captain-food/issues/876)
+> landed, draft [PR #935](https://github.com/TheCaptainCompany/captain-food/pull/935), Lane B
+> (session_01H3AFBVzhSiGXJcFuwKjiMQ, `876-projection-lag-gauge-zero`), REVERSIBLE (internal drain
+> loop behind a stable interface).** `drain_group` (`crates/infrastructure/src/projection/worker.rs`)
+> returned the moment a page came back short of `batch_size` (the ordinary "last page" case) WITHOUT
+> a confirmatory empty scan, so the gauge's last-recorded value stayed at the PRE-drain pending
+> count — capped at `batch_size` while genuinely behind, never 0, unless the backlog happened to be
+> an exact multiple of the batch. **D2**: the loop now falls through to a genuine extra scan on a
+> short page; a 0 is recorded ONLY by a scan that observed nothing pending, never inferred at the
+> short-page return itself (that would under-report exactly at Friday peak, where the backlog is
+> rarely an exact multiple of `batch_size`). Separately, `tick`'s idle gate (`last_head == head`)
+> short-circuited before any group was scanned, so an idle platform never re-recorded anything after
+> its first drain. **D3**: the gate still skips every group's DB scan (ADR-20260810-231300's
+> bandwidth carve-out stands, untouched), but now re-records a literal 0 for every gauge-bearing
+> group on the way out — exact, since the gate only arms once every group has fully drained. **D4**:
+> `rider_restriction.rs`'s `.parse().ok()` folded a malformed `decidedAt`/`effectiveAt` to `None` on
+> a RESTRICTED row (`restriction: null` on a rider the fold just classified RESTRICTED); it now folds
+> to `env.occurred_at` (deterministic on replay) and emits a `tracing::error!` (position + raw
+> string, technical never business) — never a `FoldFault` (log-and-skip would leave the rider ACTIVE,
+> worse than a null).
+>
+> **FOUR gauges share this loop, not the issue's three**: `scope_membership_lag_positions`,
+> `rider_standing_lag_positions`, `restaurant_roster_lag_positions`,
+> `restaurant_invitation_list_lag_positions` — `read_authorization::lag_positions` emits the first
+> name and carried the identical defect, unnamed in the issue text. Generalized at the CHECKPOINT
+> (below), not at the original draft.
+>
+> **Reds, each isolated against its named mutant, quoted and reverted** —
+> `crates/infrastructure/tests/rider_standing_lag_metric.rs`: (a)
+> `the_rider_group_lag_gauge_reads_zero_under_the_default_batch_size` (one fact, default batch) —
+> `left: Some(1), right: Some(0)` at the branch base, before D2; (b)
+> `the_rider_group_lag_gauge_is_re_recorded_on_an_idle_pass` (pokes the production instrument with
+> `999`, a value `drain_group` never itself produces, defeating the SDK's cumulative-Gauge
+> re-export) — `left: Some(999), right: Some(0)` before D3, reproduced again by dropping the
+> re-record; (c) `a_zero_is_only_recorded_by_a_scan_that_observed_nothing_pending` (multi-page drain,
+> batch 2, three facts) — `left: Some(1), right: Some(0)` before D2 — renamed at Round 2 confirmation
+> to `a_multi_page_drain_ending_in_a_short_page_still_ends_at_zero_with_every_fact_folded`: the
+> original name claimed a property (distinguishing an observed-empty scan from an inferred
+> short-page end) the test cannot cash — the reviewer's short-page mutant still passes it. That
+> undischarged property is carried forward under the original name in #936 item 3; D4's new
+> `a_malformed_restriction_timestamp_folds_to_occurred_at`
+> (`crates/application/src/projectors/rider_restriction.rs`) — `left: None, right: Some(2026-…)`
+> against `.parse().ok()`. At the CHECKPOINT, generalizing (b) to all FOUR gauges reproduced the
+> D3-partial mutant (keep Rider's re-record, drop the other three) RED where the Rider-only
+> assertion had been GREEN: `left: Some(999), right: Some(0)` on `scope_membership_lag_positions`.
+>
+> **Consent decisions (observability-agent, dba, farley — unanimous, briefing roster)**: D2's extra
+> scan (cost: one PK-ordered tail scan per DRAINING group per tick, filtered by stream prefix — NOT
+> an index condition — scaling with `head - checkpoint` for that group, measured 4.4 ms across a 50k
+> gap and 0.03 ms caught up, dba); D3's re-record without removing the gate (ADR-20260810-231300's
+> carve-out stands); D4's fold-to-`occurred_at`-and-report, never a `FoldFault` (dba: log-and-skip
+> would leave the rider ACTIVE, worse than a null).
+>
+> **CHECKPOINT verdicts: CONTINUE ×4** (observability-agent, dba, farley continued; **beck invited**
+> for the test-design finding) — beck re-ran the D3 and D4 mutants (both RED, confirmed) and planted
+> a SUBTLER D2 mutant himself (record 0 explicitly at the short-page return, keeping the early
+> return, instead of the confirmatory scan): **GREEN under a single writer** on tests (a) and (c) —
+> a short page is tautologically the true end of the backlog absent a concurrent writer, so both
+> implementations converge on the identical final gauge value with no writer racing the return.
+> **Confirmed unpinnable as a unit test: a test seam is not bought for an undischarged race in a
+> REVERSIBLE change** — the residue is filed (below), not buried under a false-green test.
+>
+> **Stated residue, on the record**: (1) D2's mutant is unpinnable under a single writer — every
+> single-writer observable agrees between the two implementations; the actual difference is a race
+> window bounded by one poll interval, because the writer that would expose it also moves `head`,
+> which means the confirmatory-scan design and the short-page-infers-0 design would ONLY diverge if
+> a write landed in the gap between the short page and the return — and by then the next tick's own
+> scan (not the idle gate, which cannot arm on a moved head) already sees it; beck's seam shape (an
+> injectable scan hook or a controlled two-connection harness) is named, not built, in the linked
+> follow-up. (2) The gauge still SATURATES at `batch_size` above 0 — honest exactly at 0, not above
+> it; a `head - checkpoint` reading that would not saturate is the linked follow-up.
+>
+> **Card defects**: the issue named THREE gauges sharing this loop, not four (above). The pinned
+> claim that a reset exporter + `force_flush()` would show "no point recorded" on a stale Gauge is
+> WRONG IN THE LOAD-BEARING DIRECTION — observability's own miss: `InMemoryMetricExporter::reset()`
+> clears the exporter's buffer, never the SDK's `LastValue` aggregator, and the default
+> `Temporality::Cumulative` re-exports the last value on every flush regardless of new `.record()`
+> calls, so the originally-designed test (b) would have passed trivially whether or not D3 worked —
+> a false-green, not a false-red, the worse direction for a gate to fail in. Corrected with the poke
+> technique (`docs/claude/sessions/gates.md` §19k). The local Postgres password/`su postgres`
+> recipe in gates.md §19a also did not hold this session (corrected there, with the quote).
+>
+> **Roster miss, attributed**: no TESTING lens (beck) sat the red-first design briefing — the
+> coordinator's selection, not a card defect or an invited-lens depth miss; a red-first test design
+> is exactly beck's lens and its absence is why the cumulative-exporter error and the unpinnable D2
+> seam both surfaced only at the checkpoint rather than before any code. The architect, as the
+> issue's owner, was also not consulted on the four-vs-three gauge count before dispatch. Neither
+> miss reverts REVERSIBLE's 2–3-lens sizing on its own (ADR-20260817-105845) — banked for the next
+> card naming a shared-loop metric fix: invite beck at the briefing whenever the pin is a red-first
+> test on a Gauge/last-value instrument.
+>
+> Follow-up filed:
+> [#936 "#935 follow-ups (projection lag gauges): record head - checkpoint (the gauge saturates at
+> batch_size), an authenticated db pre-flight, the deferred concurrent-writer seam, the error-event
+> assertion, business_metrics placement, Delta temporality"](https://github.com/TheCaptainCompany/captain-food/issues/936)
+> carries the D2 seam shape, the `head - checkpoint` reading, an authenticated (not reachability-only)
+> `db-preflight.sh`, the D4 log assertion (`application` lacks a tracing `Capture` dev-dependency),
+> whether these gauges belong in `business_metrics` (ADR-20260811-014129) rather than OTLP, and
+> whether Delta temporality changes the re-export-forever shape. #876's checklist is the
+> coordinator's.
+
 > **2026-09-06 — [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — eleven
 > declared controls render as an empty tagged div (GAP(renderer)); make `render_node_kind`
 > exhaustive over `ComponentKind`"](https://github.com/TheCaptainCompany/captain-food/issues/888)

@@ -1003,6 +1003,26 @@ impl ProjectionWorker {
         // between ~41k and ~2.4k queries an hour at the unassisted cadence, and the reason a
         // completely idle platform was the single largest consumer of outbound bandwidth.
         if self.last_head.load(Ordering::Relaxed) == head {
+            // #876 D3: the gate still skips every group's DB scan (ADR-20260810-231300's bandwidth
+            // carve-out stands), but it must not ALSO skip re-recording the gauge -- without this,
+            // an idle platform's dashboard freezes at whatever value the last real drain left and
+            // never refreshes again until the log next moves. Re-recording a literal 0 here is
+            // EXACT, not an approximation: the gate only arms when the previous pass drained every
+            // group to completion, so pending is 0 by construction and needs no query to confirm.
+            for group in self.groups() {
+                if group.checkpoint == "ScopeMembership" {
+                    telemetry::meters::read_authorization::lag_positions(0);
+                }
+                if group.checkpoint == "Rider" {
+                    telemetry::meters::rider_restriction::lag(0);
+                }
+                if group.checkpoint == "RestaurantRoster" {
+                    telemetry::meters::restaurant_invitation::roster_lag(0);
+                }
+                if group.checkpoint == "RestaurantInvitationList" {
+                    telemetry::meters::restaurant_invitation::invitation_list_lag(0);
+                }
+            }
             return Ok((head, head));
         }
         for group in self.groups() {
@@ -1046,20 +1066,17 @@ impl ProjectionWorker {
             // The ACL index's lag is a USER-VISIBLE DENIAL, not stale data (a just-placed order's
             // own customer is denied their order while it lags), so it gets the contract's
             // dedicated gauge (`read-authorization` business_metrics). Emitted per scan: the
-            // pending batch length is a lower bound while draining, and an exact 0 when caught up.
+            // pending batch length is a lower bound while draining, and an exact 0 ONLY on a scan
+            // that observed nothing pending (#876 D2 -- never inferred at a short-page return).
             if group.checkpoint == "ScopeMembership" {
                 telemetry::meters::read_authorization::lag_positions(pending.len() as i64);
             }
             // `rider-restriction` contract (#639 part C step 4-i, ADR-20260904-081527 §9): the
             // `scope_membership_lag_positions` mirror — while the Rider projector lags, a
             // restricted rider is still GRANTED, so "immediately" is a measured claim only with
-            // this gauge. Round 2 item 6(b) (dba, farley): "0 when caught up" was FALSE as
-            // written — this loop returns on a short page and the idle gate below never
-            // re-records, so an idle platform exports the PRE-DRAIN page length until the log next
-            // moves. True shape: the pending page length at each scan — a lower bound capped at
-            // `batch_size` while draining, re-recorded only when the log moves, 0 only on the
-            // first scan that finds nothing. Pre-existing, shared `drain_group` behaviour (not
-            // fixed here — architect-owned issue).
+            // this gauge. #876 fix: the pending page length at each scan is a lower bound while
+            // draining, and an exact 0 ONLY on the scan that finds nothing (never inferred at a
+            // short page, and re-recorded on every idle pass too -- see `tick`'s idle gate below).
             if group.checkpoint == "Rider" {
                 telemetry::meters::rider_restriction::lag(pending.len() as i64);
             }
@@ -1074,7 +1091,6 @@ impl ProjectionWorker {
             if pending.is_empty() {
                 return Ok(());
             }
-            let batch_len = pending.len() as i64;
 
             let mut tx = self.pool.begin().await.map_err(db_err)?;
             let mut last_position = checkpoint;
@@ -1146,9 +1162,21 @@ impl ProjectionWorker {
             .map_err(db_err)?;
             tx.commit().await.map_err(db_err)?;
             checkpoint = last_position;
-            if batch_len < self.batch_size {
-                return Ok(());
-            }
+            // #876 D2: NO early return on a short page (`batch_len < self.batch_size`) here. A
+            // short page is the ordinary "last page" case, but inferring 0 at THIS point would be
+            // reading it off a scan that just observed something pending (this very batch), never
+            // off a scan that observed nothing -- and it would under-report exactly at Friday peak,
+            // where every tick's LAST page for a draining group is short by construction (the
+            // backlog is rarely an exact multiple of `batch_size`). The loop falls through to the
+            // top instead, so the NEXT scan is the one that actually finds nothing pending and
+            // records the 0 -- and if an event landed in the gap, that scan sees it and keeps
+            // draining, correctly. This scan is NOT an index lookup (dba): `stream_name LIKE ANY`
+            // is a FILTER, not an index condition -- it is a PK-ordered (`position`) tail scan
+            // bounded by `position > checkpoint`, so its cost scales with `head - checkpoint` for
+            // THIS group, not with the table's total size (measured: 4.4 ms across a 50k-position
+            // gap, 0.03 ms once caught up). It runs on `self.pool` AFTER `tx.commit()` above --
+            // outside the batch transaction, holding no lock -- so it never extends the write's
+            // critical section.
         }
     }
 
