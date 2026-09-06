@@ -459,15 +459,9 @@ EOF
         rf_msg="register-check: a cited record names a test ($rf_hit_count matching line(s) across the cited record file(s)) and this dispatch carries no \`Red-first:\` section. Add one entry per hit, or the explicit negative if none of the hits actually name a test."
       fi
     else
-      # A PRESENT `Red-first:` section is always shape-validated, whatever the hit count is --
-      # #914 item 2 (beck): at 0 hits this used to be skipped entirely, so `none` was accepted by
-      # the rule never firing, never by being read and found true, and a POSITIVE entry pinned to
-      # a citation with no test-naming line was silently accepted too. `rf_hit_count` now decides
-      # only two things below: a MISSING section is refused only at >0 hits, and `none` is refused
-      # as a false negative only at >0 hits. KNOWN VERDICT CHANGE: a 0-hit card whose prose merely
-      # mentions `Red-first:` with no valid entry and no `none` now blocks with
-      # `dispatch-redfirst-shape` -- the same verdict the >0-hit path already gave that shape; the
-      # remedy is the same explicit negative.
+      # A PRESENT `Red-first:` section is always shape-validated, whatever the hit count is.
+      # Full rationale and the KNOWN VERDICT CHANGE this introduces: see RULE 1's header comment
+      # above (#914 item 2, beck/farley) -- declared there once, not repeated here.
       rf_saw_none=no
       rf_entry_ok=no
       while IFS= read -r rline; do
