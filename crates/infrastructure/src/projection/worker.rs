@@ -1003,6 +1003,26 @@ impl ProjectionWorker {
         // between ~41k and ~2.4k queries an hour at the unassisted cadence, and the reason a
         // completely idle platform was the single largest consumer of outbound bandwidth.
         if self.last_head.load(Ordering::Relaxed) == head {
+            // #876 D3: the gate still skips every group's DB scan (ADR-20260810-231300's bandwidth
+            // carve-out stands), but it must not ALSO skip re-recording the gauge -- without this,
+            // an idle platform's dashboard freezes at whatever value the last real drain left and
+            // never refreshes again until the log next moves. Re-recording a literal 0 here is
+            // EXACT, not an approximation: the gate only arms when the previous pass drained every
+            // group to completion, so pending is 0 by construction and needs no query to confirm.
+            for group in self.groups() {
+                if group.checkpoint == "ScopeMembership" {
+                    telemetry::meters::read_authorization::lag_positions(0);
+                }
+                if group.checkpoint == "Rider" {
+                    telemetry::meters::rider_restriction::lag(0);
+                }
+                if group.checkpoint == "RestaurantRoster" {
+                    telemetry::meters::restaurant_invitation::roster_lag(0);
+                }
+                if group.checkpoint == "RestaurantInvitationList" {
+                    telemetry::meters::restaurant_invitation::invitation_list_lag(0);
+                }
+            }
             return Ok((head, head));
         }
         for group in self.groups() {
