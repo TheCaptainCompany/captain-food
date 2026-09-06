@@ -39,4 +39,7 @@ note: 'External items are the founder''s (controller entity, the Art. 30 registe
   proven red-first (`an_admin_token_with_no_platform_grant_is_unbound.rs`); (5) the `admin-sign-in` contract and
   `platform_access_grant_enforcing` at both composition roots, plus the new `RUN_*` fleet-parity codegen test
   (`tools/codegen-rs/src/tests.rs::run_flag_parity`), landed. (6) with 6-iii; (3)-(4), (7)-(8) are flip
-  preconditions, not code in these slices — still open, still the founder''s external items.'
+  preconditions, not code in these slices — still open, still the founder''s external items.
+  Ordering, stated plainly: flip `RUN_PLATFORM_ACCESS_GRANT` and run `bootstrap-platform-admin`
+  BEFORE any environment relies on ADMIN — the seam ships fail-closed precisely so this ordering
+  cannot be skipped by accident, not because any environment today depends on it being followed.'

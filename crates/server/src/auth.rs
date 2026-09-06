@@ -2508,9 +2508,13 @@ impl ResolveMemberIdentity for NoDatabaseMemberIdentity {
 
 // =====================================================================================
 // The ADMIN/platform seam (#639 part C step 6-v, ADR-20260905-223957 §2) — the RIDER/MEMBER shape,
-// transposed. UNGATED (like both): there is no legacy ADMIN-claim behaviour an OFF state could
-// preserve for this READ path — the door being gated is `RUN_PLATFORM_ACCESS_GRANT` on the WRITE
-// side (`grant_platform_access`); the seam always resolves through Postgres once a grant exists.
+// transposed. UNGATED and fail-closed: with `RUN_PLATFORM_ACCESS_GRANT` off, no ADMIN token can
+// resolve and none can be granted until the key flips and the bootstrap runs — the legacy this
+// replaces was role-trust ADMIN minting `Identity::Admin` straight from the token, giving
+// `ScopePredicate::All` over 77 operations with no live grant behind it at all; production is
+// suspended (ADR-20260817-105844), so no environment relies on that role-claim behaviour today.
+// The door being gated is `RUN_PLATFORM_ACCESS_GRANT` on the WRITE side (`grant_platform_access`);
+// the seam always resolves through Postgres once a grant exists.
 // =====================================================================================
 
 /// The request-seam TRANSLATION from the verified auth subject to "does this subject hold a LIVE
