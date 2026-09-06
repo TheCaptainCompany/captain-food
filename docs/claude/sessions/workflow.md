@@ -806,12 +806,22 @@ rule 1, tracking issue [#910](https://github.com/TheCaptainCompany/captain-food/
 *cited record* — the trail block above — was seen FAILING before the change that makes it pass.
 When the record a dispatch cites names a test, a belt or a mutant (any line matching one of the
 tokens `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`), the card carries a
-`Red-first:` section, one entry per hit — this section rides ALONGSIDE the `Register check:`/
-`Decision row:` line, never instead of it. **A PRESENT `Red-first:` section is ALWAYS
-shape-validated (#914), whatever the hit count is**: the count decides only two refusals — a
-MISSING section is refused only when a cited record actually has a hit, and the explicit negative
-below is refused as a false negative only then too. A present section with no valid entry and no
-`none` is refused for its shape at ANY hit count, including zero.
+`Red-first:` section — this section rides ALONGSIDE the `Register check:`/`Decision row:` line,
+never instead of it. **Restated 2026-09-06** (#926 item 2, consent decision, option (a) — the
+team's, ADR-20260904-013834): two DIFFERENT obligations here, not one, and only one of them is
+enforced by a gate. The **CARD's obligation** is one entry per hit — read at the mob briefing and
+by the independent reviewer over the full diff, never by the hook, because it cannot be: the ADR's
+own honesty limit already concedes that completeness of the extraction is NOT CHECKABLE, and a
+literal per-hit COUNT is unworkable to enforce mechanically besides (ADR-20260906-024838 itself
+carries 17 hit lines). What **THE HOOK checks**, and all it checks, is presence of AT LEAST ONE
+well-shaped entry (or the declared negative below) for the whole section — **A PRESENT
+`Red-first:` section is ALWAYS shape-validated (#914), whatever the hit count is**: the count
+decides only two refusals — a MISSING section is refused only when a cited record actually has a
+hit, and the explicit negative below is refused as a false negative only then too. A present
+section with no valid entry and no declared negative is refused for its shape at ANY hit count,
+including zero. NAMED RESIDUAL, stated rather than hidden: one valid entry excuses every OTHER hit
+in the same cited record — a card with three hits and one entry passes the hook, and only review
+catches the other two going unaccounted for.
 
 ```
 Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
