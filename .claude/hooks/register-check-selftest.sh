@@ -628,6 +628,11 @@ expect_d RF4c-redfirst-positive-founded-elsewhere-on-zero-hit-record 0 "{\"tool_
 expect_d RF5-redfirst-false-negative 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-false-negative
 # RF6 ALLOW: a compliant card -- one well-shaped entry pinned to the real hit line.
 expect_d RF6-redfirst-compliant 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_gate_is_red_first — ADR-20260906-050000:4 — mutant: delete the token check — expected red: register-check selftest RF6 fails\"}}" dispatch-trail-ok
+# RF7 BLOCK: `<record>:<line>` resolves to a REAL file but a line PAST EOF (the fixture has 5
+#    lines; line 99 does not exist) -- the branch the removed `wc -l` guard held (`sed -n Np` on a
+#    line past EOF prints nothing, and nothing cannot match the token regex) has never been seen
+#    red (#914 item 3, reviewer/beck).
+expect_d RF7-redfirst-line-past-eof 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:99 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
 
 # ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
 # A parse failure was being reported as a read declaration of read-only, so each of these was
