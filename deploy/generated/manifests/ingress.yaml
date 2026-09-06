@@ -206,6 +206,13 @@ spec:
                 name: gateway-admin
                 port:
                   name: http
+          - path: /public/graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-public
+                port:
+                  name: http
           - path: /
             pathType: Prefix
             backend:

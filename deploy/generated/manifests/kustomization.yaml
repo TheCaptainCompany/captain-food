@@ -6,6 +6,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - ingress.yaml
+  - bins/actor-admin-sign-in.yaml
   - bins/actor-cart.yaml
   - bins/actor-catalog.yaml
   - bins/actor-conversation.yaml
