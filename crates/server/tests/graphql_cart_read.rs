@@ -186,6 +186,10 @@ struct FakeAsOf {
     /// recorded (never on the reply, D3), so a test can learn "the coordinate the mint used"
     /// without hardcoding it.
     last_coordinate: std::sync::atomic::AtomicI64,
+    /// The `correlation_id` the MOST RECENT `at_head` call received -- beck NB6: both fakes used to
+    /// discard `_correlation_id`, so a caller passing `Uuid::nil()` was indistinguishable from one
+    /// passing the request's own id. Captured honestly, never on the reply.
+    last_correlation_id: std::sync::Mutex<Option<uuid::Uuid>>,
 }
 
 impl FakeAsOf {
@@ -263,12 +267,18 @@ impl FakeAsOf {
             catalog_id,
             reads: std::sync::atomic::AtomicUsize::new(0),
             last_coordinate: std::sync::atomic::AtomicI64::new(0),
+            last_correlation_id: std::sync::Mutex::new(None),
         }
     }
 
     /// The coordinate the most recent `at_head` call returned (test-only introspection).
     fn last_returned_coordinate(&self) -> i64 {
         self.last_coordinate.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The `correlation_id` the most recent `at_head` call received (test-only introspection).
+    fn last_correlation_id(&self) -> Option<uuid::Uuid> {
+        *self.last_correlation_id.lock().expect("lock")
     }
 
     /// Appends a fourth event bumping offer 20's price to `new_price_cents` -- simulates a
@@ -333,9 +343,10 @@ impl application::ports::AsOfPriceAuthority for FakeAsOf {
     async fn at_head(
         &self,
         catalog_id: ds::CatalogId,
-        _correlation_id: uuid::Uuid,
+        correlation_id: uuid::Uuid,
     ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *self.last_correlation_id.lock().expect("lock") = Some(correlation_id);
         if catalog_id != self.catalog_id {
             return Err(DomainError::Repository("unknown catalog".into()));
         }
@@ -1161,6 +1172,10 @@ fn line_1500() -> CartLineItem {
 /// under later catalog changes). The mint's own coordinate is not on the reply (D3), so this test
 /// knows it analytically: three seeded events -> head is coordinate 3, and nothing else appends
 /// until AFTER the read below returns.
+///
+/// Also D5/beck NB6: `at_head` receives the REQUEST's own correlation id, not `Uuid::nil()` — both
+/// fakes used to discard `_correlation_id`, so this went unnoticed everywhere. The test injects one
+/// explicitly (`server::graphql_session::RequestCorrelationId`) and reads it back off the fake.
 #[tokio::test]
 async fn repricing_at_the_returned_coordinate_reproduces_the_returned_prices() {
     let restaurant = ds::RestaurantId(uid(90));
@@ -1172,12 +1187,14 @@ async fn repricing_at_the_returned_coordinate_reproduces_the_returned_prices() {
         fake.clone(),
         true,
     );
+    let request_correlation_id = uuid::Uuid::from_u128(0xC0FFEE);
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
                 .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
-                .data(tenant_of(restaurant)),
+                .data(tenant_of(restaurant))
+                .data(server::graphql_session::RequestCorrelationId(request_correlation_id)),
         )
         .await;
     assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
@@ -1190,6 +1207,13 @@ async fn repricing_at_the_returned_coordinate_reproduces_the_returned_prices() {
     // D3 keeps it off the wire entirely).
     let minted_coordinate = fake.last_returned_coordinate();
     assert_eq!(minted_coordinate, 3, "three seeded events -> head coordinate 3");
+
+    // The correlation id `at_head` ACTUALLY received is the request's own id, never `Uuid::nil()`.
+    assert_eq!(
+        fake.last_correlation_id(),
+        Some(request_correlation_id),
+        "the mint must carry the request's own correlation id, not a nil placeholder"
+    );
 
     // The catalog changes AFTER the mint returned (a concurrent write, or simply time passing).
     fake.append_price_update(1900);
@@ -1276,6 +1300,52 @@ async fn with_the_door_closed_the_priced_read_is_the_projection_read_and_carries
     );
 }
 
+/// D2: the mixed-authority mutant this whole slice exists to forbid — `at_head` called (so the fold
+/// IS read) but priced from the PROJECTION anyway (beck mutant C: `price_cart(&snapshot, ..)`
+/// instead of `price_cart_at(&snapshot, &as_of, ..)`). Every OTHER door-OPEN test seeds `FakeAsOf`
+/// and `TreeCatalogs` at the SAME 1500, so the two authorities never disagree and this mutant would
+/// survive them all; this test is the mirror of
+/// [`with_the_door_closed_the_priced_read_is_the_projection_read_and_carries_no_coordinate`], with
+/// the decoy price on the FOLD instead of the projection — the open arm must show the FOLD's 1900,
+/// never the projection's 1500.
+#[tokio::test]
+async fn the_open_arm_prices_from_the_fold_never_the_projection() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    // The fold's price moves to 1900 BEFORE the read -- the projection (`TreeCatalogs`) still
+    // reports 1500, so a mint that mixes authorities (fold coordinate + projection price) is
+    // directly observable as a leaked 1500 instead of the fold's 1900.
+    fake.append_price_update(1900);
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        true, // OPEN
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    assert_eq!(
+        data["current"]["lines"][0]["lineTotal"]["amountCents"],
+        json!(1900),
+        "the open arm must price from the FOLD (1900), never the projection (1500) -- the \
+         mixed-authority mint every lens's STOP forbids"
+    );
+    assert_eq!(
+        fake.last_returned_coordinate(),
+        4,
+        "the fourth event (the price update) is the fold's head coordinate"
+    );
+}
+
 /// D4: a fold failure with the door OPEN is a `technical_error` (the read ERRORS), NEVER a
 /// HEAD/projection fallback. `FailingAsOf` always refuses -- the catalog "does not exist" from the
 /// fold's point of view -- and `TreeCatalogs` still projects a perfectly good 15,00 EUR row, so any
@@ -1301,6 +1371,14 @@ async fn a_fold_failure_with_the_door_open_is_a_technical_error_never_a_head_pri
         !resp.errors.is_empty(),
         "a fold failure must ERROR the read, never fall back to a price, got data {:?}",
         resp.data.into_json()
+    );
+    // The classification its own name promises: `technical_error`, never the business-shaped
+    // `PriceUnresolvable` rejection (`:1103`'s pattern, mirrored) — a fold failure is a repository
+    // failure, not a business decision that this specific offer is unresolvable.
+    assert!(
+        !resp.errors[0].message.contains("PriceUnresolvable"),
+        "a fold failure is technical_error, never the business PriceUnresolvable classification: {:?}",
+        resp.errors[0].message
     );
 }
 

@@ -966,6 +966,57 @@ mod tests {
         );
     }
 
+    /// PROP-20260831-134539:557 (round 2, obs NB8) — the AT-HEAD shape's late-bound fields must
+    /// each be a DECLARED ATTRIBUTE on the `catalog.as_of.fold` contract row in
+    /// `specs/observability.yaml`, not merely declared as a `tracing` span field: the two can drift
+    /// independently (a field removed from the spec while the Rust constructor still declares it,
+    /// or vice versa), and [`catalog_as_of_fold_declares_every_recorded_field`] only ever checked
+    /// the Rust side. This test reads the CONTRACT itself.
+    #[test]
+    fn catalog_as_of_fold_at_head_declares_every_late_bound_field() {
+        // `business.version` is late-bound on the AT-HEAD shape specifically (unlike the bounded
+        // `as_of` shape, which is handed the coordinate up front); the other three are late-bound
+        // on both shapes.
+        let late_bound = [
+            "business.version",
+            "business.rows_read",
+            "business.events_applied",
+            "business.failure_reason",
+        ];
+
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let observability_yaml = manifest_dir.join("../../specs/observability.yaml");
+        let contents = std::fs::read_to_string(&observability_yaml)
+            .unwrap_or_else(|e| panic!("read {}: {e}", observability_yaml.display()));
+
+        // Isolate the `catalog.as_of.fold` span's OWN block: from its `- name:` line up to
+        // whichever comes first, the next span entry (block-mapping style, `- name: "..."`) or the
+        // `metrics:` key that closes the enclosing contract's `spans:` list. Metric entries use
+        // flow-mapping style (`- { name: "...", ... }`) so they never match the span pattern.
+        let start = contents
+            .find("- name: \"catalog.as_of.fold\"")
+            .expect("catalog.as_of.fold span declared in specs/observability.yaml");
+        let after = &contents[start..];
+        let next_span = after[1..].find("\n    - name: \"").map(|i| i + 1);
+        let next_metrics = after.find("\n  metrics:");
+        let end = match (next_span, next_metrics) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => after.len(),
+        };
+        let block = &after[..end];
+
+        for attr in late_bound {
+            assert!(
+                block.contains(&format!("key: \"{attr}\"")),
+                "the {attr} late-bound field must stay a DECLARED attribute on the \
+                 catalog.as_of.fold contract row in specs/observability.yaml -- undeclared \
+                 attribute: {attr}"
+            );
+        }
+    }
+
     /// A minimal VALUE-capturing layer (unlike `with_subscriber`'s `fmt` layer, which only proves a
     /// field is DECLARED): this actually records what `on_new_span` receives, so a test can assert a
     /// field was RECORDED with a real value, not merely declared `Empty` and never populated —

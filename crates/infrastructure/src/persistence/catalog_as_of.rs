@@ -193,16 +193,21 @@ impl PgAsOfCatalogRepository {
     /// payload sizes over EVERY row returned (technical rows included, before
     /// [`Self::decode_rows`] drops them), because L's cost is bytes, not length (dba: one
     /// 500-product `CatalogImported` resync is ~200 KB in 0.05% of L).
+    ///
+    /// **`payload_bytes` is read straight off Postgres, never re-serialized per row** (round 2, the
+    /// PROP-20260831-134539 §12 payload_bytes lever, HEAD of the cheapest-lever order): the
+    /// previous form called `serde_json::to_vec` on every decoded `serde_json::Value` to re-measure
+    /// what Postgres had already told it, and that re-serialization — instrumentation living INSIDE
+    /// the timed leg, in PRODUCTION code — decomposed to roughly a third of the native `at_head`
+    /// cost at L=2,000 (~28 ms of ~114 ms). [`Self::fetch_all_rows_with_byte_total`] asks Postgres
+    /// for the sum instead (`sum(octet_length(payload::text)) OVER ()`, in the SAME query), so no
+    /// row is ever turned back into bytes in Rust.
     async fn load_to_head(
         &self,
         stream: &str,
     ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize, CatalogVersion, usize), DomainError> {
-        let rows = self.fetch_all_rows(stream).await?;
+        let (rows, payload_bytes) = self.fetch_all_rows_with_byte_total(stream).await?;
         let stream_length = rows.len();
-        let payload_bytes: usize = rows
-            .iter()
-            .map(|(_, _, payload)| serde_json::to_vec(payload).map(|v| v.len()).unwrap_or(0))
-            .sum();
         let highest = rows.iter().map(|(v, _, _)| *v).max();
         let Some(coordinate) = highest.and_then(CatalogVersion::try_new) else {
             return Err(db_err(format!(
@@ -212,6 +217,44 @@ impl PgAsOfCatalogRepository {
         };
         let events = Self::decode_rows(rows)?;
         Ok((events, stream_length, coordinate, payload_bytes))
+    }
+
+    /// [`Self::fetch_all_rows`]'s SAME rows, plus the total payload byte count Postgres computes in
+    /// the SAME query (`sum(octet_length(payload::text)) OVER ()`, one extra column expression on
+    /// every row, never a second round trip and never a second query). Kept SEPARATE from
+    /// `fetch_all_rows` on purpose: the DB-gated benchmark times `fetch_all_rows` directly as "the
+    /// SQL leg alone" (`crates/infrastructure/tests/as_of_catalog_read.rs`), and that shape must
+    /// stay exactly what it always was — widening its row shape would move the goalposts under an
+    /// existing, unrelated measurement. `pub` for the SAME reason `fetch_rows`/`fetch_all_rows`/
+    /// `decode_rows` are: the DB-gated test needs to verify the reported byte total directly,
+    /// against `sum(octet_length(payload::text))` computed independently.
+    pub async fn fetch_all_rows_with_byte_total(
+        &self,
+        stream_name: &str,
+    ) -> Result<(Vec<RawRow>, usize), DomainError> {
+        let rows = sqlx::query(
+            "SELECT version, event_type, payload, \
+             sum(octet_length(payload::text)) OVER () AS total_bytes \
+             FROM domain_events WHERE stream_name = $1 ORDER BY version",
+        )
+        .bind(stream_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        let mut total_bytes: usize = 0;
+        for row in &rows {
+            let row_version: i32 = row.try_get("version").map_err(db_err)?;
+            let event_type: String = row.try_get("event_type").map_err(db_err)?;
+            let payload: serde_json::Value = row.try_get("payload").map_err(db_err)?;
+            out.push((row_version as i64, event_type, payload));
+        }
+        if let Some(first) = rows.first() {
+            let bytes: i64 = first.try_get("total_bytes").map_err(db_err)?;
+            total_bytes = bytes.max(0) as usize;
+        }
+        Ok((out, total_bytes))
     }
 }
 

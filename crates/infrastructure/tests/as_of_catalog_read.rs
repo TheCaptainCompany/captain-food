@@ -341,6 +341,69 @@ async fn at_head_refuses_a_catalog_that_was_never_created() {
     );
 }
 
+/// PROP-20260831-134539 §12 round 2 (QUOTE-MINT-PRECONDITIONS item (2), the payload_bytes lever) —
+/// `payload_bytes` must come straight off Postgres, never a re-serialization of the decoded rows:
+/// the reported total equals `sum(octet_length(payload::text))`, computed INDEPENDENTLY by a plain
+/// `SELECT` against the same stream, never by re-running the adapter's own arithmetic. Mutant: the
+/// card's own — report 0 bytes — would fail this trivially; the real regression this guards is a
+/// FUTURE reintroduction of per-row `serde_json::to_vec` that silently drifts from what Postgres
+/// actually stored (e.g. a different JSON key ordering or whitespace).
+#[tokio::test]
+async fn payload_bytes_equals_the_fixtures_octet_length() {
+    let Some(db) = common::TestDb::acquire("as_of_catalog_read_payload_bytes").await else { return };
+    let pool = db.pool();
+
+    let catalog_id = uuid::Uuid::new_v4();
+    let restaurant_id = uuid::Uuid::new_v4();
+    let product_id = uuid::Uuid::new_v4();
+    let offer_id = uuid::Uuid::new_v4();
+    let stream = domain::catalog::stream(CatalogId(catalog_id));
+
+    append_event(
+        &pool,
+        &stream,
+        1,
+        "CatalogCreated",
+        serde_json::json!({ "catalogId": catalog_id, "restaurantId": restaurant_id, "name": "Main" }),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        2,
+        "ProductAdded",
+        product_payload(catalog_id, restaurant_id, product_id, offer_id, "Margherita", 1500),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        3,
+        "ProductUpdated",
+        product_payload(catalog_id, restaurant_id, product_id, offer_id, "Margherita", 1900),
+    )
+    .await;
+
+    // The INDEPENDENT reference: computed by a plain SELECT, never by calling back into the
+    // adapter's own code.
+    let expected_bytes: i64 =
+        sqlx::query_scalar("SELECT sum(octet_length(payload::text)) FROM domain_events WHERE stream_name = $1")
+            .bind(&stream)
+            .fetch_one(&pool)
+            .await
+            .expect("independent octet_length sum");
+
+    let repo = PgAsOfCatalogRepository::new(pool.clone());
+    let (rows, reported_bytes) =
+        repo.fetch_all_rows_with_byte_total(&stream).await.expect("fetch_all_rows_with_byte_total");
+    assert_eq!(rows.len(), 3, "the fixture's three seeded rows");
+    assert_eq!(
+        reported_bytes as i64, expected_bytes,
+        "payload_bytes must equal the fixture's own sum(octet_length(payload::text)), read straight \
+         off Postgres -- never re-derived by re-serializing the decoded rows"
+    );
+}
+
 /// PROP-20260831-134539:548 (#921 item 13(b), slice 3a deliverable 5) — the benchmark fixture's L
 /// claim is VERIFIED against the stream it actually built, via `SELECT max(version)`, never assumed
 /// from the seeding loop's own counters. Mutant: seed fewer rows than L claims while still printing
@@ -531,6 +594,17 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
         remaining,
     )
     .await;
+
+    // The PIN (beck NB5 = dba NB3, round 2): THIS benchmark's own stream is verified to actually be
+    // L events long, via `SELECT max(version)` -- never trusted from the seeding loop's own
+    // arithmetic (`the_benchmark_fixture_is_actually_l_events_long` pins a SEPARATE, smaller
+    // fixture; this pins the one every arm below actually measures against).
+    let head: i32 = sqlx::query_scalar("SELECT max(version) FROM domain_events WHERE stream_name = $1")
+        .bind(&stream)
+        .fetch_one(&pool)
+        .await
+        .expect("max version");
+    assert_eq!(head, L, "the benchmark's own stream must actually be L events long");
 
     let repo = PgAsOfCatalogRepository::new(pool.clone());
 
