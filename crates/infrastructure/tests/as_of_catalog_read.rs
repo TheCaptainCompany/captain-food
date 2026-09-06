@@ -341,6 +341,46 @@ async fn at_head_refuses_a_catalog_that_was_never_created() {
     );
 }
 
+/// PROP-20260831-134539:548 (#921 item 13(b), slice 3a deliverable 5) — the benchmark fixture's L
+/// claim is VERIFIED against the stream it actually built, via `SELECT max(version)`, never assumed
+/// from the seeding loop's own counters. Mutant: seed fewer rows than L claims while still printing
+/// the larger L.
+#[tokio::test]
+async fn the_benchmark_fixture_is_actually_l_events_long() {
+    let Some(db) = common::TestDb::acquire("as_of_catalog_read_fixture_honesty").await else { return };
+    let pool = db.pool();
+
+    const L: i32 = 2_000;
+    let catalog_id = uuid::Uuid::new_v4();
+    let restaurant_id = uuid::Uuid::new_v4();
+    let offer_id = uuid::Uuid::new_v4();
+    let stream = domain::catalog::stream(CatalogId(catalog_id));
+
+    append_event(
+        &pool,
+        &stream,
+        1,
+        "CatalogCreated",
+        serde_json::json!({ "catalogId": catalog_id, "restaurantId": restaurant_id, "name": "Main" }),
+    )
+    .await;
+    bulk_seed_offer_stock_updates(&pool, &stream, catalog_id, restaurant_id, offer_id, 2, L - 1).await;
+
+    // The PIN: the benchmark's L claim is checked against the stream's ACTUAL head version, via
+    // `SELECT max(version)` — never trusted from the seeding loop's own arithmetic (which is exactly
+    // what a seeding bug, or a card that changes L in one place and not another, would get wrong
+    // silently).
+    let head: i32 = sqlx::query_scalar("SELECT max(version) FROM domain_events WHERE stream_name = $1")
+        .bind(&stream)
+        .fetch_one(&pool)
+        .await
+        .expect("max version");
+    assert_eq!(
+        head, L,
+        "the benchmark fixture claims L={L} events but the stream's actual head version is {head}"
+    );
+}
+
 /// PROP-20260831-134539:547 (red-first, round 2; THE FARLEY GATE) — the version RETURNED by a real
 /// `EventStore::append` is the exact coordinate `as_of` reads: appending a further event must never
 /// be visible through a read at the version returned BEFORE that append. Mutant: reintroduce the `+1`
