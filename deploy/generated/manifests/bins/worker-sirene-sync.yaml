@@ -61,7 +61,6 @@ spec:
                     secretKeyRef:
                       name: captain-secrets
                       key: HONEYCOMB_API_KEY
-                      optional: true
               resources:
                 requests:
                   cpu: 25m

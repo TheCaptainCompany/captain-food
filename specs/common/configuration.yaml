@@ -21,8 +21,18 @@ description: >
     - type      : bool | string | int | enum. `bool` accepts true/1/yes/on and false/0/no/off,
                   case-insensitive, trimmed, quotes stripped (ADR-20260728-224500) — an unrecognised
                   value falls back to `default` AND logs that it did.
-    - required  : list of PROFILES in which the key MUST be present. Absent/[] = never required.
-                  A missing required key is reported WITH EVERY OTHER missing key and the app STOPS.
+    - required  : list of PROFILES in which the key MUST be present at BOOT. A missing required key
+                  is reported WITH EVERY OTHER missing key and the app STOPS. Absent (never
+                  written) and explicit `[]` mean the SAME thing for boot — never required — but
+                  they mean two different things for the DEPLOY secret gate (round 3, R3-1,
+                  ADR-20260815-015422): an ABSENT `required:` still demands the secret be
+                  PROVISIONED before release (the ordinary, fatal-if-missing case); an EXPLICIT
+                  `required: []` on a `secret: true` key additionally DECLARES the secret may be
+                  absent at deploy too (a genuinely optional, dark-feature secret like
+                  `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`) — the gate then reports its absence as
+                  `missing-optional`, non-fatal, instead of failing the release. Writing `[]` on a
+                  key that is not actually dark-feature-optional silently widens a blocking gate;
+                  say so in the key's `gates:` prose when you do.
     - default   : value when unset. Required keys must not declare one (it would mask the requirement).
     - secret    : true = the value is NEVER rendered — logs and status surfaces report `set`/`unset`.
     - gates     : WHAT BREAKS without it, in one sentence. This is not a comment: it is printed next to

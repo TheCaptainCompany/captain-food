@@ -156,10 +156,15 @@ pub(crate) fn bin_config_scopes(b: &BinSpec, model: &Model) -> BTreeSet<String> 
 /// as before. NOTE the SIRENE ingestion keys (`consumer: sirene_ingest`) deliberately declare NO
 /// production `from_secret` today — GitHub Actions injects them directly — so the
 /// worker-sirene-sync pod env stays without them until the #358 cutover gives them a deploy
-/// source (recorded there). `optional` is `k.required.is_empty()` — the spec's own `required:`
-/// list, never a second hand-maintained flag (round 2, R2-1): a key never required at boot (like
-/// `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`) must not be able to block the release path the way a
-/// genuinely required secret does.
+/// source (recorded there). `optional` is `k.secret && k.required_declared && k.required.is_empty()`
+/// — round 3, R3-1: an ABSENT `required:` and an EXPLICIT `required: []` used to fold into the
+/// same empty `Vec`, so this gate could not tell "never declared" from "declared optional" and 14
+/// secrets nobody ever marked optional silently flipped fatal->non-fatal. The declared posture
+/// (ADR-20260815-015422) is now spelled out: a key is optional at deploy ONLY when the spec
+/// EXPLICITLY writes `required: []` on it (like `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` — never
+/// required at boot, so it must not be able to block the release path the way a genuinely
+/// required secret does); a key that never mentions `required:` at all stays fatal, exactly as a
+/// key `required: [staging, production]` does.
 pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, String, String, bool)> {
     parse_config_keys(model)
         .into_iter()
@@ -173,7 +178,7 @@ pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, Stri
                 .or_else(|| model.origins.get(&("configuration.yaml".to_string(), k.name.clone())))
                 .cloned()
                 .unwrap_or_else(|| KERNEL_SCOPE.to_string());
-            let optional = k.required.is_empty();
+            let optional = k.secret && k.required_declared && k.required.is_empty();
             Some((k.name, scope, k.consumer, repo_secret, optional))
         })
         .collect()

@@ -57,31 +57,26 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: SUPABASE_SMS_HOOK_SECRET
-                  optional: true
             - name: SUPABASE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: SUPABASE_SECRET_KEY
-                  optional: true
             - name: HONEYCOMB_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: HONEYCOMB_API_KEY
-                  optional: true
             - name: EXTERNAL_API_TOKENS
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: EXTERNAL_API_TOKENS
-                  optional: true
             - name: INTERNAL_TRIGGER_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: INTERNAL_TRIGGER_TOKEN
-                  optional: true
             - name: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
               valueFrom:
                 secretKeyRef:
@@ -93,25 +88,21 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: OVH_APPLICATION_KEY
-                  optional: true
             - name: OVH_APPLICATION_SECRET
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: OVH_APPLICATION_SECRET
-                  optional: true
             - name: OVH_CONSUMER_KEY
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: OVH_CONSUMER_KEY
-                  optional: true
             - name: OVH_SMS_SERVICE_NAME
               valueFrom:
                 secretKeyRef:
                   name: captain-secrets
                   key: OVH_SMS_SERVICE_NAME
-                  optional: true
             - name: EMAIL_QUOTA_KEY_HMAC_SECRET
               valueFrom:
                 secretKeyRef:

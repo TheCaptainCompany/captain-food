@@ -8437,6 +8437,52 @@ fn the_deployed_monolith_has_a_generated_manifest() {
     );
 }
 
+/// Round 3, R3-1: the deploy secret gate's `optional` flag must come from an EXPLICIT `required:
+/// []` on a `secret: true` key, never from an ABSENT `required:` folding into the same empty
+/// `Vec` (ADR-20260815-015422 -- a declared posture, never a constructor fallback). Before the
+/// fix, `k.required.is_empty()` could not tell the two apart and every secret that simply never
+/// mentions `required:` silently became optional too. On the real spec catalog exactly ONE
+/// production secret key writes `required: []`: `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`.
+#[test]
+fn only_the_explicitly_declared_optional_secret_is_optional() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let optional_keys: Vec<String> = production_secret_keys(&model)
+        .into_iter()
+        .filter(|(_, _, _, _, optional)| *optional)
+        .map(|(name, _, _, _, _)| name)
+        .collect();
+    assert_eq!(
+        optional_keys,
+        vec!["PLATFORM_BOOTSTRAP_ADMIN_SUBJECT".to_string()],
+        "exactly one production secret key may be optional at deploy -- an absent `required:` \
+         must stay fatal, only an EXPLICIT `required: []` on a `secret: true` key may declare \
+         `missing-optional`; got {optional_keys:?}"
+    );
+
+    // The generated contract must agree: `secret-keys.json` carries `optional: true` on that one
+    // key alone.
+    let pins = read_image_pins(&root).expect("pins parse");
+    let tree = emit_deploy_tree(&model, &pins);
+    let secret_keys_json = tree
+        .iter()
+        .find(|(p, _)| p == "secret-keys.json")
+        .map(|(_, c)| c.as_str())
+        .expect("secret-keys.json emitted");
+    let parsed: serde_json::Value = serde_json::from_str(secret_keys_json).expect("valid JSON");
+    let keys = parsed["keys"].as_object().expect("keys object");
+    let optional_in_json: Vec<&String> = keys
+        .iter()
+        .filter(|(_, v)| v["optional"].as_bool() == Some(true))
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(
+        optional_in_json,
+        vec!["PLATFORM_BOOTSTRAP_ADMIN_SUBJECT"],
+        "secret-keys.json must carry `optional: true` on PLATFORM_BOOTSTRAP_ADMIN_SUBJECT alone"
+    );
+}
+
 /// The pin ledger drives the Deployment image: a recorded digest is baked in (digest-pinned,
 /// ADR-20260730-051500 -- never a moving tag); a null pin renders the deliberately-undeployable
 /// `:unpinned` tag, so an unpinned bin can never silently deploy `latest`.
@@ -9114,6 +9160,7 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
         ty: "string".into(),
         values: Vec::new(),
         required: Vec::new(),
+        required_declared: false,
         default: None,
         secret,
         gates: String::new(),

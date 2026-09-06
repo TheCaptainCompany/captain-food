@@ -7,6 +7,15 @@ pub(crate) struct ConfigKey {
     pub(crate) ty: String,
     pub(crate) values: Vec<String>,
     pub(crate) required: Vec<String>,
+    /// Whether `required:` was EXPLICITLY written in the spec, distinct from `required.is_empty()`
+    /// (round 3, R3-1): the loader used to fold an ABSENT `required:` into the same empty `Vec` as
+    /// an explicit `required: []`, so a deploy-gate reader asking "may this secret be absent at
+    /// deploy?" could not tell "never declared" from "declared optional" — 14 secrets nobody ever
+    /// marked optional flipped `secretKeyRef.optional: true` in `deploy/generated/secret-keys.json`
+    /// (ADR-20260815-015422: a declared posture, never a constructor fallback). RUNTIME
+    /// requiredness (`Config::from_env`, boot-time missing-key checks) still reads `required`
+    /// itself and is UNCHANGED by this field; only the deploy secret gate's optionality consults it.
+    pub(crate) required_declared: bool,
     pub(crate) default: Option<String>,
     pub(crate) secret: bool,
     pub(crate) gates: String,
@@ -75,6 +84,7 @@ pub(crate) fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
                 .and_then(|v| v.as_sequence())
                 .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default(),
+            required_declared: node.get("required").and_then(|v| v.as_sequence()).is_some(),
             default,
             secret: node.get("secret").and_then(|v| v.as_bool()).unwrap_or(false),
             gates: str_at("gates").unwrap_or_default(),
