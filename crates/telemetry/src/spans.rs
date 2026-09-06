@@ -684,6 +684,45 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
     }
 }
 
+/// `catalog.as_of.fold` (INTERNAL) — the as-of price-fold READ, end to end: SQL + decode + fold
+/// (PROP-20260831-134539 slice 2 of "the priced quote token", DARK — no production caller yet, no
+/// `specs/observability.yaml` contract row: it lands with slice 4 once a caller supplies a real
+/// correlation id, per the round-2 card's deliberate deviation from the round-1 shape).
+///
+/// `business.version` is the requested coordinate, known at construction. `business.stream_length`
+/// (rows returned, technical rows included) and `business.events_applied` (business events the fold
+/// actually applied) are late-bound — known only once the read completes — and DECLARED here so
+/// [`record_catalog_as_of_fold`] is not a silent no-op (the same trap `command.validate`'s
+/// `service_window_verdict` and `cart.price`'s `otel.status_code` exist to avoid: `tracing` cannot
+/// add a field that was not declared when the span was created).
+///
+/// `business.correlation_id` is declared `Empty` and deliberately left UNSET this slice — there is no
+/// caller to supply a real one yet, so recording a placeholder would be worse than an honest absence.
+///
+/// `business.head_version` is DELIBERATELY ABSENT: recording it would need a second HEAD read this
+/// capability does not perform, and inventing one only to populate a span would add exactly the
+/// extra round trip `graphql-architect`'s presentation-pass CATCH warned against.
+pub fn catalog_as_of_fold(aggregate_id: &str, version: i64) -> Span {
+    tracing::info_span!(
+        "catalog.as_of.fold",
+        otel.kind = "internal",
+        business.aggregate_id = aggregate_id,
+        business.version = version,
+        business.correlation_id = Empty,
+        business.stream_length = Empty,
+        business.events_applied = Empty,
+    )
+}
+
+/// Record the as-of read's two late-bound counts on `catalog.as_of.fold` — `stream_length` (rows
+/// returned, technical rows included) and `events_applied` (business events the fold actually
+/// applied; invariant: `events_applied <= stream_length` and the highest row version returned equals
+/// the requested `business.version`, or the adapter would already have failed closed).
+pub fn record_catalog_as_of_fold(span: &Span, stream_length: usize, events_applied: usize) {
+    span.record(attr::STREAM_LENGTH, stream_length as i64);
+    span.record(attr::EVENTS_APPLIED, events_applied as i64);
+}
+
 /// `rider.standing.denied` (INTERNAL) — the `StandingGuard`'s own carve-out-tested RIDER denial
 /// (`rider-restriction` contract, #639 part C step 4-i round 2 item 6(a)). Round 1 declared this
 /// span in `observability.yaml` but the runtime only ever emitted a bare `tracing::info!` EVENT —
@@ -828,6 +867,25 @@ mod tests {
              technical_error rule (any_span_errors) could NEVER fire and every unresolvable price \
              would classify as a success"
         );
+
+        let as_of = catalog_as_of_fold("catalog-1", 42);
+        record_catalog_as_of_fold(&as_of, 43, 42);
+        let af = as_of.metadata().unwrap().fields();
+        assert!(af.field(attr::AGGREGATE_ID).is_some());
+        assert!(af.field(attr::VERSION).is_some(), "business.version is set at construction");
+        assert!(
+            af.field(attr::CORRELATION_ID).is_some(),
+            "business.correlation_id is late-bound but declared -- dark this slice, but a caller \
+             that later records it must not find a silent no-op"
+        );
+        assert!(
+            af.field(attr::STREAM_LENGTH).is_some(),
+            "business.stream_length is late-bound but declared"
+        );
+        assert!(
+            af.field(attr::EVENTS_APPLIED).is_some(),
+            "business.events_applied is late-bound but declared"
+        );
     }
 
     /// The OTel span KIND is part of each contract (`kind: SERVER` etc). It travels as the `otel.kind`
@@ -854,6 +912,7 @@ mod tests {
             auth_scope_membership("ORDER", "CUSTOMER"),
             claims_stamp(),
             reminder_promote("OrderAcceptanceTimedOut", true),
+            catalog_as_of_fold("catalog-1", 1),
         ];
         for s in spans {
             let meta = s.metadata().expect("span has metadata");

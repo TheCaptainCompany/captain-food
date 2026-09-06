@@ -514,8 +514,16 @@ mod tests {
         .await
         .expect("HEAD prices the line");
 
-        // The as-of fold, independently, at V = HEAD.
-        let as_of = AsOfCatalog::from_stream(&events, events.len() as i64 - 1);
+        // The as-of fold, independently, at V = HEAD -- the SAME 1-based version numbering the
+        // `Envelope`/projector loop above already uses (`position: i as i64 + 1`).
+        use domain::catalog_as_of::CatalogVersion;
+        let versioned_events: Vec<(CatalogVersion, DomainEvent)> = events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (CatalogVersion::try_new(i as i64 + 1).unwrap(), e.clone()))
+            .collect();
+        let head = CatalogVersion::try_new(events.len() as i64).unwrap();
+        let as_of = AsOfCatalog::from_stream(&versioned_events, head);
         let as_of_price =
             as_of.price_of(offer_id, &[option_id]).expect("as-of prices the same offer");
 

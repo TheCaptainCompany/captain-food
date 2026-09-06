@@ -3,7 +3,7 @@
 //! application → domain edge at compile time.
 
 use async_trait::async_trait;
-use domain::catalog_as_of::AsOfCatalog;
+use domain::catalog_as_of::{AsOfCatalog, CatalogVersion};
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{CatalogId, GbpLinkStatus, WebUrl};
 use domain::shared::{errors::DomainError, identifiers::RestaurantId};
@@ -238,6 +238,14 @@ pub trait EventStore: Send + Sync {
 /// through the back door). The returned [`AsOfCatalog`] is a RESOLVED VALUE: it holds no repo handle,
 /// so a caller cannot use it to keep reading past the coordinate it was built at.
 ///
+/// `version` is [`CatalogVersion`] — the coordinate IS the stream version the event store returned on
+/// append (`EventStore::append`'s return, `event_store.rs:90`; ADR-20260808-171056, 1-based), NEVER
+/// the live head, and NEVER a port-invented 0-based convention (round 2 correction: an earlier draft
+/// of this port took a bare `i64` with a `+1` at the SQL boundary — one more unit than `append`
+/// already returns, which would silently price one event past the coordinate a caller names). **A
+/// coordinate beyond head is an ERROR**, not a HEAD price: the adapter fails closed rather than
+/// clamping (round 2, vernon B1/young B1).
+///
 /// DARK in this slice: no production caller. The Postgres adapter
 /// (`crates/infrastructure/src/persistence/...`) reads through a RANGE read on the event store
 /// (`WHERE stream_name = $1 AND version <= $2`), decoding the event PAYLOAD only — never retaining
@@ -246,8 +254,13 @@ pub trait EventStore: Send + Sync {
 #[async_trait]
 pub trait AsOfPriceAuthority: Send + Sync {
     /// The catalog's prices at `version` (inclusive), reconstructed from the `Catalog-<catalogId>`
-    /// stream up to and including that coordinate.
-    async fn as_of(&self, catalog_id: CatalogId, version: i64) -> Result<AsOfCatalog, DomainError>;
+    /// stream up to and including that coordinate. `Err` when `version` is absent or beyond head —
+    /// never a HEAD price for a coordinate that does not exist.
+    async fn as_of(
+        &self,
+        catalog_id: CatalogId,
+        version: CatalogVersion,
+    ) -> Result<AsOfCatalog, DomainError>;
 }
 
 /// Google Business Profile ownership-proof verification (ADR-0019: "delegate ownership proof to
