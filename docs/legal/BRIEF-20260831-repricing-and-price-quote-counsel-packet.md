@@ -336,6 +336,36 @@ not answered here:
 Questions, not answers — carried forward to 3b/4's design, where the signed quote and its stored
 shape are decided.
 
+### (g) NEW AT SLICE 3b+4 — CQ-7 (the refusal's information duty)
+
+Named at the slice 3b+4 briefing (2026-09-06,
+[ADR-20260906-192007](../adr/ADR-20260906-192007-slice-3b-and-the-command-change-land-as-expand-contract-behind-an-interlocked-write-door-with-the-refusal-set-enumerated.md)):
+that record enumerates a refusal set (structural rejections, `QuoteNoLongerHonoured`, a fold
+technical error) that all surface through **one cause-neutral customer screen** — ux's draft, quoted
+in that ADR as a draft for counsel, never clearance — and requires that a `PaymentIntent` be created
+before verify runs (D-F: verify sits in the pre-payment guard block, before the Stripe call) but is
+never captured on any refusal path. Two questions on what that screen must say, not answered here:
+
+- **CQ-7a — does a no-cause refusal discharge the information duty on a refused distance order?**
+  The consumer sees "we could not confirm your total" with no cause named (deliberately, per the
+  design's own fence against implying "the price changed" for causes that are not price changes at
+  all — a forged token, a stale cart edit). Does French distance-selling information-duty law
+  (the L112-1/L221-5 posture already carried at §7's L5, this brief's §3 disclosure floor) accept a
+  refusal that states no cause at all, or does refusing an order still trigger a duty to state SOME
+  reason, even a generic one, distinct from the duty to disclose a REPRICE (which this design is
+  careful never to name)?
+- **CQ-7b — must "nothing was charged" say anything more when a `PaymentIntent` was created and not
+  captured?** The design's copy says "your card was not charged and no authorization was taken" —
+  but a `PaymentIntent` in manual-capture mode (`ADR-20260808-195315` §1.2) DOES place an
+  authorization hold at creation, released (not "never taken") on cancellation or expiry. Is stating
+  "no authorization was taken" accurate consumer-facing language for a hold that WAS placed and then
+  released, or does the information duty require distinguishing "no charge, and any hold has been
+  released" from "no hold was ever placed" — and does the timing of the release (immediate vs. the
+  card network's own settlement window) change the answer?
+
+Questions, not answers — carried forward to the 3b+4 deliverable's own copy review (the team's
+reviewer pass, not counsel, discharges nothing here); **prepared for counsel, never clearance.**
+
 ---
 
 ## 8. Sequencing — and this is the practical output of QT-8 / QT-9

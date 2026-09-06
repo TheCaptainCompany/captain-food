@@ -473,6 +473,75 @@ Consulted (one line per lens asked; the class is a reversible refactor — ADR-2
 - farley — NB7: 'no other hunk under THIS licence'; the fence stays enforceable only if each licence is judged by
   its own conditions.
 
+**Seventh carve-out recorded 2026-09-06 (consent vernon + reviewer; TEAM-DECIDES-OPTION-SPACES;
+recorded on `main` BEFORE the branch, per reviewer's own rule that the fourth and sixth carve-outs
+were each recorded only after a card-directed touch — the recurring gap this one closes), for
+[PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) §11 item 4 (slice 3b
++ the command change, ONE deliverable), decided by
+[ADR-20260906-192007](ADR-20260906-192007-slice-3b-and-the-command-change-land-as-expand-contract-behind-an-interlocked-write-door-with-the-refusal-set-enumerated.md):**
+three hunks, licensed together because they are one indivisible write-side guard:
+
+(a) **one additive `steps:`/`guard:` entry in `specs/ordering/processmanager.yaml`'s `PlaceOrder`
+receives: chain**, declaring the quote-verify step and its `throws:` `$ref`, strictly BEFORE the
+payment call — structurally REPLACING the `:93` `PriceMismatch` guard rather than adding beside it
+(the guard it replaces is deleted in the same hunk, so this carve-out's own "zero deleted lines"
+condition below is scoped to every OTHER fenced file, never to this one line of
+`processmanager.yaml` itself).
+
+(b) **one added argument at the `PlaceOrder` arm in `crates/infrastructure/src/mailbox/pm_delivery.rs`**
+(the only production call site of `application::commands::place_order`), in exactly the
+`enforce_service_hours_guard` shape (PR #885's second carve-out, above): the arm reads one more field
+off `CommandDeps` and threads it as one more argument, no call-site decision, no branching added at
+the call site itself.
+
+(c) **the matching `CommandDeps` field in `crates/infrastructure/src/inbox.rs` and its construction
+in `crates/infrastructure/src/mailbox/standalone.rs`** — noting that because the signing key is a
+DECLARED `configuration.yaml` key (`secret: true`, `required: [staging, production]`, no default —
+ADR-20260906-192007 D-H), (c) is not a NEW shape at all: it reduces to the second carve-out's own
+precedent, byte-for-byte, the same way `enforce_service_hours_guard` itself is read off `CommandDeps`
+today.
+
+Conditions, all five or the STOP stands: (1) additive-only outside hunk (a)'s own guard-replace line
+— `git diff origin/main -- crates/infrastructure/src/mailbox/pm_delivery.rs crates/infrastructure/src/inbox.rs crates/infrastructure/src/mailbox/standalone.rs | grep -c '^-[^-]'`
+is `0`, and `processmanager.yaml`'s diff is exactly the one-guard replace of hunk (a); (2) no
+routing, lease, fencing, lane, dispatch-arm, ordering or catch-all machinery touched in any of the
+three files; (3) hunk (b) is ONE argument threaded, never a call-site decision — the verify LOGIC
+itself lives in `commands.rs`, unfenced; (4) each hunk carries a comment naming this carve-out,
+because the executor's self-check is a path grep and the next reader must find the licence in the
+file; (5) no other hunk under THIS licence — a hunk under another numbered carve-out is that
+carve-out's, judged by its own conditions. **STOP, explicitly, for the avoidance of the #922 lesson
+repeated**: any hunk in `crates/application/src/process_managers/**` (including
+`place_order.rs`), `crates/infrastructure/src/mailbox/handler.rs`, `crates/actor_runtime/**`, or
+either emitter (`tools/codegen-rs/src/emit/actor_inbox.rs`,
+`tools/codegen-rs/src/emit/pm_orchestrators.rs`) — a forced `pm_orchestrators.rs` change is a STOP,
+not a licence to extend this carve-out; the executor hands back instead.
+
+Cost that earned it: the briefing found the brief's own claim that this deliverable "will need
+`crates/application/src/process_managers/**`" was itself a card defect (vernon) — the command leg
+(`PlaceOrder`) is unfenced `commands.rs`, and only the EVENT legs
+(`PaymentAuthorized`/`PaymentFailed`) live in `process_managers/**`; recording the true shape here,
+before the card, removes the ambiguity the brief's own text would otherwise have handed the
+executor.
+
+Consulted (one line per lens asked; the class is `HOLD: human` — money movement — full mob at the
+briefing, ADR-20260816-134352, but the carve-out ITSELF is a reversible fence amendment judged by
+the narrower set below, as the fourth, fifth and sixth carve-outs were):
+- vernon — consent; the carve-out licenses exactly one guard replace, one threaded argument and one
+  reduced-to-precedent `CommandDeps` field; the verify logic stays in `commands.rs`, unfenced, said
+  in those words; no lane, lease, fencing token, dispatch arm or ordering is touched by any of the
+  three hunks.
+- reviewer — consent; recorded on `main` before the branch closes the gap the fourth and sixth
+  carve-outs each left open (recorded only after a card-directed touch); the STOP list names the
+  `process_managers/**`/`handler.rs`/`actor_runtime/**`/emitter paths explicitly so a forced
+  `pm_orchestrators.rs` change cannot be mistaken for licensed.
+- architect — the carve-out's shape matches the fence's own text (the command leg's only production
+  call site is `pm_delivery.rs:95`, confirmed against the fenced-path list above); the design fork
+  (the key as a configuration key, not a port) is closed FIRST so (c) reduces to the second
+  carve-out's shape rather than needing a new one.
+- farley — the key as a `configuration.yaml` secret key (D-H) is what makes (c) a non-event; the
+  door itself stays interlocked (D-B) so the write-side guard this carve-out licenses can never run
+  ahead of the read-side capability it depends on.
+
 ## Consulted, §8 third carve-out (2026-09-05, PR #901 round 3)
 
 The `RecordLeg::RestaurantInvitation` shape (#639 part C step 6-iv) was read against the fence
