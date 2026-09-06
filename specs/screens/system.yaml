@@ -134,10 +134,10 @@ bottom_sheets:
   admin_sign_in_confirmation_sheet:
     id: admin_sign_in_confirmation_sheet
     type: bottom_sheet
-    title: { $ref: 'system.translations.yaml#/sys.sign_in.title' }
+    title: { $ref: 'system.translations.yaml#/sys.sign_in.confirmation_title' }
     sections:
       - { type: text, value: { $ref: 'system.translations.yaml#/sys.sign_in.confirmation_body' } }
-      - { type: button, id: admin_sign_in_confirmation_close, label: { $ref: 'system.translations.yaml#/sys.sign_in.title' }, variant: outline, action: { type: close_sheet } }
+      - { type: button, id: admin_sign_in_confirmation_close, label: { $ref: 'system.translations.yaml#/sys.sign_in.close' }, variant: outline, action: { type: close_sheet } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
@@ -353,7 +353,7 @@ screens:
     data_requirements: []
     actions_used: [request_admin_sign_in_link]
     gaps:
-      - "No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — \"authenticate access to Captain's internal tools\" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) is NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note (legal, ADR-20260906-023825, round 2 R2-L1 precedent). ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here."
+      - "No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — \"authenticate access to Captain's internal tools\" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) plus the LCEN art. 6 III (mentions légales) obligation are NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note carries. ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here."
       - "The link-expiry countdown and a delayed resend re-enable need a client-side timer/countdown primitive this DSL does not declare (the restaurant_backoffice.yaml sign_in screen's own gap): the resend control is always active instead (the wall is server-side, harmless)."
     components:
       - type: sticky_header
@@ -418,7 +418,7 @@ screens:
     data_requirements: []
     actions_used: []
     gaps:
-      - "No legal/privacy link exists on this surface yet (no such page exists anywhere in the product today) -- the same absence the sign_in screen's own gaps note carries."
+      - "No legal/privacy link exists on this surface yet (no such page exists anywhere in the product today) -- the same absence the sign_in screen's own gaps note carries, including the LCEN art. 6 III (mentions légales) obligation."
       - "No exit control exists on this screen by design (ux STOP, 2026-09-06 briefing): #94 (real sign-out) is the named follow-up that unblocks one, since a navigate-to-/sign-in control would loop on the still-valid ADMIN-claimed cookie."
       - "The verified-email echo limitation (the restaurant_backoffice.yaml not_linked screen's own gap, :~994): no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, so the refused address is not printed here."
     components:
