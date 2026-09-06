@@ -315,9 +315,10 @@ async fn at_head_prices_the_live_head_and_returns_its_coordinate() {
     append_event(&pool, &stream, 3, "ProductUpdated", product(1900)).await;
 
     let repo = PgAsOfCatalogRepository::new(pool.clone());
-    let (as_of, coordinate) = repo.at_head(CatalogId(catalog_id), uuid::Uuid::nil()).await.expect("at_head reads the live head");
-    assert_eq!(coordinate, CatalogVersion::try_new(3).unwrap(), "at_head must return version 3, the live head");
-    assert_eq!(as_of.coordinate(), coordinate, "AsOfCatalog::coordinate must equal the returned coordinate");
+    // The tuple collapse (ADR-20260906-192007 D-L): `at_head` returns `AsOfCatalog` alone now --
+    // its own `.coordinate()` IS the coordinate, not a second value that could disagree.
+    let as_of = repo.at_head(CatalogId(catalog_id), uuid::Uuid::nil()).await.expect("at_head reads the live head");
+    assert_eq!(as_of.coordinate(), CatalogVersion::try_new(3).unwrap(), "at_head must return version 3, the live head");
     let price = as_of.price_of(OfferId(offer_id), &[]).expect("offer exists at head");
     assert_eq!(price.unit_price.amount_cents.0, 1900, "at_head must price the LATEST update, not a stale one");
 }

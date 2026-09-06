@@ -177,17 +177,25 @@ keys:
     runKind: door
     decisionRow: QUOTE-MINT-PRECONDITIONS
     gates: >
-      The priced-read mint (PROP-20260831-134539 slice 3a, D2/D4): ON, `cart.current`/`cart`/`carts`
-      price the cart from `AsOfPriceAuthority::at_head` — ONE unbounded range read of the
-      `Catalog-<id>` stream, returning `(AsOfCatalog, CatalogVersion)` as ONE value, never a second
-      read and never a caller-supplied expectation to check against. The coordinate is
-      server-carried only in this slice: it travels inside the read and is DROPPED at the reply
-      boundary — no `catalogVersion` field, no input, no entities.yaml property (D3; the published
-      `quote` word is slice 3b's). OFF is NOT a fallback of a failed fold: it is TODAY'S read,
-      stated explicitly as the closed arm — `CatalogSnapshot::load` + `price_cart` against the live
-      catalog PROJECTION, exactly as it has always run, carrying no coordinate. A fold failure with
-      the door OPEN (the coordinate absent, or the stream unreadable) is
-      `technical_error` through the EXISTING unresolvable-at-read path
+      The priced read's fold arm (PROP-20260831-134539 slice 3a, D2/D4) — corrected wording,
+      ADR-20260906-192007 D-L: "mint" is reserved for slice 3b's `QuoteMinter` (D-H), which signs a
+      quote; this key gates a READ, and reading the fold is not minting anything. ON, `cart.current`
+      and `cart` price the cart from `AsOfPriceAuthority::at_head` — ONE unbounded range read of the
+      `Catalog-<id>` stream, returning an `AsOfCatalog` that carries its own coordinate
+      (`AsOfCatalog::coordinate`; the tuple collapse, ADR-20260906-192007 D-L: `at_head` no longer
+      returns a second, separately-checked `CatalogVersion` that could disagree with the value's own
+      field), never a second read and never a caller-supplied expectation to check against. The
+      `carts` LIST fan-out (one row per restaurant) does NOT participate in this door at all —
+      structurally, not by convention: its own entry point (`cart_read::priced_list`) carries no
+      witness parameter to open it, closed by the type system rather than left to this flag (D-L;
+      dba's saturation concern — N restaurants would otherwise mean N unbounded head folds inside one
+      request). The coordinate is server-carried only in this slice: it travels inside the read and
+      is DROPPED at the reply boundary — no `catalogVersion` field, no input, no entities.yaml
+      property (D3; the published `quote` word is slice 3b's). OFF is NOT a fallback of a failed
+      fold: it is TODAY'S read, stated explicitly as the closed arm — `CatalogSnapshot::load` +
+      `price_cart` against the live catalog PROJECTION, exactly as it has always run, carrying no
+      coordinate. A fold failure with the door OPEN (the coordinate absent, or the stream unreadable)
+      is `technical_error` through the EXISTING unresolvable-at-read path
       (`errors.yaml#/PriceUnresolvable`'s sibling classification, ADR-20260810-112836 §6) — NEVER a
       HEAD/projection fallback, and never presented as a price change. `decisionRow` binds this key
       to `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open): the phase-0 latency budget, the

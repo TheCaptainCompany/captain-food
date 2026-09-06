@@ -173,7 +173,7 @@ impl application::ports::AsOfPriceAuthority for Empty {
         &self,
         _catalog_id: domain::generated::scalars::CatalogId,
         _correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         Err(DomainError::Repository("Empty never folds".into()))
     }
 }

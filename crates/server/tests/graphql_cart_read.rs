@@ -167,7 +167,7 @@ impl application::ports::AsOfPriceAuthority for Empty {
         &self,
         _catalog_id: ds::CatalogId,
         _correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         Err(DomainError::Repository("Empty never folds".into()))
     }
 }
@@ -344,7 +344,7 @@ impl application::ports::AsOfPriceAuthority for FakeAsOf {
         &self,
         catalog_id: ds::CatalogId,
         correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.last_correlation_id.lock().expect("lock") = Some(correlation_id);
         if catalog_id != self.catalog_id {
@@ -361,7 +361,7 @@ impl application::ports::AsOfPriceAuthority for FakeAsOf {
             .map(|(i, e)| (domain::catalog_as_of::CatalogVersion::try_new(i as i64 + 1).unwrap(), e.clone()))
             .collect();
         self.last_coordinate.store(head.get(), std::sync::atomic::Ordering::SeqCst);
-        Ok((domain::catalog_as_of::AsOfCatalog::from_stream(&versioned, head), head))
+        Ok(domain::catalog_as_of::AsOfCatalog::from_stream(&versioned, head))
     }
 }
 
@@ -381,7 +381,7 @@ impl application::ports::AsOfPriceAuthority for FailingAsOf {
         &self,
         _catalog_id: ds::CatalogId,
         _correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         Err(DomainError::Repository("catalog not created".into()))
     }
 }

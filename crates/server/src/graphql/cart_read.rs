@@ -9,10 +9,20 @@
 //! - [`readable_by`] — the by-id claim-ownership narrowing (#144/#434);
 //! - [`priced`] — money-free row → priced GraphQL `Cart` under the `cart-price` observability
 //!   contract (span + histogram + defect counter live HERE, the framework boundary — both pricers
-//!   stay SDK-free): CLOSED (`RUN_FOLD_PRICED_CART_READ` off, default everywhere) prices via
-//!   `price_cart` over a one-read [`CatalogSnapshot`], unchanged since #451; OPEN prices via
-//!   `price_cart_at` over the SAME snapshot plus ONE `AsOfPriceAuthority::at_head` range read,
-//!   carrying no coordinate past this function (PROP-20260831-134539 slice 3a, D2-D4).
+//!   stay SDK-free): CLOSED (no witness, default everywhere) prices via `price_cart` over a
+//!   one-read [`CatalogSnapshot`], unchanged since #451; OPEN ([`FoldPricedReadOpen`] present)
+//!   prices via `price_cart_at` over the SAME snapshot plus ONE `AsOfPriceAuthority::at_head`
+//!   range read, carrying no coordinate past this function (PROP-20260831-134539 slice 3a, D2-D4).
+//!
+//! **The `carts` fan-out narrowing** (ADR-20260906-192007 D-L, compiler-first per
+//! ADR-20260803-234035 level 4): `priced`'s old `door_open: bool` parameter let EVERY cart read —
+//! including the multi-restaurant `carts` LIST — open the fold-priced door, which would mean N
+//! unbounded head folds inside one request (dba's saturation concern; 3b already doubles the fold
+//! count per single-cart checkout, D-M). [`priced_list`] is the `carts` fan-out's only entry point
+//! and its signature carries no witness parameter at all — there is no value the fan-out's
+//! generated call site could pass to open the door, so the fan-out staying CLOSED is a fact the
+//! type system states, not a runtime flag the fan-out happens to leave off. [`priced`] keeps the
+//! witness parameter for the two SINGLE-cart-read entry points (`cart`, `current`) only.
 
 use application::ports::AsOfPriceAuthority;
 use application::pricing::{price_cart, price_cart_at, CatalogSnapshot};
@@ -96,6 +106,26 @@ pub fn readable_by(row: &CartRow, scope: &ReadScope) -> bool {
     }
 }
 
+/// The fold-priced door's OPEN state — a WITNESS, not a `bool` (ADR-20260906-192007 D-L). The only
+/// constructor is [`FoldPricedReadOpen::from_flag`]; a caller with `flag = false` gets `None`, and
+/// there is no other way to produce `Some`. [`priced_list`] (the `carts` fan-out) never calls this
+/// constructor and never receives a value of this type — its own signature has nowhere to put one
+/// — so the multi-restaurant list cannot mint N unbounded head folds in one request regardless of
+/// the door's runtime position, closed by the type system rather than by a convention the fan-out
+/// could accidentally violate later.
+#[derive(Debug, Clone, Copy)]
+pub struct FoldPricedReadOpen(());
+
+impl FoldPricedReadOpen {
+    /// `Some` when the door's own config flag is open; `None` otherwise. The two single-cart-read
+    /// entry points (`cart`, `current`) are the only emitted call sites for this constructor —
+    /// `carts` reads no door flag at all (D-L: the `ctx.data::<RunFoldPricedCartRead>()` call the
+    /// fan-out used to make is dead code once it calls [`priced_list`] instead, and is removed).
+    pub fn from_flag(flag: bool) -> Option<Self> {
+        flag.then_some(Self(()))
+    }
+}
+
 /// Money-free row → priced GraphQL `Cart`, the ONE pricing path for every cart read
 /// (rules.yaml#/CartPricedFromLiveCatalog): parse the row's repricing inputs, load the live
 /// catalog ONCE ([`CatalogSnapshot`] — N lines, 1 read), price via `price_cart`, and map into
@@ -120,13 +150,14 @@ pub fn readable_by(row: &CartRow, scope: &ReadScope) -> bool {
 pub async fn priced(
     catalogs: &dyn CatalogReadRepository,
     // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2/D4): the fold-priced read authority
-    // and the door that gates it. CLOSED (default everywhere) = today's read, below, unchanged —
-    // stated explicitly as its own arm, never as a fallback. OPEN = the SAME snapshot resolves
-    // `catalog_id`, then ONE `at_head` call returns prices AND the coordinate they were bounded at
-    // as one value; the coordinate is used to price via `price_cart_at` and DROPPED here — it
-    // reaches no reply field, no input, no command (D3).
+    // and the door that gates it. CLOSED (`door` is `None`, default everywhere) = today's read,
+    // below, unchanged — stated explicitly as its own arm, never as a fallback. OPEN (`door` is
+    // `Some`) = the SAME snapshot resolves `catalog_id`, then ONE `at_head` call returns prices
+    // carrying their own coordinate ([`AsOfCatalog::coordinate`], ADR-20260906-192007 D-L's tuple
+    // collapse); the coordinate is used to price via `price_cart_at` and DROPPED here — it reaches
+    // no reply field, no input, no command (D3).
     authority: &dyn AsOfPriceAuthority,
-    door_open: bool,
+    door: Option<FoldPricedReadOpen>,
     row: CartRow,
     // The already clock-evaluated navigation target (RSO-1): built ONCE by the resolver via
     // `Restaurant::at` with the request clock — a `RestaurantRow` here would force this seam to
@@ -162,7 +193,7 @@ pub async fn priced(
             // projected row, for `catalog_id` and (in the OPEN arm) display metadata — never
             // re-loaded, never a second `by_restaurant` call.
             let snapshot = CatalogSnapshot::load(catalogs, row.restaurant_id).await?;
-            if door_open {
+            if door.is_some() {
                 // The CLOSED arm's own "no catalog" case falls out of `price_cart`'s per-line
                 // `offer_by_id` lookup naturally; mirrored here so the OPEN arm fails the SAME way
                 // for the SAME input rather than inventing a second unresolvable shape.
@@ -172,12 +203,12 @@ pub async fn priced(
                         serde_json::json!({ "cartId": row.cart_id, "offerId": lines[0].offer_id }),
                     ));
                 };
-                // THE mint (D2): one unbounded range read to head, returning prices and the
-                // coordinate they were bounded at as one value. `Err` here (coordinate absent,
-                // stream unreadable) falls straight through to the SAME `map_err` below as any
-                // other pricing failure — technical_error, never a HEAD/projection fallback (D4,
-                // every lens's STOP).
-                let (as_of, _coordinate) = authority.at_head(catalog_id, correlation_id).await?;
+                // THE mint (D2): one unbounded range read to head, returning prices carrying their
+                // own coordinate (the tuple collapse, ADR-20260906-192007 D-L). `Err` here
+                // (coordinate absent, stream unreadable) falls straight through to the SAME
+                // `map_err` below as any other pricing failure — technical_error, never a
+                // HEAD/projection fallback (D4, every lens's STOP).
+                let as_of = authority.at_head(catalog_id, correlation_id).await?;
                 price_cart_at(&snapshot, &as_of, row.cart_id, row.restaurant_id, &lines).await
             } else {
                 price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await
@@ -240,6 +271,28 @@ pub async fn priced(
         telemetry::spans::record_cart_price_error(&span);
         e
     })
+}
+
+/// The `carts` FAN-OUT entry point (ADR-20260906-192007 D-L) — the customer's carts LIST, one row
+/// per restaurant. Always CLOSED, structurally: this signature carries no [`FoldPricedReadOpen`]
+/// parameter at all, so there is no value the generated `carts` resolver could pass to reach the
+/// fold-priced arm, whatever the door's runtime config says. `authority` is threaded through only
+/// because it delegates to [`priced`], which still declares one — it is never actually called on
+/// this path, since `door` is always `None` below.
+///
+/// Why the fan-out is narrowed rather than left to the same door as the two single-cart reads
+/// (dba, D-L, D-M): the door's own precondition register models ONE fold per read; `carts` returns
+/// one row PER RESTAURANT, so opening the door here would multiply that by however many
+/// restaurants the caller has an open cart at, inside a single request — the exact unbounded-fold
+/// shape the dedicated fold pool (D-K) exists to bound, but for N reads at once rather than one.
+pub async fn priced_list(
+    catalogs: &dyn CatalogReadRepository,
+    authority: &dyn AsOfPriceAuthority,
+    row: CartRow,
+    restaurant: Restaurant,
+    correlation_id: uuid::Uuid,
+) -> async_graphql::Result<Cart> {
+    priced(catalogs, authority, None, row, restaurant, correlation_id).await
 }
 
 /// The zero-lines cart: the honest sum of nothing, not a fabricated payable. Shares one

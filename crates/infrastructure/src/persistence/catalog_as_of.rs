@@ -303,7 +303,7 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
         &self,
         catalog_id: CatalogId,
         correlation_id: uuid::Uuid,
-    ) -> Result<(AsOfCatalog, CatalogVersion), DomainError> {
+    ) -> Result<AsOfCatalog, DomainError> {
         let stream = domain::catalog::stream(catalog_id);
         let span = telemetry::spans::catalog_as_of_fold_at_head(
             &catalog_id.0.to_string(),
@@ -325,7 +325,7 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
             telemetry::spans::record_catalog_as_of_fold_version(&span_for_record, coordinate.get());
             telemetry::meters::catalog_as_of::stream_length(stream_length as f64);
             telemetry::meters::catalog_as_of::payload_bytes(payload_bytes as f64);
-            Ok((catalog, coordinate))
+            Ok(catalog)
         }
         .instrument(span)
         .await;
