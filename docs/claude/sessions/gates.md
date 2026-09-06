@@ -91,7 +91,7 @@ entry was caught only by CI. The fix for an unused dependency is to DELETE it, n
 `[package.metadata.cargo-machete] ignored` entry — the whole point of the D6 step is that an
 unheld capability someone can silently start using is a hole.
 
-So the honest local pre-push gate for `crates/**` work is three commands, not one:
+So the honest local pre-push CHECK for `crates/**` work (a check, never a gate — a gate is executable and blocking, and CI is the gate) is three commands, not one:
 
 ```bash
 make rust && cargo test --workspace && cargo machete
@@ -468,6 +468,20 @@ it destroys the failure ENUMERATION — the per-suite detail naming which tests 
 away above the final summary line, so a red run tells you it failed but not where, and the only
 recovery is running the whole target again (cost: one full re-run of a failing target,
 2026-08-15; again 2026-09-06 on #920 round 3, where a background `make test-crates | tail -N` left a log of doc-test noise with no verdict and cost a full DB-gated re-run). Redirect to a file IN THE SCRATCHPAD and grep it for `test result: FAILED`, `panicked` and `error[`; never window a test run through `tail`. The environment rule "never redirect a workspace test run to an uncapped log" is about a RUNAWAY suite filling the disk, not a licence to pipe through `tail` — a dispatch card that quotes the first rule must quote this one beside it.
+
+**A `runKind: door` key's standalone `declare_flag` is a pre-recorded fence carve-out** — see ADR-20260904-081527 §8's
+standing clause (2026-09-06): a card introducing a door key checks the fleet-parity test's two hardcoded root paths
+against its own Fence section BEFORE dispatch; the second executor STOP of this class (#922) is what earned the clause.
+
+**Pre-push checks on confirmation rounds (founder decision 2026-09-06, [ADR-20260906-152024](../../adr/ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md) §1).**
+Round 1 of a PR runs the full local set (`make validate`, `make rust`, the DB-gated workspace `make test-crates`,
+`cargo clippy --workspace`, `make check-drift`). A confirmation round (2 or 3) runs `make validate` plus the tests
+and clippy of the transitive REVERSE-dependency closure of the crates it touched (`cargo tree --invert`), plus
+`tools/codegen-rs` whenever `specs/**`, generated artifacts, migrations or manifests are touched; a diff touching
+`migrations/**` or `specs/database/**` expands to the full DB-gated set (`-j 1`); a diff touching `specs/screens/**`
+runs the whole screen-binding validator. The terminating clause: the hand-back's *green* and the ready flip mean
+**CI green on the head**, never a subset-green local run. Until `make gate-round` exists (#923) the executor
+derives the set by hand and lists it in the hand-back.
 
 **A direct-to-`main` dispatch never pushes a red-first commit alone.** On a branch, "one commit per
 deliverable, push after each" is right: CI gates every push and a red test between two pushes costs

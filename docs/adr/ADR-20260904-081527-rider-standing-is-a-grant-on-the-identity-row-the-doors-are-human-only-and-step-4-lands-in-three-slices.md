@@ -421,6 +421,38 @@ Briefing before any code; **no lens output is legal advice or clearance**.
   `op-uncovered-by-story` is an ERROR; the fence globs recorded nowhere; the stale antecedent;
   ADR-20260810-194548 as the origin decision.
 
+## §8 fifth carve-out and the standing clause (2026-09-06, PR #922, slice 3a of PROP-20260831-134539)
+
+**Fifth carve-out recorded 2026-09-06 (consent farley + vernon; TEAM-DECIDES-OPTION-SPACES):** ONE additive
+`declare_flag` line plus its `env_flag` default for the new door key `RUN_FOLD_PRICED_CART_READ` in
+`crates/infrastructure/src/mailbox/standalone.rs`, and nothing else in any fenced file. Conditions, all four or the
+executor's STOP stands: (1) byte-parallel to the monolith root's declaration — same key string, default `false`,
+deploy-dark; exactly `declare_flag("RUN_FOLD_PRICED_CART_READ", env_flag("RUN_FOLD_PRICED_CART_READ", false))`,
+no `CommandDeps` field, no threading, no sibling `door_enforcing` gauge; (2) additive only — zero deleted lines
+across the §8 fence globs on the branch; (3) no other hunk anywhere in the fence; (4) a comment on the line naming
+this carve-out, because the executor's self-check is a path grep and the next reader must find the licence in the
+file. Cost that earned it: the slice-3a executor stopped correctly mid-run (deliverables 2–6 deferred) because the
+card named `runKind: door` and fenced `mailbox/**` without addressing that the fleet-parity gate
+(ADR-20260905-223957 §5, ADR-20260906-113444) makes the standalone `declare_flag` GATE-FORCED for every door key —
+the second STOP of this class (#909 was the first).
+
+**Standing clause (farley, vernon):** for every `runKind: door` key introduced after this date, the bare
+`declare_flag` + `env_flag` default at the standalone root is a PRE-RECORDED carve-out under the same four
+conditions — safe because it is not discretionary (the parity test forces it; its population is spec-derived from
+`configuration.yaml`). Scope: exactly those two lines. Everything else in the fence stays case-by-case, the
+`door_enforcing` sibling gauge included (6-iii carved it once, deliberately). Re-read this clause if the parity
+test's population filter or the door/worker split changes. gates.md and the dispatch-card template carry a
+POINTER here; a template cannot amend a fence. Card-writer rule (the executor's, recorded): a card introducing a
+`runKind: door` key checks the parity test's two hardcoded root paths against its own Fence section BEFORE
+dispatch — a door key and a `mailbox/**` fence are jointly exhaustive on `standalone.rs`.
+
+Consulted (one line per lens asked; the class is a reversible refactor — ADR-20260816-134352):
+- farley — consent; the gate demands both roots because a fleet split in a release gate is the failure it exists
+  to catch; refusing its mechanical output would make the gate the obstacle rather than the verdict; the record is
+  §8, never a template.
+- vernon — consent; a declaration at a composition root touches no lane, lease, fencing token, dispatch arm or
+  ordering; scope the standing clause to the two lines; the sibling gauge stays case-by-case.
+
 ## Consulted, §8 third carve-out (2026-09-05, PR #901 round 3)
 
 The `RecordLeg::RestaurantInvitation` shape (#639 part C step 6-iv) was read against the fence

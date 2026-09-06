@@ -4,6 +4,15 @@ Part of [`../sessions.md`](../sessions.md).
 
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
+> **Founder decision 2026-09-06 (verbatim: *"Increase the disk allowance so the build cache stays"*)**, recorded
+> under `/decision`: the allowance is to be raised so `target/debug/deps` is never cleared mid-lane. The
+> action is his — the allowance is an environment setting on the Claude Code environment, admin-gated,
+> not something a session can change (docs: https://code.claude.com/docs/en/claude-code-on-the-web). Until a
+> session observes the larger allowance (`df -h /` at start), every rule in this section stands. Cost that
+> earned it: on 2026-09-06 the 22 GB `deps` cache was cleared twice under a running lane and each clear cost
+> a ~20-minute full rebuild on the next executor run. No lens was consulted: a small subject with no
+> option space and an action only the founder can perform (proportionality, CLAUDE.md).
+
 `df` reporting `Avail 0` with a low `Used` figure means the **allowance** is spent, not that the
 machine is broken. Writes fail with `No space left on device` while **deletes still succeed** — and
 freed space is immediately writable.
