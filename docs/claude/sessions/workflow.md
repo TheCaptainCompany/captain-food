@@ -821,8 +821,10 @@ true of every case at every stage**: RF4 (`Red-first: none` at 0 hits) was GREEN
 for the wrong reason — the rule never fired at 0 hits, so `none` was accepted by the rule's absence,
 never by being read and found true. [#914](https://github.com/TheCaptainCompany/captain-food/issues/914)
 made the 0-hit arm actually validated and re-proved RF4 red-first against the shipped shape
-(mutant: re-gate the parse behind `rf_hit_count -gt 0`). **What the gate checks and what it does
-not**, the same honesty limit Lane D already states about itself:
+(mutant: delete the `[Nn]one*` ALLOW arm — RF4's own real mutant; re-gating the parse behind
+`rf_hit_count -gt 0` is a DIFFERENT mutant, and reds RF4b/RF4d, never RF4, since it only disables
+the validation the 0-hit arm needed, not the ALLOW arm itself). **What the gate checks and what it
+does not**, the same honesty limit Lane D already states about itself:
 CHECKABLE — presence of the section, resolution of `<record>:<line>`, and shape of the entry.
 NOT CHECKABLE — that the named test is real, that it was EVER actually seen red, or that the
 extraction from the cited record is COMPLETE (every line that "names a test" is a judgement call
