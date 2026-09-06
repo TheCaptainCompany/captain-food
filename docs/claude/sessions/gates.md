@@ -468,6 +468,14 @@ it destroys the failure ENUMERATION — the per-suite detail naming which tests 
 away above the final summary line, so a red run tells you it failed but not where, and the only
 recovery is running the whole target again (cost: one full re-run of a failing target,
 2026-08-15; again 2026-09-06 on #920 round 3, where a background `make test-crates | tail -N` left a log of doc-test noise with no verdict and cost a full DB-gated re-run). Redirect to a file IN THE SCRATCHPAD and grep it for `test result: FAILED`, `panicked` and `error[`; never window a test run through `tail`. The environment rule "never redirect a workspace test run to an uncapped log" is about a RUNAWAY suite filling the disk, not a licence to pipe through `tail` — a dispatch card that quotes the first rule must quote this one beside it.
+
+**A direct-to-`main` dispatch never pushes a red-first commit alone.** On a branch, "one commit per
+deliverable, push after each" is right: CI gates every push and a red test between two pushes costs
+nothing. On a spec- or docs-only change that goes straight to `main`, the same wording put a red
+codegen test on `main` for the minutes between the red commit and the fix (#921 item 1, 2026-09-06,
+caught by the coordinator, not by a gate — direct-to-`main` has none between commits). The card
+wording for a direct-to-`main` dispatch is: show the red locally and quote it in the hand-back; push
+red + green TOGETHER, once, after every gate is green.
 **The output is unreadable in BOTH directions, which is why the exit code is the only verdict.**
 A GREEN `check-drift` is SILENT — it prints no success line at all (`Makefile:74-75`: the only
 output is the failure `echo`), and the `✓ wrote <artifact>` list you see scroll past comes from its
