@@ -723,7 +723,7 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "PlatformMember",
         stream_prefixes: &["PlatformMembership-"],
         projectors: &[ReadModelProjector::PlatformMember],
-        scope: "network",
+        scope: "common",
     },
     // The restaurant's own team roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
     // amendment, PROP-20260831-180622 §6.4): its OWN checkpoint group, born at 0 -- the `Member`

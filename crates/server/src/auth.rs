@@ -3102,8 +3102,23 @@ mod read_scope_tests {
             ReadScope::Public
         );
 
-        // Role decisions, no claims involved.
-        assert_eq!(read_scope(&principal(RequestRole::Admin, "s", None)), ReadScope::Admin);
+        // ADMIN joined RIDER as a role whose scope is NEVER a claims function (#639 part C step
+        // 6-v, ADR-20260905-223957 §2): `role_path` now mints `Identity::Unbound` for ADMIN, and
+        // only the seam (`resolve_platform_scope`) can produce `Identity::Admin` on a live
+        // `PlatformMembership` grant -- the SAME shape as the RIDER block above, transposed.
+        let p = principal(RequestRole::Admin, "s", None);
+        assert_eq!(read_scope(&p), ReadScope::Public, "an admin token never resolves without Postgres");
+        assert_eq!(
+            p.recorded_role(),
+            RequestRole::Public,
+            "and until the seam binds it an admin token is Unbound: it records PUBLIC, not the \
+             role it asserts — the #849 re-presentation lesson, transposed onto ADMIN"
+        );
+        assert_eq!(
+            p.acting_role(RequestRole::Admin).get(),
+            RequestRole::Public,
+            "and acts as PUBLIC on the write half, for the same reason"
+        );
         assert_eq!(read_scope(&Principal::anonymous()), ReadScope::Public);
         assert_eq!(read_scope(&principal(RequestRole::External, "s", None)), ReadScope::Public);
         assert_eq!(read_scope(&Principal::external_service()), ReadScope::Public);

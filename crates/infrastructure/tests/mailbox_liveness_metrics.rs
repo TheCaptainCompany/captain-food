@@ -533,6 +533,16 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // #639 part C step 6-iv (ADR-20260905-101349 SS2/SS3, the SAME fleet-parity lesson):
             // the invitation door's own release gate.
             ("RUN_RESTAURANT_INVITATION", deps.run_restaurant_invitation),
+            // #639 part C step 6-v (ADR-20260905-223957 SS5, the SAME fleet-parity lesson): the
+            // platform grant door's own release gate.
+            ("RUN_PLATFORM_ACCESS_GRANT", deps.run_platform_access_grant),
+            // A genuine PRE-EXISTING gap this round's `run_flag_parity` codegen test found: this
+            // fleet never serves the WebSocket the gate closes, but the fleet-parity EVIDENCE is
+            // still owed (declared at the monolith root, missing here before this fix). No
+            // `CommandDeps` field carries it -- `standalone_deps` reads the environment directly
+            // (`env_flag`, private to that module) -- so this pins the same default (`false`) the
+            // test's unset environment resolves to, the one honest value available from here.
+            ("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", false),
         ],
     );
 
