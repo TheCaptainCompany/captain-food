@@ -38,7 +38,11 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > `999`, a value `drain_group` never itself produces, defeating the SDK's cumulative-Gauge
 > re-export) — `left: Some(999), right: Some(0)` before D3, reproduced again by dropping the
 > re-record; (c) `a_zero_is_only_recorded_by_a_scan_that_observed_nothing_pending` (multi-page drain,
-> batch 2, three facts) — `left: Some(1), right: Some(0)` before D2; D4's new
+> batch 2, three facts) — `left: Some(1), right: Some(0)` before D2 — renamed at Round 2 confirmation
+> to `a_multi_page_drain_ending_in_a_short_page_still_ends_at_zero_with_every_fact_folded`: the
+> original name claimed a property (distinguishing an observed-empty scan from an inferred
+> short-page end) the test cannot cash — the reviewer's short-page mutant still passes it. That
+> undischarged property is carried forward under the original name in #936 item 3; D4's new
 > `a_malformed_restriction_timestamp_folds_to_occurred_at`
 > (`crates/application/src/projectors/rider_restriction.rs`) — `left: None, right: Some(2026-…)`
 > against `.parse().ok()`. At the CHECKPOINT, generalizing (b) to all FOUR gauges reproduced the

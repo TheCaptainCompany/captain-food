@@ -293,8 +293,14 @@ async fn the_rider_group_lag_gauge_is_re_recorded_on_an_idle_pass() {
 /// the identical final value here. D2's actual justification (a writer racing the short-page
 /// return) is a genuine, undischarged gap, exactly the class the module doc already names for the
 /// ">0 while behind" reading -- not attempted here for the same reason (a flaky gate, not a proof).
+///
+/// Named for what it pins, not for the property it cannot cash: the reviewer's short-page mutant
+/// (inferring 0 at the short page itself, never re-scanning) still passes all 5 assertions here,
+/// which is exactly the gap above. The undischarged concurrent-writer seam this test's ORIGINAL
+/// name claimed ("a zero is only recorded by a scan that observed nothing pending") is carried
+/// forward under that name in #936 item 3.
 #[tokio::test]
-async fn a_zero_is_only_recorded_by_a_scan_that_observed_nothing_pending() {
+async fn a_multi_page_drain_ending_in_a_short_page_still_ends_at_zero_with_every_fact_folded() {
     let Some(db) =
         common::TestDb::acquire("rider_standing_lag_metric_multi_page_short_tail").await
     else {

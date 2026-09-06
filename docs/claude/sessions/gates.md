@@ -975,7 +975,12 @@ is itself the argument: **a list that grows has no business stating its own leng
   test-crates` panics unless `DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres` is
   ALSO exported (`crates/db_test_gate/src/lib.rs`, the #474 inversion). A reviewer lost a full run
   to "cluster up, URL unset" on #849 after this section first said "alone suffices" — corrected
-  2026-09-03.
+  2026-09-03. ~~Do NOT `ALTER USER postgres …` over the socket (peer auth refuses it) and do not
+  reach for `su postgres -c` (the sandbox refuses it). A card that carried the `ALTER USER` step
+  cost one denied command per executor.~~ **Superseded 2026-09-06 (#876)**: struck, not deleted —
+  the #849 cost (one denied command per executor for the card that tried `ALTER USER`) was real and
+  measured THERE; it just does not generalize, per the next bullet, where the identical recipe
+  worked.
   **Did NOT hold on 2026-09-06 in the Lane B container (#876)**: the line above said *"the password
   is already `postgres`"* and *"do not reach for `su postgres -c` (the sandbox refuses it)"* — both
   false there. `PGPASSWORD=postgres psql -h localhost -U postgres -c 'select 1'` failed with
