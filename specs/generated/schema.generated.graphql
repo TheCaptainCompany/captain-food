@@ -78,6 +78,7 @@ scalar GatewayStatusCode
 scalar DialingCode
 scalar NationalPhoneNumber
 scalar OtpCode
+scalar PlatformMembershipId
 scalar ConversationMessageId
 scalar MessageBody
 scalar MuteReason
@@ -107,7 +108,6 @@ scalar TimeOfDay
 scalar ProspectionScore
 scalar MembershipId
 scalar RestaurantInvitationId
-scalar PlatformMembershipId
 scalar CartLineId
 scalar StarRating
 scalar RatingComment
@@ -313,6 +313,10 @@ enum CommandFailureReason {
   TRANSIENT_INFRASTRUCTURE
 }
 
+enum PlatformAccessBasis {
+  CAPTAIN_ONBOARDING
+}
+
 enum MessageVisibility {
   PUBLIC
   INTERNAL
@@ -493,10 +497,6 @@ enum RestaurantInvitationStatus {
   ACCEPTED
   REVOKED
   EXPIRED
-}
-
-enum PlatformAccessBasis {
-  CAPTAIN_ONBOARDING
 }
 
 enum ThumbRating {
@@ -1240,6 +1240,12 @@ input RequeueMailboxMessageInput {
   targetMessageId: MessageId!
 }
 
+input GrantPlatformAccessInput {
+  platformMembershipId: PlatformMembershipId!
+  authSubject: AuthSubject!
+  basis: PlatformAccessBasis!
+}
+
 input OpenConversationInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
@@ -1674,12 +1680,6 @@ input RevokeRestaurantInvitationInput {
 input AcceptRestaurantInvitationInput {
   invitationId: RestaurantInvitationId!
   token: EmailVerificationToken!
-}
-
-input GrantPlatformAccessInput {
-  platformMembershipId: PlatformMembershipId!
-  authSubject: AuthSubject!
-  basis: PlatformAccessBasis!
 }
 
 input AddCartLineInput {
@@ -2171,6 +2171,7 @@ type Mutation {
   updateOfferStock(input: UpdateOfferStockInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOfferStock")
   importCatalog(input: ImportCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "ImportCatalog")
   requeueMailboxMessage(input: RequeueMailboxMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RequeueMailboxMessage")
+  grantPlatformAccess(input: GrantPlatformAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantPlatformAccess")
   openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
   postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
   recordMessageTranslation(input: RecordMessageTranslationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "RecordMessageTranslation")
@@ -2239,7 +2240,6 @@ type Mutation {
   inviteRestaurantMember(input: InviteRestaurantMemberInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT]) @command(name: "InviteRestaurantMember")
   revokeRestaurantInvitation(input: RevokeRestaurantInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT]) @command(name: "RevokeRestaurantInvitation")
   acceptRestaurantInvitation(input: AcceptRestaurantInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "AcceptRestaurantInvitation")
-  grantPlatformAccess(input: GrantPlatformAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantPlatformAccess")
   addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
   removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
   changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")

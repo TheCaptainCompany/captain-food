@@ -150,7 +150,7 @@
       "actor": "PlatformMembership",
       "kind": "aggregate",
       "domain_crates": [
-        "domain-network"
+        "domain-common"
       ],
       "path": "crates/bins/actor-platform-membership"
     },

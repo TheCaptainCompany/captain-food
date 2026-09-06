@@ -511,3 +511,14 @@ pub struct NationalPhoneNumber(pub String);
 /// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OtpCode(pub String);
+
+/// Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names "one protected instance" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PlatformMembershipId(pub uuid::Uuid);
+
+/// WHY a `PlatformAccessGranted` fact was recorded -- a NEW closed scalar, deliberately NOT `network.yaml#/AccessBasis` (ADR-20260905-223957 §1, evans): that scalar's four values are RESTAURANT-worded (`OWNER_DECLARATION`, `MEMBER_INVITATION`, …) and reusing it here would let a platform grant carry a value that means nothing for the platform relationship, or worse, invite a future restaurant-only value onto this door by accident. One value today -- the grant records an operational ACT (Captain onboards its own person), never a corporate/governance status (business: SAS today, SCIC conversion deferred to M18; ASSOCIE/COOPERATEUR/MANDATAIRE/SALARIE are forbidden values, on this scalar as on `AccessBasis`). Closed and additive-only, same discipline as every other basis scalar in this scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum PlatformAccessBasis {
+    CAPTAIN_ONBOARDING,
+}

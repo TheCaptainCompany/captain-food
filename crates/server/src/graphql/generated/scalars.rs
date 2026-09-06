@@ -1961,6 +1961,42 @@ impl From<OtpCode> for ds::OtpCode {
     }
 }
 
+/// Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names "one protected instance" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct PlatformMembershipId(pub uuid::Uuid);
+async_graphql::scalar!(PlatformMembershipId, "PlatformMembershipId", "Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names \"one protected instance\" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.");
+impl From<ds::PlatformMembershipId> for PlatformMembershipId {
+    fn from(v: ds::PlatformMembershipId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<PlatformMembershipId> for ds::PlatformMembershipId {
+    fn from(v: PlatformMembershipId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// WHY a `PlatformAccessGranted` fact was recorded -- a NEW closed scalar, deliberately NOT `network.yaml#/AccessBasis` (ADR-20260905-223957 §1, evans): that scalar's four values are RESTAURANT-worded (`OWNER_DECLARATION`, `MEMBER_INVITATION`, …) and reusing it here would let a platform grant carry a value that means nothing for the platform relationship, or worse, invite a future restaurant-only value onto this door by accident. One value today -- the grant records an operational ACT (Captain onboards its own person), never a corporate/governance status (business: SAS today, SCIC conversion deferred to M18; ASSOCIE/COOPERATEUR/MANDATAIRE/SALARIE are forbidden values, on this scalar as on `AccessBasis`). Closed and additive-only, same discipline as every other basis scalar in this scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum PlatformAccessBasis {
+    #[graphql(name = "CAPTAIN_ONBOARDING")]
+    CAPTAIN_ONBOARDING,
+}
+impl From<ds::PlatformAccessBasis> for PlatformAccessBasis {
+    fn from(v: ds::PlatformAccessBasis) -> Self {
+        match v {
+            ds::PlatformAccessBasis::CAPTAIN_ONBOARDING => Self::CAPTAIN_ONBOARDING,
+        }
+    }
+}
+impl From<PlatformAccessBasis> for ds::PlatformAccessBasis {
+    fn from(v: PlatformAccessBasis) -> Self {
+        match v {
+            PlatformAccessBasis::CAPTAIN_ONBOARDING => Self::CAPTAIN_ONBOARDING,
+        }
+    }
+}
+
 /// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);
@@ -3257,42 +3293,6 @@ impl From<RestaurantInvitationStatus> for ds::RestaurantInvitationStatus {
             RestaurantInvitationStatus::ACCEPTED => Self::ACCEPTED,
             RestaurantInvitationStatus::REVOKED => Self::REVOKED,
             RestaurantInvitationStatus::EXPIRED => Self::EXPIRED,
-        }
-    }
-}
-
-/// Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names "one protected instance" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct PlatformMembershipId(pub uuid::Uuid);
-async_graphql::scalar!(PlatformMembershipId, "PlatformMembershipId", "Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names \"one protected instance\" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.");
-impl From<ds::PlatformMembershipId> for PlatformMembershipId {
-    fn from(v: ds::PlatformMembershipId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<PlatformMembershipId> for ds::PlatformMembershipId {
-    fn from(v: PlatformMembershipId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// WHY a `PlatformAccessGranted` fact was recorded -- a NEW closed scalar, deliberately NOT `network.yaml#/AccessBasis` (ADR-20260905-223957 §1, evans): that scalar's four values are RESTAURANT-worded (`OWNER_DECLARATION`, `MEMBER_INVITATION`, …) and reusing it here would let a platform grant carry a value that means nothing for the platform relationship, or worse, invite a future restaurant-only value onto this door by accident. One value today -- the grant records an operational ACT (Captain onboards its own person), never a corporate/governance status (business: SAS today, SCIC conversion deferred to M18; ASSOCIE/COOPERATEUR/MANDATAIRE/SALARIE are forbidden values, on this scalar as on `AccessBasis`). Closed and additive-only, same discipline as every other basis scalar in this scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum PlatformAccessBasis {
-    #[graphql(name = "CAPTAIN_ONBOARDING")]
-    CAPTAIN_ONBOARDING,
-}
-impl From<ds::PlatformAccessBasis> for PlatformAccessBasis {
-    fn from(v: ds::PlatformAccessBasis) -> Self {
-        match v {
-            ds::PlatformAccessBasis::CAPTAIN_ONBOARDING => Self::CAPTAIN_ONBOARDING,
-        }
-    }
-}
-impl From<PlatformAccessBasis> for ds::PlatformAccessBasis {
-    fn from(v: PlatformAccessBasis) -> Self {
-        match v {
-            PlatformAccessBasis::CAPTAIN_ONBOARDING => Self::CAPTAIN_ONBOARDING,
         }
     }
 }

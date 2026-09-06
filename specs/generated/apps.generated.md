@@ -34,13 +34,13 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 | **customer** | 8 | 2 | 6 | 0 | 1 | 6 |
 | **delivery** | 11 | 1 | 10 | 0 | 1 | 10 |
 | **order** | 17 | 0 | 17 | 0 | 0 | 17 |
-| **platform** | 12 | 3 | 9 | 0 | 1 | 10 |
-| **restaurant** | 8 | 2 | 6 | 0 | 0 | 6 |
+| **platform** | 9 | 3 | 6 | 0 | 1 | 7 |
+| **restaurant** | 11 | 2 | 9 | 0 | 0 | 9 |
 | **total** | **60** | **8** | **52** | **0** | **3** | **53** |
 
 **The verdicts:**
 
-- **No app spans two boundaries** -- not yet. 3 of 60 apps DECLARE crates from more than one business boundary (`pm-cart-binding` = customer+order; `pm-delivery-dispatch` = delivery+order; `bam` = catalog+customer+delivery+order). On the graph the build actually resolves, 53 do.
+- **No app spans two boundaries** -- not yet. 3 of 60 apps DECLARE crates from more than one business boundary (`pm-cart-binding` = customer+order; `pm-delivery-dispatch` = delivery+order; `bam` = catalog+customer+delivery+order+restaurant). On the graph the build actually resolves, 53 do.
 - **resolved == declared** -- 8 of 60 apps. 52 link domain crates their manifest never names.
 - **Which dependency carries the facade in** -- `bin_runtime` into 48, `infrastructure` into 9, `server` into 8, `stripe-adapter` into 5, `surface_runtime` into 5, `avelo37-adapter` into 2, `coopcycle-adapter` into 2, `uber-direct-adapter` into 2, `actor_client` into 1, `application` into 1, `hubrise-adapter` into 1. Splitting the crate at the top of that list is the single largest move available; section 4's `via` column says which apps it would free.
 - **Roles no bounded context claims** -- `ADMIN`, `EXTERNAL`. Their gateways are indexed under `platform` because nothing else is derivable, NOT because a context decided so; a `roles:` entry in `c4-l2.yaml` moves them with no edit here.
@@ -50,7 +50,7 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 
 Every workspace crate any app resolves, by the set of boundaries whose apps reach it AND by HOW MANY apps do.
 
-**No crate the apps reach is boundary-EXCLUSIVE: all 47 are linked from apps of two or more boundaries, and 23 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and no single family clears it -- the 8 `graphql-*` subgraphs cover 5 of those boundaries between them, so a maximal signature takes apps from more than one family. **The `apps` column is the one with resolution**: it counts how many of the 60 deployables actually link the crate, and it ranges from 8 to 60.
+**No crate the apps reach is boundary-EXCLUSIVE: all 47 are linked from apps of two or more boundaries, and 47 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover all 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 60 deployables actually link the crate, and it ranges from 8 to 60.
 
 | reached by | apps (of 60) | crates | which |
 |---|---:|---:|---|
@@ -58,12 +58,11 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 53 | 9 | `domain`, `domain-catalog`, `domain-common`, `domain-comms`, `domain-customer`, `domain-delivery`, `domain-network`, `domain-ordering`, `domain-payments` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 48 | 7 | `actor_client`, `actor_runtime`, `application`, `bin_runtime`, `client-restaurant`, `infrastructure`, `sirene_ingest` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 15 | 1 | `gateway_runtime` |
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 13 | 4 | `app-core`, `shared_types`, `surface_runtime`, `web` |
-| 5 boundaries (catalog, customer, delivery, order, platform) | 13 | 2 | `client-payment`, `stripe-adapter` |
-| 5 boundaries (catalog, customer, delivery, order, platform) | 12 | 1 | `client-delivery-job` |
-| 5 boundaries (catalog, customer, delivery, order, platform) | 10 | 3 | `avelo37-adapter`, `coopcycle-adapter`, `uber-direct-adapter` |
-| 5 boundaries (catalog, customer, delivery, order, platform) | 9 | 3 | `client-catalog`, `client-restaurant-account`, `hubrise-adapter` |
-| 5 boundaries (catalog, customer, delivery, order, platform) | 8 | 15 | `client-cart`, `client-conversation`, `client-customer`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-place-order-process`, `client-platform-membership`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-restaurant-invitation`, `client-restaurant-membership`, `client-rider`, `server` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 13 | 6 | `app-core`, `client-payment`, `shared_types`, `stripe-adapter`, `surface_runtime`, `web` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 12 | 1 | `client-delivery-job` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 10 | 3 | `avelo37-adapter`, `coopcycle-adapter`, `uber-direct-adapter` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 9 | 3 | `client-catalog`, `client-restaurant-account`, `hubrise-adapter` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 8 | 15 | `client-cart`, `client-conversation`, `client-customer`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-place-order-process`, `client-platform-membership`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-restaurant-invitation`, `client-restaurant-membership`, `client-rider`, `server` |
 
 **Reached by no deployable** -- 5 workspace crate(s): `captain-food-codegen`, `captain-food-secret-gate`, `client-customer-credit`, `db-test-gate`, `desktop`. Codegen, gates and the desktop shell are expected here. `client-customer-credit` is not: a generated actor client no app links is either an actor with no caller or a wiring gap, and this is the only artifact that would show it.
 
@@ -85,7 +84,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `actor-mailbox-supervision` | platform | lane `MailboxSupervision` | common | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `actor-order` | order | lane `Order` | common + ordering | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
 | `actor-payment` | order | lane `Payment` | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime` | 15 | -- |
-| `actor-platform-membership` | platform | lane `PlatformMembership` | network | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
+| `actor-platform-membership` | platform | lane `PlatformMembership` | common | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `actor-prospect` | restaurant | lane `Prospect` | network | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `actor-reclamation` | order | lane `Reclamation` | ordering | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `actor-restaurant` | restaurant | lane `Restaurant` | common + network | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
@@ -113,7 +112,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `projector-comms` | order | scope `comms`: 0 View_* + 1 projection table(s) | comms | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `projector-customer` | customer | scope `customer`: 1 View_* + 1 projection table(s) | customer | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `projector-delivery` | delivery | scope `delivery`: 2 View_* + 3 projection table(s) | delivery | **all 8** | **fat +7** | `bin_runtime` | 17 | -- |
-| `projector-network` | platform | scope `network`: 0 View_* + 7 projection table(s) | network | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
+| `projector-network` | restaurant | scope `network`: 0 View_* + 6 projection table(s) | network | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `projector-ordering` | order | scope `ordering`: 2 View_* + 3 projection table(s) | ordering | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `projector-payments` | order | scope `payments`: 1 View_* + 1 projection table(s) | payments | **all 8** | **fat +7** | `bin_runtime` | 15 | -- |
 
@@ -123,7 +122,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 |---|---|---|---|---|---|---|---:|---|
 | `worker-erasure` | platform | CronJob `15 * * * *` | -- | **all 8** | **fat +8** | `bin_runtime`, `infrastructure` | 2 | -- |
 | `worker-retention` | platform | CronJob `0 */6 * * *` | -- | **all 8** | **fat +8** | `bin_runtime`, `infrastructure` | 2 | -- |
-| `worker-sirene-sync` | platform | CronJob `0 3 * * 1` (SUSPENDED); hosts consumer(s) sirene_ingest | -- | **all 8** | **fat +8** | `bin_runtime`, `infrastructure` | 2 | **INSEE_API_TOKEN** (no production `from_secret` (injected outside the cluster)) |
+| `worker-sirene-sync` | restaurant | CronJob `0 3 * * 1` (SUSPENDED); hosts consumer(s) sirene_ingest | -- | **all 8** | **fat +8** | `bin_runtime`, `infrastructure` | 2 | **INSEE_API_TOKEN** (no production `from_secret` (injected outside the cluster)) |
 
 ### `adapter` -- 5 app(s)
 
@@ -140,11 +139,11 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
 | `graphql-catalog` | catalog | scope `catalog`: 2 quer(ies), 13 mutation(s), 0 subscription(s) | catalog | **all 8** | **fat +7** | `bin_runtime`, `server` | 14 | -- |
-| `graphql-common` | platform | scope `common`: 3 quer(ies), 1 mutation(s), 1 subscription(s) | common | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
+| `graphql-common` | platform | scope `common`: 3 quer(ies), 2 mutation(s), 1 subscription(s) | common | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
 | `graphql-comms` | order | scope `comms`: 2 quer(ies), 6 mutation(s), 0 subscription(s) | comms | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
 | `graphql-customer` | customer | scope `customer`: 2 quer(ies), 17 mutation(s), 0 subscription(s) | customer | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
 | `graphql-delivery` | delivery | scope `delivery`: 7 quer(ies), 17 mutation(s), 0 subscription(s) | delivery | **all 8** | **fat +7** | `bin_runtime`, `server` | 17 | -- |
-| `graphql-network` | platform | scope `network`: 7 quer(ies), 29 mutation(s), 0 subscription(s) | network | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
+| `graphql-network` | restaurant | scope `network`: 7 quer(ies), 28 mutation(s), 0 subscription(s) | network | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
 | `graphql-ordering` | order | scope `ordering`: 9 quer(ies), 21 mutation(s), 1 subscription(s) | ordering | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
 | `graphql-payments` | order | scope `payments`: 6 quer(ies), 2 mutation(s), 1 subscription(s) | payments | **all 8** | **fat +7** | `bin_runtime`, `server` | 15 | -- |
 

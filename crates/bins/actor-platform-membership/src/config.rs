@@ -286,20 +286,6 @@ pub struct Config {
     pub email_quota_key_hmac_secret: String,
     /// DEFAULT `50`. UNVERIFIED input (ADR-20260905-101349 §9): the per-role GraphQL depth/complexity ceiling is `codegen-emitted max x (100 + this) / 100` -- the emitted max is the deepest/most complex GENERATED client document that role's screens actually bind (`tools/codegen-rs`'s `graphql-limits` emitter over `crates/web/src/generated/data_layer.rs`'s `ResolverKey::selection()`), and this percentage is the safety margin above that observed real traffic before a request is refused. 50% is a round, unresearched starting margin -- wide enough that an ordinary screen fragment addition does not immediately trip the ratchet, narrow enough that an order-of-magnitude pathological query still refuses. Never a public-only limit: it applies to the ceiling computed for EVERY role.
     pub graphql_limit_headroom_percent: i64,
-    /// DEFAULT `900`. The Restaurant.serviceWindow.validUntil horizon (RSO-1, DECISIONS §43 sub-question iii): validUntil = min(next window transition, evaluatedAt + this horizon), and under HOURS_UNDECLARED — where no transition exists to wait for — it is evaluatedAt + horizon alone. Exists so no cache can treat a verdict as immortal: without it a restaurant declaring its hours at 18:50 on a Friday would keep rendering a blank badge in every warm cache at the hour it matters. Seconds; the 900 default trades staleness against re-evaluation load at Friday-peak list fan-out.
-    pub service_window_validity_horizon_seconds: i64,
-    /// DEFAULT `false`. SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene. STOPPED since 2026-07-28, and the reason this text used to give ("PAUSED with the CI sweep, issue #220") is STALE: #220 closed the same day, as did the other named bottleneck #218, so the chain has been off for over a month behind a blocker that no longer exists and nobody has re-taken the restart decision. Restarting is NOT a flag flip -- an owner-declared restaurant carries no SIRET, which is the crawl's idempotency key, so un-pausing before that door shares the key manufactures duplicate restaurants; and a self-declared listing currently enters the prospect funnel. Both guards, and the decision itself, are issue #800.
-    pub run_sirene_worker: bool,
-    /// DEFAULT `false`. The staff access grant door (#639 part C step 6-i, ADR-20260905-101349 §6). ON, `grantRestaurantAccess` appends `RestaurantAccessGranted` as normal (subject to the accepted- basis check, `AccessBasisNotYetAccepted`). OFF, the handler refuses BEFORE touching the store with the typed `MemberAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantAccess` is NEVER gated by this key: releasing access is always safe to allow. Preconditions gating the flip are named in `docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml` (open): the Art. 14 notice to the provisioned person, an Art. 30 entry "staff access management", the lifetime reservation written down with its future path, the Supabase DPA/region and Art. 26 items (founder's, external), and 6-ii merged (a grant with no door is a binding nobody can use).
-    pub run_member_access_grant: bool,
-    /// DEFAULT `false`. The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §6). ON, both `requestMemberSignInLink` and `confirmMemberSignIn` run their identify/stamp/park flow as designed. OFF, BOTH refuse BEFORE touching the identity provider with the typed `MemberSignInDoorClosed` rejection -- a supervisable row, never a silent no-op. Preconditions gating the flip are named in `docs/decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` (open): 6-i merged (done), the silent `/auth/refresh` retry + `?next=` in the client (#894-class, own issue), email deliverability proven by a hand-dispatched drill (SPF/DKIM/DMARC, founder's), the Supabase DPA/region (founder's), the legal/privacy page the refusal screen links (owner named), and `MEMBER-ACCESS-GRANT-PRECONDITIONS` flipped first (a door with no grant path is a refusal machine).
-    pub run_member_sign_in_door: bool,
-    /// DEFAULT `false`. The invitation door (#639 part C step 6-iv, ADR-20260905-101349 §2/§3). ON, `inviteRestaurantMember` sends the invite email and appends `RestaurantInvitationSent` as normal. OFF, the handler refuses BEFORE touching the store with the typed `RestaurantInvitationDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantInvitation` is NEVER gated by this key: withdrawing an offer nobody has accepted yet is always safe to allow. `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg stays behind `RUN_MEMBER_ACCESS_GRANT` (the SAME irreversible-grant gate CAPTAIN_ONBOARDING already uses -- a member-invitation grant is equally the first fact that starts a real Tours human's legal clock, so it is not a separate key). Preconditions gating the flip are named in `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml` (open): the invitation email deliverability drill, `RUN_MEMBER_SIGN_IN_DOOR` flipped FIRST (an invitation nobody can sign in with afterwards is a dead letter), the Art. 13 notice at the invited address (a third party's email typed by a manager -- legal names the instrument), the TTL value below confirmed (not just defaulted), and no seat-count/billing semantics anywhere in this slice.
-    pub run_restaurant_invitation: bool,
-    /// DEFAULT `false`. The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON, `GrantPlatformAccess` appends `PlatformAccessGranted` as normal (subject to the accepted-basis check). OFF, the handler refuses BEFORE touching the store with the typed `PlatformAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. NO revoke command exists yet to be asymmetric with (ADR-20260905-223957 §3). Preconditions gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): the one-shot bootstrap landed and idempotent, the seam refusing an unbound ADMIN token proven red-first, the Art. 13/Art. 30 items (founder's, external), the labour posture (founder's), the `admin-sign-in` contract and both dead-man gauges live, and 6-iii's System routing items.
-    pub run_platform_access_grant: bool,
-    /// DEFAULT `604800`. UNVERIFIED input (see the comment above this key). How long a `RestaurantInvitation` stays PENDING before the promotion pass delivers `RestaurantInvitationExpired` (`reschedule: keep` -- a redelivered birth never moves the deadline). Proposed default: 7 days (604800s), pending confirmation in `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`.
-    pub restaurant_invitation_ttl_seconds: i64,
 }
 
 impl Config {
@@ -462,28 +448,6 @@ impl Config {
         }
         let email_quota_key_hmac_secret = email_quota_key_hmac_secret.unwrap_or_default();
         let graphql_limit_headroom_percent = raw("GRAPHQL_LIMIT_HEADROOM_PERCENT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(50);
-        let service_window_validity_horizon_seconds = raw("SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
-        let run_sirene_worker = raw("RUN_SIRENE_WORKER")
-            .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
-            .unwrap_or(false);
-        let run_member_access_grant = raw("RUN_MEMBER_ACCESS_GRANT")
-            .or_else(|| baked("RUN_MEMBER_ACCESS_GRANT", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_MEMBER_ACCESS_GRANT", &v, false))
-            .unwrap_or(false);
-        let run_member_sign_in_door = raw("RUN_MEMBER_SIGN_IN_DOOR")
-            .or_else(|| baked("RUN_MEMBER_SIGN_IN_DOOR", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_MEMBER_SIGN_IN_DOOR", &v, false))
-            .unwrap_or(false);
-        let run_restaurant_invitation = raw("RUN_RESTAURANT_INVITATION")
-            .or_else(|| baked("RUN_RESTAURANT_INVITATION", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_RESTAURANT_INVITATION", &v, false))
-            .unwrap_or(false);
-        let run_platform_access_grant = raw("RUN_PLATFORM_ACCESS_GRANT")
-            .or_else(|| baked("RUN_PLATFORM_ACCESS_GRANT", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_PLATFORM_ACCESS_GRANT", &v, false))
-            .unwrap_or(false);
-        let restaurant_invitation_ttl_seconds = raw("RESTAURANT_INVITATION_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(604800);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -579,13 +543,6 @@ impl Config {
                 email_max_sends_per_day_global,
                 email_quota_key_hmac_secret,
                 graphql_limit_headroom_percent,
-                service_window_validity_horizon_seconds,
-                run_sirene_worker,
-                run_member_access_grant,
-                run_member_sign_in_door,
-                run_restaurant_invitation,
-                run_platform_access_grant,
-                restaurant_invitation_ttl_seconds,
             },
             problems,
         )
@@ -597,7 +554,6 @@ impl Config {
     /// constant (ADR-20260731-214500).
     pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {
         [
-            ("RESTAURANT_INVITATION_TTL_SECONDS", std::time::Duration::from_secs(u64::try_from(self.restaurant_invitation_ttl_seconds).expect("RESTAURANT_INVITATION_TTL_SECONDS must be non-negative"))),
         ]
         .into_iter()
         .collect()
@@ -660,19 +616,12 @@ impl Config {
         out.push_str(&format!("  EMAIL_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.email_max_sends_per_day_global));
         out.push_str(&format!("  EMAIL_QUOTA_KEY_HMAC_SECRET = {}\n", if self.email_quota_key_hmac_secret.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  GRAPHQL_LIMIT_HEADROOM_PERCENT = {}\n", self.graphql_limit_headroom_percent));
-        out.push_str(&format!("  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS = {}\n", self.service_window_validity_horizon_seconds));
-        out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
-        out.push_str(&format!("  RUN_MEMBER_ACCESS_GRANT    = {}\n", self.run_member_access_grant));
-        out.push_str(&format!("  RUN_MEMBER_SIGN_IN_DOOR    = {}\n", self.run_member_sign_in_door));
-        out.push_str(&format!("  RUN_RESTAURANT_INVITATION  = {}\n", self.run_restaurant_invitation));
-        out.push_str(&format!("  RUN_PLATFORM_ACCESS_GRANT  = {}\n", self.run_platform_access_grant));
-        out.push_str(&format!("  RESTAURANT_INVITATION_TTL_SECONDS = {}\n", self.restaurant_invitation_ttl_seconds));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 59;
+pub const KEY_COUNT: usize = 52;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -729,13 +678,6 @@ pub const DECLARED_KEYS: &[&str] = &[
     "EMAIL_MAX_SENDS_PER_DAY_GLOBAL",
     "EMAIL_QUOTA_KEY_HMAC_SECRET",
     "GRAPHQL_LIMIT_HEADROOM_PERCENT",
-    "SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS",
-    "RUN_SIRENE_WORKER",
-    "RUN_MEMBER_ACCESS_GRANT",
-    "RUN_MEMBER_SIGN_IN_DOOR",
-    "RUN_RESTAURANT_INVITATION",
-    "RUN_PLATFORM_ACCESS_GRANT",
-    "RESTAURANT_INVITATION_TTL_SECONDS",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
@@ -769,13 +711,4 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
-    ("RUN_SIRENE_WORKER", "production", "true"),
-    ("RUN_SIRENE_WORKER", "staging", "true"),
-    ("RUN_MEMBER_ACCESS_GRANT", "production", "false"),
-    ("RUN_MEMBER_SIGN_IN_DOOR", "production", "false"),
-    ("RUN_MEMBER_SIGN_IN_DOOR", "staging", "false"),
-    ("RUN_RESTAURANT_INVITATION", "production", "false"),
-    ("RUN_RESTAURANT_INVITATION", "staging", "false"),
-    ("RUN_PLATFORM_ACCESS_GRANT", "production", "false"),
-    ("RUN_PLATFORM_ACCESS_GRANT", "staging", "false"),
 ];

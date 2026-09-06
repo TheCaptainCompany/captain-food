@@ -19,7 +19,7 @@ pub const ACTOR_SCOPES: &[(&str, &str)] = &[
     ("Payment", "payments"),
     ("PaymentSettlementProcess", "payments"),
     ("PlaceOrderProcess", "ordering"),
-    ("PlatformMembership", "network"),
+    ("PlatformMembership", "common"),
     ("Prospect", "network"),
     ("Reclamation", "ordering"),
     ("ReclamationProcess", "ordering"),

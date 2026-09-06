@@ -158,17 +158,3 @@ MemberSignInGatedBeforeStore:
   description: "requestMemberSignInLink and confirmMemberSignIn both refuse with the typed MemberSignInDoorClosed BEFORE the identity provider is touched while configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR is off (#639 part C step 6-ii, ADR-20260905-101349 §6)."
 
 
-# --- The platform grant and the ADMIN seam binding (#639 part C step 6-v,
-# ADR-20260905-223957 §1-§3) -------------------------------------------------------------------
-
-PlatformAccessGrantIsIdempotent:
-  description: "GrantPlatformAccess on an EXISTING platformMembershipId is an idempotent no-op (no second event) -- a caller retry, or a re-run of the one-shot bootstrap targeting the SAME deterministic id, never mints a duplicate relationship (#639 part C step 6-v, ADR-20260905-223957 §1/§3)."
-
-PlatformAuthSubjectResolvesToOneMembership:
-  description: "A GrantPlatformAccess whose authSubject already holds a LIVE PlatformMembership on a DIFFERENT platformMembershipId is rejected before any fact is recorded (PlatformAccessAlreadyGranted) -- the PlatformMember bridge's auth_subject UNIQUE constraint is the arbiter the handler consults, checked before appending, since ADMIN is NOT a PrincipalKind and reuses no reservation table (#639 part C step 6-v, ADR-20260905-223957 §1, PRINCIPALS-MEMBER)."
-
-GrantPlatformAccessIsAHumanAct:
-  description: "GrantPlatformAccess is roles: [ADMIN] with requires: acting: { ADMIN: any } and no EXTERNAL key -- every subsequent admin is hand-issued by an existing one, and the FIRST is a recorded act dispatched through the mailbox by the one-shot bootstrap, never a public claim-the-first-admin path (#639 part C step 6-v, ADR-20260905-223957 §3); no process manager may `send` it (validator pm-sends-human-only-command)."
-
-PlatformAccessGrantGatedBeforeStore:
-  description: "GrantPlatformAccess refuses with the typed PlatformAccessGrantDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT is off, for BOTH the hand-issued GraphQL door and the one-shot bootstrap dispatching the same command (#639 part C step 6-v, ADR-20260905-223957 §5)."

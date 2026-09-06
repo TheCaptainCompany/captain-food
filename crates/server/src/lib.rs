@@ -228,7 +228,13 @@ pub fn wire() -> HealthDto {
 /// ADR-20260905-101349): the `member` table backs the `Member` projector arm on
 /// `RestaurantAccessGranted`, so a build without it would fail every staff-access grant projection
 /// with `relation "member" does not exist` (42P01) the moment `RUN_MEMBER_ACCESS_GRANT` flips on.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260905130000;
+///
+/// `20260905150000` = `platform_member_bridge` (#639 part C step 6-v, ADR-20260905-223957): the
+/// `platform_member` table backs the `PlatformMember` projector arm on `PlatformAccessGranted` and
+/// the ADMIN seam's `resolve_platform_scope` lookup, so a build without it would fail every
+/// platform-access grant projection with `relation "platform_member" does not exist` (42P01) the
+/// moment `RUN_PLATFORM_ACCESS_GRANT` flips on, and would 500 the ADMIN seam's own read.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260905150000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

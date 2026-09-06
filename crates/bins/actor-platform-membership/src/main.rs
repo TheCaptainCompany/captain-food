@@ -13,7 +13,7 @@
 
 // The manifest is the scope assertion; these imports make each declared domain-crate
 // link a compile-checked fact (the linker cannot silently strip it).
-use domain_network as _;
+use domain_common as _;
 
 /// The bin's scope-filtered typed configuration (#374 Q4): the declared keys of its linked
 /// scopes + `common`, read once at startup — the same generated reader the monolith uses,

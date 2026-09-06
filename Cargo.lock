@@ -141,7 +141,7 @@ name = "actor-platform-membership"
 version = "0.1.0"
 dependencies = [
  "bin_runtime",
- "domain-network",
+ "domain-common",
  "regex",
  "serde_json",
  "tokio",
