@@ -261,13 +261,20 @@ pub mod mount {
         session: SessionId,
         locale: String,
     ) {
+        // #904 (ADR-20260905-101349 §13): the mutation dispatcher gets its own one-shot-refresh
+        // budget here too (`interact::install` requires it unconditionally). NOT shared with the
+        // read below: these hand-written screens' OWN `resolve_requirements` read stays on the
+        // plain `HttpTransport`, unwrapped — a named gap (PR body), not this card's SDUI hydrate
+        // loop, and none of `checkout`/`tracking`/the sign-in return landings are the
+        // 19:40-lockout queue screens #904 exists for.
+        let refresh_used = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         // The delegated action layer, exactly as the SDUI path installs it: checkout's
         // `payment_failed_state` renders two client-kind `navigate` buttons carrying the renderer's
         // own DOM contract, and without this listener they are controls that render and do nothing
         // — the failure mode CLAUDE.md calls worse than no control at all. `matched.screen` (#639
         // 4-ii): none of these hand-written screens declare `restricted:`/`unauthenticated:` today,
         // but the driver's bounce decision reads the SAME field the SDUI path does.
-        crate::interact::install(&origin, role, session, matched.screen);
+        crate::interact::install(&origin, role, session, matched.screen, refresh_used);
         let transport = HttpTransport::new(&origin, role, session);
         let tenant = crate::router::Surface::slug_of(&host).map(str::to_string);
 

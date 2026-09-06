@@ -18,6 +18,67 @@
 use crate::generated::screens::Screen;
 use crate::graphql::TransportError;
 
+/// [`bounce_after`], plus the `?next=` return-to-screen leg (#904, ADR-20260905-101349 §13 — the
+/// member door's flip precondition): composed HERE, at the ONE call site both the hydrate loop
+/// (`renderer.rs`) and the mutation dispatcher (`interact.rs:~317`) now go through, so a read
+/// refusal and a write refusal can never disagree about whether — or how — a next was attached.
+///
+/// A `next` is attached ONLY on the unauthenticated (bare 401) leg of a `requires_auth` screen —
+/// never on `RIDER_RESTRICTED` (`/restricted`) or `ADMIN_ACCESS_NOT_GRANTED` (`/sign-in/no-access`,
+/// a terminal refusal, not a "come back once you sign in" door) — built from `current_path_and_query`
+/// (the CALLER's `location.pathname()` + `location.search()`; this module owns composition, never
+/// the stripping the caller must already have applied to `token`/`next` themselves, per
+/// `router.rs`'s own doc: "query strings are the caller's to strip" — this function additionally
+/// belt-and-braces drops both here too, so a call site forgetting to strip cannot leak a stale
+/// `next` value into a fresh one, or forward a magic-link token into a query string).
+pub fn bounce_target(
+    err: &TransportError,
+    screen: &Screen,
+    current_path_and_query: &str,
+) -> Option<String> {
+    let route = bounce_after(err, screen)?;
+    let is_unauthenticated = matches!(err, TransportError::Status { status: 401 });
+    if !is_unauthenticated || !screen.requires_auth {
+        return Some(route.to_string());
+    }
+    let stripped = drop_query_params(current_path_and_query, &["token", "next"]);
+    if stripped.is_empty() {
+        return Some(route.to_string());
+    }
+    Some(format!("{route}?next={}", percent_encode_next(&stripped)))
+}
+
+/// Drop the named query params from `path_and_query` (`pathname` + `search`) — never a hand-rolled
+/// URL library, this crate's whole query-string surface is these few characters (`router.rs`'s doc:
+/// "query strings are the caller's to strip").
+fn drop_query_params(path_and_query: &str, drop: &[&str]) -> String {
+    let mut parts = path_and_query.splitn(2, '?');
+    let path = parts.next().unwrap_or("");
+    let Some(query) = parts.next() else { return path.to_string() };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|kv| !drop.contains(&kv.split('=').next().unwrap_or("")))
+        .collect();
+    if kept.is_empty() { path.to_string() } else { format!("{path}?{}", kept.join("&")) }
+}
+
+/// A minimal percent-encoder for embedding an arbitrary path+query as ONE query VALUE (`?next=`):
+/// everything outside the unreserved set (plus `/`, kept bare for readability) becomes `%XX`.
+/// `router::safe_next`'s `percent_decode_once` is this encoder's exact inverse; decoding happens
+/// exactly once, there, never here.
+fn percent_encode_next(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for b in input.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Where one refused GraphQL call bounces `screen`'s visitor, or `None` to stay put. The ONLY
 /// entry point either call site (the hydrate loop's per-read outcome, `interact.rs`'s pre-
 /// acceptance mutation failure) may use to decide a bounce — see the module docs for the two legs.
@@ -152,5 +213,70 @@ mod tests {
     #[test]
     fn a_non_401_status_never_bounces() {
         assert_eq!(bounce_after(&TransportError::Status { status: 500 }, jobs()), None);
+    }
+
+    // ---- D2 (#904, ADR-20260905-101349 §13): `bounce_target`'s `?next=` composition ----
+
+    /// Red-first (ADR-20260905-101349:171): a mutant that drops the `?next=` composition entirely
+    /// (bounces without one) fails this — the route would lack `?next=` altogether.
+    #[test]
+    fn a_401_bounces_with_next_equal_to_the_current_path_stripped_of_token() {
+        let target = bounce_target(
+            &TransportError::Status { status: 401 },
+            jobs(),
+            "/jobs?token=stale-abc&foo=bar",
+        );
+        // `token` (a stale magic-link leftover) and the query order otherwise are both stripped/
+        // kept as expected; the whole thing is percent-encoded as ONE query value.
+        assert_eq!(target, Some("/sign-in?next=/jobs%3Ffoo%3Dbar".to_string()));
+    }
+
+    /// The bare-path case (no query at all) still gets a `next` — never conditioned on a query
+    /// existing.
+    #[test]
+    fn a_401_on_a_bare_path_still_carries_next() {
+        let target = bounce_target(&TransportError::Status { status: 401 }, jobs(), "/jobs");
+        assert_eq!(target, Some("/sign-in?next=/jobs".to_string()));
+    }
+
+    /// A `next` param already on the URL (a stale bounce chain) is ALSO stripped before
+    /// recomposing — never nested/doubled.
+    #[test]
+    fn a_stale_next_param_is_stripped_before_recomposing() {
+        let target =
+            bounce_target(&TransportError::Status { status: 401 }, jobs(), "/jobs?next=%2Fold");
+        assert_eq!(target, Some("/sign-in?next=/jobs".to_string()));
+    }
+
+    /// `RIDER_RESTRICTED` and `ADMIN_ACCESS_NOT_GRANTED` never carry a `next` — both are terminal
+    /// refusals, not a "come back once you sign in" door.
+    #[test]
+    fn restricted_and_admin_not_granted_bounces_never_carry_next() {
+        assert_eq!(
+            bounce_target(&restricted_reason(), jobs(), "/jobs"),
+            Some("/restricted".to_string())
+        );
+        assert_eq!(
+            bounce_target(&admin_not_granted(), mailbox_lanes(), "/system/mailbox"),
+            Some("/sign-in/no-access".to_string())
+        );
+    }
+
+    /// A screen without `requires_auth` never gets a `next` even on a bare 401 (defensive — no
+    /// such screen should ever 401 in practice, but the rule is structural, not incidental).
+    #[test]
+    fn an_open_screen_never_carries_next() {
+        assert_eq!(sign_in_door().requires_auth, false, "fixture assumption");
+        // sign_in_door() declares no unauthenticated_route, so bounce_after is already None here;
+        // the assertion is that `bounce_target` never invents a `next` even if it did.
+        assert_eq!(bounce_target(&TransportError::Status { status: 401 }, sign_in_door(), "/sign-in"), None);
+    }
+
+    /// Network/malformed/non-401 statuses never carry a `next` either (`bounce_after` already
+    /// returns `None` for them; `bounce_target` must not diverge).
+    #[test]
+    fn non_bouncing_errors_never_carry_next() {
+        assert_eq!(bounce_target(&TransportError::Network("reset".into()), jobs(), "/jobs"), None);
+        assert_eq!(bounce_target(&TransportError::Status { status: 500 }, jobs(), "/jobs"), None);
     }
 }

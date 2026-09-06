@@ -1585,6 +1585,10 @@ pub fn hydrate() {
     let location = window.location();
     let host = location.host().unwrap_or_default();
     let path = location.pathname().unwrap_or_else(|_| "/".into());
+    // #904 D2 (ADR-20260905-101349 §13): the CURRENT pathname+query, so a refused read can compose
+    // `?next=` back to itself (`bounce::bounce_target`) -- captured once, up front, alongside the
+    // other per-load location facts.
+    let current_path_and_query = format!("{path}{}", location.search().unwrap_or_default());
     // Locale parity (#110): the shell's `<html lang>` is what SSR resolved through the chain; read it
     // back so the hydrate re-render can't disagree with the server's language (no flash, no re-resolve).
     let locale = window
@@ -1623,21 +1627,31 @@ pub fn hydrate() {
     // transports of this page (reads here, writes + push socket in `interact`) are built from the
     // same answer, so a screen can never read as one role and write as another.
     let role = surface.role_for(screen);
-    let transport = crate::graphql::HttpTransport::new(&origin, role, session);
+    // #904 (ADR-20260905-101349 §13, the member door's flip precondition): ONE one-shot-refresh
+    // budget for the whole page load, shared between this load's reads below and
+    // `interact::install`'s later mutation dispatches -- a refresh failure is remembered for the
+    // PAGE (`graphql::RefreshingTransport`'s doc comment), not just for the read loop.
+    let refresh_used = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let transport = crate::graphql::RefreshingTransport::new(
+        Box::new(crate::graphql::HttpTransport::new(&origin, role, session)),
+        Box::new(crate::graphql::HttpRefresher::new(&origin, session)),
+        std::sync::Arc::clone(&refresh_used),
+    );
 
     // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
     // `screen` (#639 4-ii): the bounce decision on a refused Tell needs the SAME screen's declared
     // routes the hydrate loop above reads.
-    crate::interact::install(&origin, role, session, screen);
+    crate::interact::install(&origin, role, session, screen, std::sync::Arc::clone(&refresh_used));
 
     let sheets = surface.sheets();
     wasm_bindgen_futures::spawn_local(async move {
         let mut ctx = RenderContext::new(&locale);
-        // #639 part C step 4-ii (ADR-20260904-124600 §2): the bounce decision is now the ONE
-        // function `crate::bounce::bounce_after` — a 401 (no session, the 2c-ii leg) or a refused
+        // #639 part C step 4-ii (ADR-20260904-124600 §2), extended by #904 D2: the bounce decision
+        // is now `crate::bounce::bounce_target` — a 401 (no session, the 2c-ii leg) or a refused
         // read carrying `extensions.reason == RIDER_RESTRICTED` both resolve through it; the first
-        // read that answers either signal decides where this screen sends its visitor.
-        let mut bounce_route: Option<&'static str> = None;
+        // read that answers either signal decides where this screen sends its visitor, and a bare
+        // 401 on a `requires_auth` screen carries `?next=` back to itself (#904).
+        let mut bounce_route: Option<String> = None;
         for resolver in screen.data_requirements {
             // #745: the generated §25b skip table — a structurally unfulfillable read (required
             // arg, no paint-time source, declared on the binding) is skipped before any network
@@ -1658,7 +1672,7 @@ pub fn hydrate() {
             let result = crate::graphql::execute_resolver(&transport, *resolver, vars).await;
             if bounce_route.is_none() {
                 if let Err(crate::graphql::ResolverError::Transport(t)) = &result {
-                    bounce_route = crate::bounce::bounce_after(t, screen);
+                    bounce_route = crate::bounce::bounce_target(t, screen, &current_path_and_query);
                 }
             }
             match crate::graphql::classify_resolve(role, *resolver, result) {
@@ -1678,7 +1692,7 @@ pub fn hydrate() {
         // signal and stays.
         if let Some(route) = bounce_route {
             if let Some(w) = web_sys::window() {
-                let _ = w.location().set_href(route);
+                let _ = w.location().set_href(&route);
             }
             return;
         }
