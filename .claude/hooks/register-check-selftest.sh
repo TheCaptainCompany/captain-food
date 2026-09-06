@@ -20,6 +20,7 @@
 # -- a reversal opens a NEW row, never reopens the file).
 set -uo pipefail
 
+SELFTEST_START_TS="$(date +%s)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$ROOT/.claude/hooks/register-check.sh"
 [ -f "$HOOK" ] || { echo "register-check selftest: cannot find $HOOK" >&2; exit 2; }
@@ -335,6 +336,16 @@ EOF
 # (review round 1, F1). One fixture per era, so a regression to the single-glob form reds here.
 : > "$FIX/docs/adr/0032-fixture-legacy-era.md"
 : > "$FIX/docs/adr/20260720-233000-fixture-prefixless-era.md"
+# A NON-EMPTY 0-hit fixture (#926 item 4): the fully EMPTY fixture above only ever reaches
+# malformedness via a line PAST EOF (RF4b shares RF7's own branch), so no case exercised "the line
+# EXISTS and carries no token" at 0 hits specifically -- a real gap, since that is a DIFFERENT
+# failure mode from "no such line". Three prose lines, none of them carrying a Rule 1 token; RF12
+# pins its own entry to line 2 by number.
+cat > "$FIX/docs/adr/ADR-20260906-060000-fixture-zerohit.md" <<'EOF'
+# Fixture: a zero-hit record for the sharper 0-hit cases (RF12/RF13/RF14, #926 item 4)
+Nothing on this second line carries a marker either -- RF12 pins its own entry here.
+Nor does this third and final line of the fixture.
+EOF
 # Agent fixtures for the shapes that used to fail OPEN (review round 1, F2). Each one is a
 # `tools:` declaration the old `awk /^tools:/{print}` reduced to the literal `tools:` -- non-empty,
 # so the fail-closed branch never ran and a write-capable agent was declared advisory.
@@ -524,15 +535,22 @@ expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LA
 expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
 # ── Lane D: the dispatch card (Agent surface, ADR-20260831-141500) ──────────────────────────────
-expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd]
-  local case="$1" want="$2" payload="$3" want_reason="${4:-}" cwd="${5:-}" got reason log="$FIX/case.log"
-  : > "$log"
+expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd] [want-stderr-fragment]
+  # want-stderr-fragment (#926 item 4) asserts the hook's ACTUAL STDERR text (`block()`'s
+  # `rf_msg`/message body, fed back to the caller) contains a literal fragment -- a DIFFERENT
+  # thing from `want-reason` above, which only checks the log's short reason CODE. No existing
+  # case's own redirection changes: stdout still goes nowhere and every prior case still passes
+  # with only 5 args: stderr is now captured to a per-case file instead of being merged and
+  # discarded, and only read back when a 6th arg is actually given.
+  local case="$1" want="$2" payload="$3" want_reason="${4:-}" cwd="${5:-}" want_stderr="${6:-}" \
+        got reason log="$FIX/case.log" errlog="$FIX/case.err"
+  : > "$log"; : > "$errlog"
   if [ -n "$cwd" ]; then
     ( cd "$cwd" && printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
-      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1 )
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>"$errlog" )
   else
     printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
-      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>"$errlog"
   fi
   got=$?
   if [ "$got" -ne "$want" ]; then
@@ -543,6 +561,12 @@ expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd]
     reason="$(tail -1 "$log" 2>/dev/null | cut -f3)"
     if [ "$reason" != "$want_reason" ]; then
       echo "register-check selftest: case $case FAILED (want reason '$want_reason', got '${reason:-none}')" >&2
+      fail=1
+    fi
+  fi
+  if [ -n "$want_stderr" ]; then
+    if ! grep -qF "$want_stderr" "$errlog" 2>/dev/null; then
+      echo "register-check selftest: case $case FAILED (want stderr containing '$want_stderr', got: $(cat "$errlog" 2>/dev/null))" >&2
       fail=1
     fi
   fi
@@ -658,6 +682,64 @@ TPATH_HOOK="${HOOK#"$ROOT"/}"
 expect_d RF8-redfirst-existing-test-path 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: $TPATH_HOOK::test_x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-trail-ok "$FIX"
 # RF9 BLOCK: a test path that is neither `NEW` nor on disk anywhere -- the existence check itself.
 expect_d RF9-redfirst-missing-test-path 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: tests/does_not_exist.rs::x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "$FIX"
+
+# ── #926 item 1: the `none` form is the DECLARED form, not a prefix glob ────────────────────────
+# The OLD `[Nn]one*)` case matched ANY text starting with "none", so `Red-first: none` followed by
+# ARBITRARY PROSE at 0 hits read as the explicit negative -- found LIVE on this card's own first
+# draft: a coordinator sentence containing the marker followed by the word "nonesuch" tripped Lane
+# D's dispatch-redfirst-false-negative reason at 17:26Z (the antecedent for RF10 and RF15 below --
+# the card that fixes the false positive was itself refused by it, on a genuine hit-count case).
+# The negative is now `none — <record-id> names no test`, where `<record-id>` must RESOLVE and must
+# be CITED IN THIS TRAIL (tested by resolved path against `rf_files`, never by id string). Anything
+# else beginning with `none` is not the declared form and falls through to the ordinary shape
+# parse, blocking with the SAME `dispatch-redfirst-shape` a malformed positive entry already gets.
+# RF10 BLOCK: "nonesuch garbage" at 0 hits -- the exact incident shape, on the 0-hit fixture. Also
+#    asserts the hook's actual STDERR text carries the shape message (#926 item 4's new argument).
+expect_d RF10-none-prefix-glob-refused 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: nonesuch garbage\"}}" dispatch-redfirst-shape "" "no entry matches the required shape"
+# RF11a BLOCK: the declared none form's OWN record id must resolve -- an invented id inside
+#    `none — <record> names no test` is not a free pass either.
+expect_d RF11a-none-unresolvable-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260101-000000 names no test\"}}" dispatch-redfirst-shape
+# RF11b BLOCK: the declared none form's record must also be CITED IN THIS TRAIL -- tested by
+#    RESOLVED PATH against `rf_files`, never by id string. ADR-20260906-050000 resolves (it is the
+#    redfirst fixture) but this trail (`$DTRAIL`) cites only ADR-20260821-095957 -- the negative may
+#    not borrow a citation the trail never made.
+expect_d RF11b-none-uncited-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-shape
+
+# RF12 BLOCK: a POSITIVE entry pinned to LINE 2 of the NEW non-empty 0-hit fixture -- the line
+#    EXISTS and carries no token, a DIFFERENT failure mode from "no such line" (RF4b/RF7, both
+#    past-EOF). Also asserts stderr. Mutant: gate the token check behind `rf_hit_count -gt 0` --
+#    at 0 hits that would skip the check entirely and wrongly ALLOW.
+DTRAIL_ZH='Register check: ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture, silent on Y'
+expect_d RF12-zero-hit-line-without-token 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_ZH\\nRed-first: NEW::test_x — ADR-20260906-060000:2 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "" "no entry matches the required shape"
+# RF13 BLOCK: an EXISTING on-disk test path with NO `::` separator at >0 hits (`$DTRAIL_RF`) --
+#    `$TPATH_HOOK` alone, so `testref` never contains `::` and the entry is skipped as malformed.
+#    Mutant: delete the `case "$testref" in *'::'*) ...` guard -- without it `tpath`/`tname` both
+#    collapse to the whole (existing, non-empty) path and the entry flips to ALLOW.
+expect_d RF13-missing-double-colon-on-existing-path 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: $TPATH_HOOK — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "$FIX"
+# RF14 BLOCK: a trail citing the ZERO-hit fixture FIRST and the redfirst fixture SECOND (citation
+#    ORDER pinned here on purpose), with the full declared none form naming the FIRST (0-hit)
+#    record. `rf_hit_count` is summed over the WHOLE trail's cited records (0 + 2 = 2), so the
+#    negative is still refused as a false negative even though the record IT NAMES has 0 hits --
+#    "the negative speaks for the whole trail, not per-record" (workflow.md). Mutant: sum hits over
+#    the FIRST cited record only -- that would read 0 and wrongly ALLOW.
+DTRAIL_ZH_THEN_RF='Register check: ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture, and ADR-20260906-050000 (2026-09-06, open) -- covers the redfirst fixture too'
+expect_d RF14-none-over-two-records-one-hitting 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_ZH_THEN_RF\\nRed-first: none — ADR-20260906-060000 names no test\"}}" dispatch-redfirst-false-negative
+# RF14b BLOCK (beck): the SAME two-record trail as RF14, with the citation ORDER REVERSED (the
+#    redfirst fixture FIRST, the zero-hit fixture SECOND) -- same expected refusal, but a
+#    DIFFERENT isolating mutant. RF14 alone does not catch "count hits over the LAST cited record
+#    only": in RF14's own order that mutant would take the redfirst fixture (the LAST record
+#    there) and still sum to the correct answer BY ACCIDENT, surviving the whole suite. Reversing
+#    the order here closes that gap: under the "last only" mutant this trail's last-cited record
+#    is the ZERO-hit fixture, so the mutant reads 0 and wrongly ALLOWs.
+DTRAIL_RF_THEN_ZH='Register check: ADR-20260906-050000 (2026-09-06, open) -- covers the redfirst fixture, and ADR-20260906-060000 (2026-09-06, open) -- covers the zero-hit fixture too'
+expect_d RF14b-none-over-two-records-reversed-order 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF_THEN_ZH\\nRed-first: none — ADR-20260906-060000 names no test\"}}" dispatch-redfirst-false-negative
+# RF15 BLOCK: the SAME malformed text as RF10 ("nonesuch garbage"), but on a record that DOES have
+#    hits (`$DTRAIL_RF`) -- PRECEDENCE. This must resolve to `dispatch-redfirst-shape`, never to the
+#    false negative RF5 pins: the OLD prefix glob read "nonesuch" as the negative (it starts with
+#    "none"), so at >0 hits it blocked for the WRONG reason (`dispatch-redfirst-false-negative`) --
+#    still BLOCKED either way, but a case that reds for the wrong reason is a claim without
+#    evidence (the shape E5 already cost this suite once).
+expect_d RF15-malformed-none-at-hits-is-shape 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: nonesuch garbage\"}}" dispatch-redfirst-shape
 
 # ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
 # A parse failure was being reported as a read declaration of read-only, so each of these was
@@ -867,9 +949,46 @@ if ! grep -q 'every_record_in_the_corpus_is_citable_through_lane_d' "$ROOT/tools
   fail=1
 fi
 
+# ── #926 item 5, RESHAPED by farley: a WARN-only regression TRIPWIRE, never a hang bound ────────
+# A post-hoc self-timer cannot BE a hang bound: a hung script never reaches the line that would
+# read it -- CI's `gate-scripts` job already carries `timeout-minutes: 10` for that, at the JOB
+# level. What a self-timer CAN do is make growth VISIBLE: the elapsed wall time is printed on
+# every run (a reading visible in every CI log), and crossing
+# REGISTER_CHECK_SELFTEST_CEILING_SECONDS (default 120s) prints exactly ONE WARN line to stderr,
+# naming itself a TRIPWIRE -- an UNVERIFIED ceiling, never a hang bound (the job timeout above
+# already owns that) and never a METER (#923 §4's `gate_minutes_per_round`, read from CI check-run
+# times, owns that). It NEVER changes the exit code: the every-turn local path from stop-gate.sh
+# must not become a trainer that teaches a session to re-run past a warning.
+# Antecedent: the gate-scripts job's own selftest step measured 4s on five recent green main runs
+# (Actions API, 2026-09-06, 1s granularity) and 4.7s locally on this container.
+# A small in-process FUNCTION, so ST1 below can call it directly with SYNTHETIC elapsed/ceiling
+# values rather than actually sleeping the suite past the ceiling.
+register_check_selftest_ceiling_warn() { # register_check_selftest_ceiling_warn <elapsed> <ceiling>
+  local elapsed="$1" ceiling="$2"
+  if [ "$elapsed" -gt "$ceiling" ]; then
+    echo "register-check selftest: WARN -- elapsed ${elapsed}s past REGISTER_CHECK_SELFTEST_CEILING_SECONDS=${ceiling}s (TRIPWIRE, UNVERIFIED ceiling: a run past it is a regression signal, not a hang bound -- CI bounds hangs at the job level, timeout-minutes: 10 -- and not a meter, #923 §4 owns that)" >&2
+  fi
+}
+# ST1: the WARN fires when elapsed > ceiling and stays SILENT when it does not -- pinned with
+# synthetic values (5s against a ceiling of 0, then 5s against the real default 120) so the case
+# never depends on the suite's own actual runtime.
+st1_out="$(register_check_selftest_ceiling_warn 5 0 2>&1 >/dev/null)"
+if ! printf '%s' "$st1_out" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1-selftest-ceiling-tripwire-warns FAILED -- no WARN/TRIPWIRE line on stderr with elapsed=5 ceiling=0 (got: $st1_out)" >&2
+  fail=1
+fi
+st1_quiet="$(register_check_selftest_ceiling_warn 5 120 2>&1 >/dev/null)"
+if [ -n "$st1_quiet" ]; then
+  echo "register-check selftest: case ST1-selftest-ceiling-tripwire-warns FAILED -- unexpected WARN with elapsed=5 ceiling=120 (got: $st1_quiet)" >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "register-check selftest: FAILED (see cases above)" >&2
   exit 2
 fi
-echo "register-check selftest: all cases pass."
+SELFTEST_ELAPSED=$(( $(date +%s) - SELFTEST_START_TS ))
+SELFTEST_CEILING="${REGISTER_CHECK_SELFTEST_CEILING_SECONDS:-120}"
+register_check_selftest_ceiling_warn "$SELFTEST_ELAPSED" "$SELFTEST_CEILING"
+echo "register-check selftest: all cases pass (${SELFTEST_ELAPSED}s)."
 exit 0

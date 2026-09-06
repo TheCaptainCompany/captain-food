@@ -385,7 +385,15 @@ RUSTFLAGS="-C debuginfo=0"` from the FIRST build, not after the first ENOSPC; (2
 own output capture lives on the same disk — a build that fills it breaks the NEXT command's
 capture ("Command output was lost") even for `rm`; redirect big-output commands to a worktree file
 (`> build.log 2>&1`) and Read it back, and remember `> /dev/null 2>&1` still gets a cleanup
-command through a full-capture condition; (3) a finished worktree's `target/` is reclaimable by
+command through a full-capture condition — and the harness's error names the `tasks/` capture
+directory as "full (0MB free)", which reads like a per-session tmpfs quota but IS the container disk
+(the #922 round-2 executor diagnosed a "session-scoped quota exhausted by call volume", retried
+`echo`/`pwd` twelve times and handed back a fully verified, UNCOMMITTED round: the recovery was one
+`rm -rf target/debug/incremental target/debug/build > /dev/null 2>&1` from the coordinator, after
+which `git commit` worked; the child process RUNS under this condition, only its output is lost —
+so run the cleanup, never a probe); (2b) on a confirmation round, COMMIT the verified diff BEFORE
+starting the whole-workspace gate run — the compile is what fills the disk, and the last commit is
+what survives (rounds 2/3 push red+green together, so a local commit costs nothing); (3) a finished worktree's `target/` is reclaimable by
 the COORDINATOR only — executors must report, not delete, other agents' trees. **Corrected 2026-08-31 (#764 records dispatch)** — this paragraph used to end *"executors cannot
 perform GitHub API mutations"*, and that is WRONG. `gh` is absent and the GitHub MCP tools are not
 in a subagent's toolset, but **the REST API is reachable**: `curl -H "Authorization: Bearer
