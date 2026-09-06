@@ -469,6 +469,10 @@ away above the final summary line, so a red run tells you it failed but not wher
 recovery is running the whole target again (cost: one full re-run of a failing target,
 2026-08-15; again 2026-09-06 on #920 round 3, where a background `make test-crates | tail -N` left a log of doc-test noise with no verdict and cost a full DB-gated re-run). Redirect to a file IN THE SCRATCHPAD and grep it for `test result: FAILED`, `panicked` and `error[`; never window a test run through `tail`. The environment rule "never redirect a workspace test run to an uncapped log" is about a RUNAWAY suite filling the disk, not a licence to pipe through `tail` — a dispatch card that quotes the first rule must quote this one beside it.
 
+**A `runKind: door` key's standalone `declare_flag` is a pre-recorded fence carve-out** — see ADR-20260904-081527 §8's
+standing clause (2026-09-06): a card introducing a door key checks the fleet-parity test's two hardcoded root paths
+against its own Fence section BEFORE dispatch; the second executor STOP of this class (#922) is what earned the clause.
+
 **Pre-push checks on confirmation rounds (founder decision 2026-09-06, [ADR-20260906-152024](../../adr/ADR-20260906-152024-two-rules-and-a-second-container-pre-push-checks-on-confirmation-rounds-claim-pinning-and-concurrent-chunks.md) §1).**
 Round 1 of a PR runs the full local set (`make validate`, `make rust`, the DB-gated workspace `make test-crates`,
 `cargo clippy --workspace`, `make check-drift`). A confirmation round (2 or 3) runs `make validate` plus the tests
