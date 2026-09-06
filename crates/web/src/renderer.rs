@@ -1497,8 +1497,80 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
             view! { <div data-c=ty>{sections}{rest}</div> }.into_any()
         }
 
-        // ── everything else: the tagged generic container (visible + auditable) ─
-        _ => {
+        // ── declared, no renderer arm yet (#888: GAP(renderer)) ──────────────────────────
+        //
+        // `render_node_kind` is now EXHAUSTIVE over `ComponentKind` (no `_` wildcard): the
+        // compiler enumerated exactly the 46 kinds below the moment the old wildcard was
+        // removed, replacing the issue's own "eleven" — a number stated with no antecedent
+        // (ADR-20260817-105845) and off by 35 (see the branch's hand-back for the E0004 quote).
+        // Every kind here renders BYTE-IDENTICAL to the old wildcard's tagged container
+        // (title/label/value text, children, `data-group`) PLUS one marker attribute so an
+        // audit can grep the DOM for what still has no dedicated arm — `data-gap` was already
+        // taken (renderer.rs:1066, the no-backing-query sense), so this reuses the specs' own
+        // phrase for the class instead: `GAP(renderer): #888`. NO `data-action` / `data-vars` /
+        // `data-trigger` here — an inert control must never look wired (CLAUDE.md).
+        //
+        // `Badge` is listed a SECOND time, unguarded: its dedicated arm above is GUARDED
+        // (`if node.prop("text").is_some()`), and a match-arm guard never counts towards
+        // exhaustivity (rustc 1.98.1: `match arms with guards don't count towards exhaustivity`)
+        // — so a `badge` node declared without `text` still needs somewhere to land. This guard
+        // gap is invisible while any OTHER kind is fully unmatched (rustc reports only the fully-
+        // uncovered patterns then) and only surfaces once those 45 are closed — found by doing
+        // exactly that and re-running the compiler, not read off the first error message.
+        //
+        // `text_area` and `tip_amount_selector` stay here ON PURPOSE (thirteen-lens consent,
+        // ADR-20260904-013834 — a split resolved by the safer option on a legal-adjacent
+        // surface): three of `text_area`'s six DSL sites bind to no mutation and the hydrate
+        // driver cannot read a `<textarea>` today (`interact.rs` `input_value` casts to
+        // `HtmlInputElement` only) — a free-text control that silently drops a door code or an
+        // allergy note is worse than this inert div. `text_area` returns as one commit once
+        // #934 item 1 binds the sites; `tip_amount_selector` stays deferred to #887.
+        ComponentKind::Screen
+        | ComponentKind::Spacer
+        | ComponentKind::Divider
+        | ComponentKind::ToastNotification
+        | ComponentKind::Overlay
+        | ComponentKind::Badge
+        | ComponentKind::BadgeRow
+        | ComponentKind::RatingBadge
+        | ComponentKind::DotSeparator
+        | ComponentKind::PromoCard
+        | ComponentKind::HeroSection
+        | ComponentKind::HeroSearchBar
+        | ComponentKind::SearchBarActive
+        | ComponentKind::FilterBar
+        | ComponentKind::CategoryPill
+        | ComponentKind::CategoryTile
+        | ComponentKind::CategoryGrid
+        | ComponentKind::RestaurantCard
+        | ComponentKind::DishRow
+        | ComponentKind::StickyCategoryNav
+        | ComponentKind::CatalogItemRow
+        | ComponentKind::ItemThumbnail
+        | ComponentKind::ItemHeader
+        | ComponentKind::OptionGroups
+        | ComponentKind::QuantitySelector
+        | ComponentKind::CartLineRow
+        | ComponentKind::QuantityStepper
+        | ComponentKind::PromoCodeInput
+        | ComponentKind::DeliveryModeToggle
+        | ComponentKind::AddressSelector
+        | ComponentKind::Form
+        | ComponentKind::TextArea
+        | ComponentKind::StripeExpressCheckoutElement
+        | ComponentKind::OrderStatusHero
+        | ComponentKind::EtaBar
+        | ComponentKind::OrderTimeline
+        | ComponentKind::RestaurantContactRow
+        | ComponentKind::OrderItemsSummary
+        | ComponentKind::OrderIdRow
+        | ComponentKind::OrderCard
+        | ComponentKind::AccountHeader
+        | ComponentKind::AvatarButton
+        | ComponentKind::LocationPill
+        | ComponentKind::Countdown
+        | ComponentKind::StarRating
+        | ComponentKind::TipAmountSelector => {
             let text = {
                 let t = prop_text(node, "title", ctx);
                 if !t.is_empty() {
@@ -1509,7 +1581,8 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
                 }
             };
             let group = format!("{:?}", node.kind.group());
-            view! { <div data-c=ty data-group=group>{text}{children_views(node, ctx)}</div> }.into_any()
+            view! { <div data-c=ty data-group=group data-no-arm="888">{text}{children_views(node, ctx)}</div> }
+                .into_any()
         }
     }
 }
@@ -3280,5 +3353,81 @@ mod tests {
             assert_eq!(ComponentKind::from_type(kind.as_str()), Some(*kind));
         }
         assert_eq!(ComponentKind::from_type("not_a_component"), None);
+    }
+
+    /// #888: the FROZEN set of kinds with no dedicated `render_node_kind` arm — the concrete
+    /// answer to the issue's own uncited "eleven" (ADR-20260817-105845: a card may not state a
+    /// derived number with no antecedent). Derived from the compiler's own E0004 the moment the
+    /// old `_` wildcard was removed (45 kinds), PLUS `Badge` (its own arm is guarded, and a
+    /// guard never counts towards exhaustivity — confirmed against rustc 1.98.1; the gap only
+    /// surfaces once the other 45 are closed, since rustc doesn't report a guard-only gap while
+    /// any OTHER pattern is fully unmatched). Kept as LITERAL strings, deliberately NOT derived
+    /// from the match arm itself, so moving a kind in or out of the no-arm arm REDS the
+    /// `no_arm_set_is_exactly_the_declared_list` test below instead of silently changing
+    /// behaviour (beck).
+    const NO_ARM_KINDS: &[&str] = &[
+        "Screen", "Spacer", "Divider", "ToastNotification", "Overlay", "Badge", "BadgeRow",
+        "RatingBadge", "DotSeparator", "PromoCard", "HeroSection", "HeroSearchBar",
+        "SearchBarActive", "FilterBar", "CategoryPill", "CategoryTile", "CategoryGrid",
+        "RestaurantCard", "DishRow", "StickyCategoryNav", "CatalogItemRow", "ItemThumbnail",
+        "ItemHeader", "OptionGroups", "QuantitySelector", "CartLineRow", "QuantityStepper",
+        "PromoCodeInput", "DeliveryModeToggle", "AddressSelector", "Form", "TextArea",
+        "StripeExpressCheckoutElement", "OrderStatusHero", "EtaBar", "OrderTimeline",
+        "RestaurantContactRow", "OrderItemsSummary", "OrderIdRow", "OrderCard", "AccountHeader",
+        "AvatarButton", "LocationPill", "Countdown", "StarRating", "TipAmountSelector",
+    ];
+
+    fn bare_node(kind: ComponentKind) -> Node {
+        Node { kind, props: &[], children: &[], branches: &[] }
+    }
+
+    /// The set of kinds that render `data-no-arm="888"` today must equal the frozen #888 list
+    /// EXACTLY — moving a kind out of the no-arm arm into a real rendering arm (or into it)
+    /// without updating this list reds here.
+    #[test]
+    fn no_arm_set_is_exactly_the_declared_list() {
+        let c = ctx();
+        let actual: std::collections::BTreeSet<String> = ComponentKind::ALL
+            .iter()
+            .filter(|k| render_node_kind(&bare_node(**k), &c).to_html().contains("data-no-arm=\"888\""))
+            .map(|k| format!("{k:?}"))
+            .collect();
+        let frozen: std::collections::BTreeSet<String> = NO_ARM_KINDS.iter().map(|s| s.to_string()).collect();
+        assert_eq!(actual, frozen, "the rendered no-arm set must equal the frozen #888 list exactly");
+    }
+
+    /// A no-arm node must carry the marker and NEVER look wired — an inert control that looks
+    /// live is worse than one that visibly is not (CLAUDE.md).
+    #[test]
+    fn no_arm_nodes_carry_the_marker_and_no_action() {
+        let c = ctx();
+        let node = Node {
+            kind: ComponentKind::TextArea,
+            props: &[("title", PropValue::Text("Untitled"))],
+            children: &[],
+            branches: &[],
+        };
+        let html = render_node_kind(&node, &c).to_html();
+        assert!(html.contains("data-no-arm=\"888\""), "no-arm node must carry the marker: {html}");
+        assert!(!html.contains("data-action"), "no-arm node must never carry data-action: {html}");
+        assert!(!html.contains("data-trigger"), "no-arm node must never carry data-trigger: {html}");
+        assert!(!html.contains("data-vars"), "no-arm node must never carry data-vars: {html}");
+    }
+
+    /// The no-arm arm renders TODAY'S tagged container unchanged (reviewer/beck: byte-identical
+    /// is untestable by construction, so this pins the two things that ARE testable — the
+    /// `data-c` tag and the title/label/value text survive the marker's addition).
+    #[test]
+    fn a_no_arm_node_renders_todays_container_unchanged() {
+        let c = ctx();
+        let node = Node {
+            kind: ComponentKind::TipAmountSelector,
+            props: &[("label", PropValue::Text("Montant"))],
+            children: &[],
+            branches: &[],
+        };
+        let html = render_node_kind(&node, &c).to_html();
+        assert!(html.contains("data-c=\"tip_amount_selector\""), "the tagged container must keep its data-c: {html}");
+        assert!(html.contains("Montant"), "the label text must still render: {html}");
     }
 }
