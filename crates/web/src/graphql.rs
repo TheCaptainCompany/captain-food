@@ -225,6 +225,112 @@ impl Transport for HttpTransport {
     }
 }
 
+/// The one-shot 401-refresh seam (#904, ADR-20260905-101349 §13 — the member door's flip
+/// precondition). One method so the production POST to `/auth/refresh` and the test double's
+/// call-counting are the ONLY two implementations anyone ever needs — the decorator below never
+/// inspects the cookie itself. `true` = the session rotated; the caller reissues the ORIGINAL
+/// document once, `false` = the refresh itself failed and the original 401 goes to the caller.
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+pub trait Refresher: MaybeSync {
+    async fn refresh(&self) -> bool;
+}
+
+/// Wraps any [`Transport`] with the EXACTLY-ONCE 401-refresh-and-reissue rule (#904): on the first
+/// HTTP 401 of the load, call the [`Refresher`] once and — if it rotated the session — reissue the
+/// SAME document + variables once; every subsequent 401 of the same load (whether the refresh
+/// itself failed, or a second request 401s after a successful refresh — a provider outage doesn't
+/// get re-tried per request) returns straight through untouched. **Only a bare HTTP 401 arms it —
+/// a 403 NEVER does** (ADR-20260904-081527 §4/`server/src/auth.rs`'s `AuthError::Forbidden` arm: a
+/// rotated token carries the exact same role, so a `RoleGuard` refusal would loop forever if it
+/// re-armed a refresh). GraphQL `errors`,
+/// network failures and every other status pass through unexamined — refreshing a cookie can never
+/// fix a malformed document or a role a fresh cookie still lacks.
+///
+/// The one-shot state is an `Arc<AtomicBool>`, not the `Rc<Cell<bool>>` a wasm32-only decorator
+/// would reach for first: [`Transport`] requires [`MaybeSync`] (== `Sync` off wasm32, so the native
+/// `#[tokio::test]`s this module is tested with — beck's Q1 — can hold a `&dyn Transport` across an
+/// `.await`), and `Rc`/`Cell` are `!Sync` on every target. `AtomicBool` costs nothing extra on
+/// wasm32's single thread and satisfies the bound everywhere. Composing ONE instance per screen
+/// load (`renderer::hydrate`) and sharing its `Arc` with the SAME load's mutation dispatcher
+/// (`interact::install`) is what makes a refresh failure "remembered for the page", not just for
+/// one resolver — the hydrate loop is sequential (one `.await` at a time), so there is no
+/// concurrent-refresh race to additionally guard against.
+pub struct RefreshingTransport {
+    inner: Box<dyn Transport>,
+    refresher: Box<dyn Refresher>,
+    used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl RefreshingTransport {
+    pub fn new(
+        inner: Box<dyn Transport>,
+        refresher: Box<dyn Refresher>,
+        used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self { inner, refresher, used }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+impl Transport for RefreshingTransport {
+    async fn execute(&self, document: &str, variables: Value) -> Result<Value, TransportError> {
+        let result = self.inner.execute(document, variables.clone()).await;
+        let Err(TransportError::Status { status: 401 }) = &result else {
+            // Not a bare 401 (a 403, a network failure, GraphQL `errors`, malformed, or success):
+            // never arms or consumes the one shot.
+            return result;
+        };
+        if self.used.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            // Already spent this load's one shot — a second 401 (failed refresh, or a fresh one
+            // after a successful refresh) goes straight to the caller.
+            return result;
+        }
+        if !self.refresher.refresh().await {
+            // The refresh call itself failed: the ORIGINAL 401 is what the caller sees — never a
+            // different error, never a retry loop.
+            return result;
+        }
+        self.inner.execute(document, variables).await
+    }
+}
+
+/// The production [`Refresher`]: POST `/auth/refresh` with the httpOnly `captain_refresh` cookie
+/// the browser attaches on its own (JS never reads it — same posture as [`HttpTransport`]'s doc
+/// comment on customer identity). wasm32-only, like [`crate::auth::claim_session`] — the browser
+/// `fetch` credentials mode it needs has no native equivalent this crate uses.
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+pub struct HttpRefresher {
+    origin: String,
+    session: SessionId,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+impl HttpRefresher {
+    pub fn new(origin: &str, session: SessionId) -> Self {
+        Self { origin: origin.trim_end_matches('/').to_string(), session }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+#[async_trait::async_trait(?Send)]
+impl Refresher for HttpRefresher {
+    async fn refresh(&self) -> bool {
+        let url = format!("{}/auth/refresh", self.origin);
+        let client = reqwest::Client::new();
+        matches!(
+            client
+                .post(&url)
+                .header(SESSION_HEADER, self.session.to_string())
+                .fetch_credentials_include()
+                .send()
+                .await,
+            Ok(resp) if resp.status().is_success()
+        )
+    }
+}
+
 /// What can go wrong AT the resolver layer (above the transport).
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
@@ -422,6 +528,55 @@ pub(crate) mod test_support {
             responses.remove(0)
         }
     }
+
+    /// So a test can keep its own `Arc<FakeTransport>` handle (to read `call_count()`/`call(i)`)
+    /// after moving a clone of it into a `Box<dyn Transport>` — the SAME need
+    /// [`super::Refresher`]'s `Arc<CountingRefresher>` impl below exists for (#904, needed once
+    /// `RefreshingTransport` wraps a `FakeTransport` in `pending.rs`'s own tests).
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl Transport for std::sync::Arc<FakeTransport> {
+        async fn execute(&self, document: &str, variables: Value) -> Result<Value, TransportError> {
+            FakeTransport::execute(self, document, variables).await
+        }
+    }
+
+    /// The [`super::Refresher`] test double (#904): counts calls, answers a scripted outcome —
+    /// never touches a network. `AtomicUsize`, not `Cell`, for the same `Sync` reason
+    /// [`super::RefreshingTransport`] itself uses `AtomicBool` (see its doc comment).
+    pub struct CountingRefresher {
+        calls: std::sync::atomic::AtomicUsize,
+        succeeds: bool,
+    }
+
+    impl CountingRefresher {
+        pub fn new(succeeds: bool) -> Self {
+            Self { calls: std::sync::atomic::AtomicUsize::new(0), succeeds }
+        }
+
+        pub fn call_count(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl super::Refresher for CountingRefresher {
+        async fn refresh(&self) -> bool {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.succeeds
+        }
+    }
+
+    /// So a test can keep its own `Arc<CountingRefresher>` handle (to read `call_count()`) after
+    /// moving a clone of it into a `Box<dyn Refresher>`.
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl super::Refresher for std::sync::Arc<CountingRefresher> {
+        async fn refresh(&self) -> bool {
+            CountingRefresher::refresh(self).await
+        }
+    }
 }
 
 #[cfg(test)]
@@ -611,5 +766,104 @@ mod tests {
         assert_eq!(t.endpoint(), "https://tours.captain.food/public/graphql");
         let t = HttpTransport::new("http://127.0.0.1:8080", Role::Customer, SessionId::mint());
         assert_eq!(t.endpoint(), "http://127.0.0.1:8080/customer/graphql");
+    }
+
+    // ---- D1 (#904, ADR-20260905-101349 §13): the one-shot 401-refresh decorator ----
+
+    use super::test_support::CountingRefresher;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    fn refreshing(
+        responses: Vec<Result<Value, TransportError>>,
+        refresher: CountingRefresher,
+    ) -> (RefreshingTransport, Arc<CountingRefresher>) {
+        let refresher = Arc::new(refresher);
+        let t = RefreshingTransport::new(
+            Box::new(FakeTransport::scripted(responses)),
+            Box::new(Arc::clone(&refresher)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        (t, refresher)
+    }
+
+    /// Red-first (ADR-20260905-101349:171): a mutant that returns the 401 without ever calling the
+    /// refresher fails this with "refresher count 0 != 1" — quoted verbatim in the hand-back.
+    #[tokio::test]
+    async fn refresh_once_then_reissues_the_same_request() {
+        let (t, refresher) = refreshing(
+            vec![
+                Err(TransportError::Status { status: 401 }),
+                Ok(json!({ "me": { "customerId": "c-1" } })),
+            ],
+            CountingRefresher::new(true),
+        );
+        let data = t.execute("query { me { customerId } }", json!({})).await.unwrap();
+        assert_eq!(data, json!({ "me": { "customerId": "c-1" } }));
+        assert_eq!(refresher.call_count(), 1, "refresher count {} != 1", refresher.call_count());
+    }
+
+    /// Red-first: a mutant that refreshes PER REQUEST (instead of once per load) fails this with
+    /// "refresher count 3 != 1" once three 401 reads have gone through the same transport.
+    #[tokio::test]
+    async fn three_401_reads_refresh_exactly_once() {
+        let (t, refresher) = refreshing(
+            vec![
+                Err(TransportError::Status { status: 401 }),
+                Ok(json!({ "a": 1 })),
+                Err(TransportError::Status { status: 401 }),
+                Err(TransportError::Status { status: 401 }),
+            ],
+            CountingRefresher::new(true),
+        );
+        // First read: 401 -> refresh -> reissue -> succeeds.
+        assert!(t.execute("query { a }", json!({})).await.is_ok());
+        // Second and third reads: the load's one shot is already spent (`used` stays true whether
+        // the FIRST refresh succeeded or not) — a second 401 is returned untouched, never retried.
+        assert!(matches!(
+            t.execute("query { b }", json!({})).await,
+            Err(TransportError::Status { status: 401 })
+        ));
+        assert!(matches!(
+            t.execute("query { c }", json!({})).await,
+            Err(TransportError::Status { status: 401 })
+        ));
+        assert_eq!(refresher.call_count(), 1, "refresher count {} != 1", refresher.call_count());
+    }
+
+    /// Red-first: a mutant that refreshes on ANY non-2xx (not just a bare 401) fails this with
+    /// "refresher count 1 != 0" — a 403 (a rotated token carrying the SAME role, ADR-081527 §4)
+    /// must never arm a refresh, or a role-mismatch would loop forever.
+    #[tokio::test]
+    async fn a_403_never_refreshes() {
+        let (t, refresher) = refreshing(
+            vec![Err(TransportError::Status { status: 403 })],
+            CountingRefresher::new(true),
+        );
+        assert!(matches!(
+            t.execute("query { a }", json!({})).await,
+            Err(TransportError::Status { status: 403 })
+        ));
+        assert_eq!(refresher.call_count(), 0, "refresher count {} != 0", refresher.call_count());
+    }
+
+    /// Red-first: a mutant that swallows a failed refresh into `Malformed` (or loops trying again)
+    /// fails this with "error kind != Status 401" or a refresher count of 2. The caller must see
+    /// the ORIGINAL 401 — never a different error, never a second attempt.
+    #[tokio::test]
+    async fn a_failed_refresh_returns_the_original_401_and_arms_no_second_refresh() {
+        let (t, refresher) = refreshing(
+            vec![
+                Err(TransportError::Status { status: 401 }),
+                Err(TransportError::Status { status: 401 }), // a second read, same load
+            ],
+            CountingRefresher::new(false),
+        );
+        let err = t.execute("query { a }", json!({})).await.unwrap_err();
+        assert!(matches!(err, TransportError::Status { status: 401 }), "error kind != Status 401: {err:?}");
+        // A second read in the same load must NOT re-arm the refresh (the failure is remembered).
+        let err2 = t.execute("query { b }", json!({})).await.unwrap_err();
+        assert!(matches!(err2, TransportError::Status { status: 401 }));
+        assert_eq!(refresher.call_count(), 1, "refresher count {} != 1 (arming a second refresh)", refresher.call_count());
     }
 }

@@ -261,13 +261,20 @@ pub mod mount {
         session: SessionId,
         locale: String,
     ) {
+        // #904 (ADR-20260905-101349 §13): the mutation dispatcher gets its own one-shot-refresh
+        // budget here too (`interact::install` requires it unconditionally). NOT shared with the
+        // read below: these hand-written screens' OWN `resolve_requirements` read stays on the
+        // plain `HttpTransport`, unwrapped — a named gap (PR body), not this card's SDUI hydrate
+        // loop, and none of `checkout`/`tracking`/the sign-in return landings are the
+        // 19:40-lockout queue screens #904 exists for.
+        let refresh_used = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         // The delegated action layer, exactly as the SDUI path installs it: checkout's
         // `payment_failed_state` renders two client-kind `navigate` buttons carrying the renderer's
         // own DOM contract, and without this listener they are controls that render and do nothing
         // — the failure mode CLAUDE.md calls worse than no control at all. `matched.screen` (#639
         // 4-ii): none of these hand-written screens declare `restricted:`/`unauthenticated:` today,
         // but the driver's bounce decision reads the SAME field the SDUI path does.
-        crate::interact::install(&origin, role, session, matched.screen);
+        crate::interact::install(&origin, role, session, matched.screen, refresh_used);
         let transport = HttpTransport::new(&origin, role, session);
         let tenant = crate::router::Surface::slug_of(&host).map(str::to_string);
 
@@ -559,7 +566,10 @@ pub mod mount {
             match outcome {
                 Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
                     crate::auth::claim_session(&origin, message_id, session).await;
-                    crate::sign_in_return::navigate_away(&origin, "/");
+                    // #904 D3: the validated pending `next` (consumed ONCE from sessionStorage,
+                    // validated at THIS moment) — `/` when none was captured or it no longer
+                    // resolves.
+                    crate::sign_in_return::navigate_away(&origin, crate::sign_in_return::return_target());
                 }
                 Ok(crate::actions::ActionOutcome::Rejected { message_id, error_code, .. }) => {
                     // Best-effort: nothing was parked for every OTHER rejection (M5's shape), so
@@ -618,7 +628,9 @@ pub mod mount {
             match outcome {
                 Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
                     crate::auth::claim_session(&origin, message_id, session).await;
-                    crate::admin_sign_in_return::navigate_away(&origin, "/");
+                    // #904 D3: the validated pending `next` — `/` when none was captured or it no
+                    // longer resolves.
+                    crate::admin_sign_in_return::navigate_away(&origin, crate::admin_sign_in_return::return_target());
                 }
                 Ok(crate::actions::ActionOutcome::Rejected { message_id, error_code, .. }) => {
                     // Best-effort: nothing was parked for every OTHER rejection, so this call is a

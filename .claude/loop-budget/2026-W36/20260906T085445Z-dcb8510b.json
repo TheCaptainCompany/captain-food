@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 5636,
+  "recordedAt": "2026-09-06T08:54:45.092Z",
+  "branch": "904-silent-refresh-next",
+  "note": "previous executor produced nothing (no commit/gate/handback) - stale timer closed with true elapsed before this run starts"
+}

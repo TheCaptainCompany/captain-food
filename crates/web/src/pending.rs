@@ -304,6 +304,47 @@ mod tests {
         assert_eq!(writes[0].input["offerId"], json!("offer-1"));
     }
 
+    /// D4 (#904, ADR-20260905-101349 §13; ADR-20260720-015500 stands): a 401 on the mutation
+    /// dispatch is handled ENTIRELY by the transport layer (`graphql::RefreshingTransport`, #904
+    /// D1) — the SAME document + variables (the client-minted `messageId` already embedded in
+    /// `metadata` before the FIRST send) are reissued once, so `dispatch_persisted` sees a
+    /// transparent success and returns the ORIGINAL id. This is the "interact.rs" red-first entry
+    /// relocated here: `interact.rs` is `#![cfg(all(target_arch = "wasm32", feature = "hydrate"))]`
+    /// end to end (its own doc comment: "Everything decision-shaped lives in the native-tested
+    /// modules... this file is DOM plumbing by design") and untestable by `cargo test -p web`
+    /// (beck's Q1) — the SAME reasoning that put D1's tests in `graphql.rs` instead.
+    ///
+    /// Red-first (ADR-20260905-101349:171): a mutant that mints a NEW id on the reissue (e.g. a
+    /// hand-rolled retry that calls `dispatch` instead of relying on the transport's transparent
+    /// reissue) fails this — the two calls' `metadata.messageId` would differ.
+    #[tokio::test]
+    async fn a_401_on_mutation_dispatch_refreshes_once_and_replays_under_the_original_message_id() {
+        let store = MemoryPendingStore::default();
+        let fake = std::sync::Arc::new(FakeTransport::scripted(vec![
+            Err(TransportError::Status { status: 401 }),
+            Ok(acceptance("PENDING", false)),
+        ]));
+        let refresher = std::sync::Arc::new(crate::graphql::test_support::CountingRefresher::new(true));
+        let transport = crate::graphql::RefreshingTransport::new(
+            Box::new(std::sync::Arc::clone(&fake)),
+            Box::new(std::sync::Arc::clone(&refresher)),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+
+        let handle = dispatch_persisted(&transport, &store, ActionKey::AddToCart, input())
+            .await
+            .expect("the refresh+reissue is transparent to the caller — never a toast, never a retap");
+
+        assert_eq!(refresher.call_count(), 1, "exactly one refresh");
+        assert_eq!(fake.call_count(), 2, "the failing 401 call plus exactly one reissue — never a loop");
+        let first_id = fake.call(0).1["metadata"]["messageId"].clone();
+        let second_id = fake.call(1).1["metadata"]["messageId"].clone();
+        assert_eq!(first_id, second_id, "message id changed between the 401 and the reissue");
+        assert_eq!(second_id, json!(handle.message_id.to_string()), "the ORIGINAL client-minted id");
+        // Never a fresh dispatch: the record itself was written under this ONE id.
+        assert_eq!(store.load()[0].message_id, handle.message_id);
+    }
+
     #[tokio::test]
     async fn settle_clears_on_every_terminal_outcome_including_rejected() {
         for (status, code) in [("SUCCEEDED", None), ("REJECTED", Some("RestaurantPaused")), ("FAILED", None)] {

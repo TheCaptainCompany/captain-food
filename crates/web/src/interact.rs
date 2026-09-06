@@ -63,7 +63,7 @@ struct InFlight {
 }
 
 struct Driver {
-    transport: Rc<HttpTransport>,
+    transport: Rc<crate::graphql::RefreshingTransport>,
     store: Rc<BrowserPendingStore>,
     /// The current WS handle (replaced on every reconnect by `on_connect`).
     socket: Rc<RefCell<Option<Handle>>>,
@@ -75,25 +75,49 @@ struct Driver {
     /// match the one that journaled `verify_otp`).
     session: SessionId,
     /// The screen this page mounted (#639 part C step 4-ii, ADR-20260904-124600 §2): a refused
-    /// Tell's bounce decision (`crate::bounce::bounce_after`) needs the SAME screen's declared
+    /// Tell's bounce decision (`crate::bounce::bounce_target`) needs the SAME screen's declared
     /// routes the hydrate loop reads — one screen per page, so one `&'static Screen` for the
     /// driver's whole lifetime.
     screen: &'static Screen,
+    /// This page's `pathname` + `search` at install time (#904 D2): the same value the hydrate
+    /// loop's own bounce composes `?next=` from — read ONCE here since this page never navigates
+    /// without a fresh `hydrate()` run.
+    current_path_and_query: String,
 }
 
 /// Install the interaction layer: the delegated click listener, the shared subscription socket,
 /// and the boot-time pending resume. Called once from `hydrate()`. `screen` is the matched screen
 /// of THIS page — the bounce decision on a refused Tell reads its `restricted_route`/
 /// `unauthenticated_route`, the same pair the hydrate loop's refused READS already read.
-pub fn install(origin: &str, role: Role, session: SessionId, screen: &'static Screen) {
+/// `refresh_used` (#904, ADR-20260905-101349 §13) is the SAME one-shot-refresh flag `hydrate()`'s
+/// read transport shares, so a refresh failure is remembered for the WHOLE page — reads and
+/// mutations alike — not re-attempted the moment a button click follows a failed read.
+pub fn install(
+    origin: &str,
+    role: Role,
+    session: SessionId,
+    screen: &'static Screen,
+    refresh_used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let current_path_and_query = web_sys::window()
+        .map(|w| {
+            let l = w.location();
+            format!("{}{}", l.pathname().unwrap_or_default(), l.search().unwrap_or_default())
+        })
+        .unwrap_or_default();
     let driver = Rc::new(Driver {
-        transport: Rc::new(HttpTransport::new(origin, role, session)),
+        transport: Rc::new(crate::graphql::RefreshingTransport::new(
+            Box::new(HttpTransport::new(origin, role, session)),
+            Box::new(crate::graphql::HttpRefresher::new(origin, session)),
+            refresh_used,
+        )),
         store: Rc::new(BrowserPendingStore),
         socket: Rc::new(RefCell::new(None)),
         in_flight: Rc::new(RefCell::new(HashMap::new())),
         origin: origin.to_string(),
         session,
         screen,
+        current_path_and_query,
     });
 
     // The shared push socket. `on_connect` fires on every (re)connect: store the fresh handle —
@@ -309,13 +333,20 @@ impl Driver {
                     h
                 }
                 Err(err) => {
-                    // #639 part C step 4-ii (ADR-20260904-124600 §2): a refused Tell bounces the
-                    // SAME way a refused read does — never a toast for a rider mid-job who just
-                    // got restricted. `ActionError::Transport` is the ONLY variant that can carry
-                    // the signal (a client/auth/gap/unbound refusal never reaches the transport).
+                    // #639 part C step 4-ii (ADR-20260904-124600 §2), extended by #904 D2/D4: a
+                    // refused Tell bounces the SAME way a refused read does — never a toast for a
+                    // rider mid-job who just got restricted — and this 401 has ALREADY been through
+                    // the one-shot refresh-and-reissue inside `d.transport` (a `RefreshingTransport`,
+                    // #904 D1): reaching this branch at all means the refresh either failed or had
+                    // already been spent this page, so the ORIGINAL messageId's mutation is never
+                    // re-dispatched a second time from here — no new id, no toast, no retap.
+                    // `ActionError::Transport` is the ONLY variant that can carry the signal (a
+                    // client/auth/gap/unbound refusal never reaches the transport).
                     if let ActionError::Transport(t) = &err {
-                        if let Some(route) = crate::bounce::bounce_after(t, d.screen) {
-                            navigate_to(route);
+                        if let Some(route) =
+                            crate::bounce::bounce_target(t, d.screen, &d.current_path_and_query)
+                        {
+                            navigate_to(&route);
                             return;
                         }
                     }
@@ -468,7 +499,7 @@ async fn apply_outcome(
                         let _ = crate::auth::claim_session(&origin, message_id, session).await;
                     }
                 },
-                |route| navigate_to(route),
+                |route| navigate_home_or_next(route),
                 |sheet_id| set_sheet_hidden(Some(sheet_id), false),
                 || set_sheet_hidden(None, true),
             )
@@ -511,6 +542,33 @@ fn navigate_to(route: &str) {
         let _ = w.location().reload();
     } else {
         let _ = w.location().set_href(route);
+    }
+}
+
+/// #904 D3 — the "rider door" leg (no email hop, same tab throughout): the `on_success` chain's
+/// generic home navigation (declared `route == "/"`) honors a pending `?next=` still present in
+/// the CURRENT location's query string — read directly, NEVER `sessionStorage` (that store is the
+/// EMAIL-HOP legs' mechanism, `sign_in_return.rs`/`admin_sign_in_return.rs`; here the page never
+/// navigated away, so the value is still right there in the URL). Any OTHER declared route is left
+/// exactly as the screen author wrote it — this never second-guesses an explicit destination, only
+/// the generic "go home" one. A renderer rule, no spec field (ADR-20260817-105845): the SDUI
+/// `navigate` grammar is untouched, this is plain Rust deciding which literal href to hand it.
+///
+/// The actual decision (#904 R2-2) lives in [`crate::next_param::same_tab_next_override`], a
+/// native-testable pure function — this file is `#![cfg(all(target_arch = "wasm32", feature =
+/// "hydrate"))]` for the WHOLE module and so is never compiled by a native `cargo test -p web` run;
+/// this function is the thin DOM read (`window.location()`) that feeds it.
+fn navigate_home_or_next(route: &str) {
+    let Some(window) = web_sys::window() else {
+        navigate_to(route);
+        return;
+    };
+    let location = window.location();
+    let host = location.host().unwrap_or_default();
+    let search = location.search().unwrap_or_default();
+    match crate::next_param::same_tab_next_override(&host, route, &search) {
+        Some(target) => navigate_to(&target),
+        None => navigate_to(route),
     }
 }
 

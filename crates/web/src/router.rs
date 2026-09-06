@@ -136,6 +136,59 @@ pub fn unauthenticated_redirect(host: &str, path: &str) -> Option<&'static str> 
     screen.unauthenticated_route
 }
 
+/// The `?next=` allowlist for the RETURN-to-screen leg (#904 D2/D3, ADR-20260905-101349 §13 — the
+/// member door's flip precondition). The ROUTER is the ONLY authority — never a hand-typed list of
+/// "safe" prefixes (the STOP condition this function exists to satisfy): a candidate is rejected on
+/// its raw SHAPE before any decoding if it could ever leave this origin — not EXACTLY one leading
+/// `/` (so `//evil.com`, a protocol-relative URL, and `https://e`, an absolute one, both fail
+/// already), or containing `\` (a separator some user-agents normalize like `/`) or `:` (a scheme).
+/// Decodes ONCE, then requires [`resolve`] to land on a screen of THIS host's surface that is BOTH
+/// `requires_auth` (an open screen — which includes every `/sign-in*` door, all `requires_auth:
+/// false` — has no "come back here" story, so this ALONE is what keeps a next from ever pointing
+/// back at sign-in) and not itself a `:param` route (returning the literal template text would be
+/// a broken destination — a named V0 gap: `next` targets a SCREEN, never a deep-linked resource).
+/// Returns that screen's own static `.route`, never the caller's decoded string: a query VALUE is
+/// exactly the stranger-controlled data this allowlist exists to keep out of a navigation target,
+/// and it cannot be `'static` regardless.
+pub fn safe_next(host: &str, next: &str) -> Option<&'static str> {
+    if !next.starts_with('/') || next.starts_with("//") || next.contains('\\') || next.contains(':') {
+        return None;
+    }
+    let decoded = percent_decode_once(next);
+    let path = decoded.split('?').next().unwrap_or(&decoded);
+    let (_, matched) = resolve(host, path);
+    let screen = matched?.screen;
+    if !screen.requires_auth || screen.route.contains(':') {
+        return None;
+    }
+    Some(screen.route)
+}
+
+/// A minimal percent-decoder (`%XX` -> byte), lossy on malformed input — a stranger-controlled URL
+/// must never crash a render. Decoding happens EXACTLY ONCE, here, at [`safe_next`]'s validation
+/// time — never again downstream (`sign_in_return.rs`'s own `percent_decode` is the SAME shape,
+/// kept separate because it decodes a different value — the return token — under a different
+/// module's testing convention).
+fn percent_decode_once(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    out.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Resolve the serving surface from the request `Host`.
 pub fn surface_for_host(host: &str) -> Surface {
     let host = host.split(':').next().unwrap_or(host); // strip port
@@ -444,6 +497,59 @@ fn render_matched(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- D2 (#904, ADR-20260905-101349 §13): `safe_next`'s router-only allowlist ----
+
+    /// Red-first (ADR-20260905-101349:171): a mutant that accepts anything `/`-prefixed (never
+    /// checking `//`, scheme, backslash, or resolving through the router) accepts `//evil.com` —
+    /// this fails immediately once that mutant lands.
+    #[test]
+    fn safe_next_rejects_host_scheme_double_slash_backslash_unmatched_and_sign_in() {
+        let host = "riders.captain.food";
+        // Protocol-relative / absolute / backslash / scheme -- rejected on SHAPE alone, before any
+        // resolve.
+        assert_eq!(safe_next(host, "//evil.com"), None, "protocol-relative must never pass");
+        assert_eq!(safe_next(host, "https://evil.com"), None, "absolute URL must never pass");
+        assert_eq!(safe_next(host, "\\\\evil.com"), None, "backslash must never pass");
+        assert_eq!(safe_next(host, "javascript:alert(1)"), None, "a scheme colon must never pass");
+        assert_eq!(safe_next(host, "not-even-a-slash"), None, "must start with exactly one /");
+        // A path the router does not resolve to any screen at all.
+        assert_eq!(safe_next(host, "/this/route/does/not/exist"), None);
+        // The sign-in door itself resolves but is `requires_auth: false` -- never a valid target
+        // (this is what keeps `next` from ever looping back to sign-in, structurally).
+        assert_eq!(safe_next(host, "/sign-in"), None, "the sign-in door itself is never a target");
+    }
+
+    /// A valid requires_auth screen of THIS surface, decoded once, resolves to its own route.
+    #[test]
+    fn safe_next_accepts_a_requires_auth_screen_of_the_same_surface() {
+        let host = "riders.captain.food";
+        assert!(match_route(Surface::Rider, "/").unwrap().screen.requires_auth, "fixture assumption");
+        assert_eq!(safe_next(host, "/"), Some("/"));
+        // The leading `/` is always literal (our own composer never encodes it, `bounce.rs`'s
+        // `percent_encode_next` keeps `/` bare) -- everything AFTER it may still be encoded, and
+        // decodes once before resolving: "/%64eliveries" decodes to "/deliveries", a real
+        // requires_auth screen of the restaurant backoffice surface.
+        assert!(match_route(Surface::RestaurantBackoffice, "/deliveries").unwrap().screen.requires_auth);
+        assert_eq!(safe_next("restos.captain.food", "/%64eliveries"), Some("/deliveries"));
+    }
+
+    /// A screen that does not `requires_auth` is never a valid `next` target either.
+    #[test]
+    fn safe_next_rejects_an_open_screen() {
+        let host = "riders.captain.food";
+        assert!(!match_route(Surface::Rider, "/sign-in").unwrap().screen.requires_auth);
+        assert_eq!(safe_next(host, "/sign-in"), None);
+    }
+
+    /// A `:param` route is a known V0 gap (§ `safe_next`'s doc): returning the literal template
+    /// text would be a broken destination, so it is rejected rather than shipped half-right.
+    #[test]
+    fn safe_next_rejects_a_dynamic_param_route() {
+        let host = "riders.captain.food";
+        assert!(match_route(Surface::Rider, "/jobs/abc").unwrap().screen.requires_auth);
+        assert_eq!(safe_next(host, "/jobs/abc"), None, "a :param route is not a valid next target");
+    }
 
     #[cfg(feature = "ssr")]
     #[test]
