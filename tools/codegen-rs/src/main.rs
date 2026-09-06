@@ -106,6 +106,15 @@ fn main() {
             validate_decision_row_gated_config_keys(&model, &dec_rows, &mut v);
             v
         });
+        // #917 (ADR-20260904-152807 §7, one level up from the rule above): a `type: bool` toggle
+        // whose `gates:` prose says STOPPED/PAUSED and carries NO `decisionRow:` at all is an error
+        // on its own — the RUN_SIRENE_WORKER shape #917 found, where the rule above had nothing to
+        // bind to because no `decisionRow:` existed yet.
+        dec_issues.extend({
+            let mut v = Vec::new();
+            validate_config_prose_says_stopped_without_row(&model, &mut v);
+            v
+        });
         // §22b — the committed index region must equal the fold over the source rows (founder
         // requirement 12): caught at VALIDATE time with the clearer message; check-drift stays
         // the outer net and compares the same bytes via the same emit function. CHECK MODE ONLY,

@@ -203,6 +203,15 @@ said `"true"`, unreconciled, discovered only by a human reading both at once
 (`PUBLISH-PRECONDITIONS`). First use: `configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR` bound to
 [`RIDER-RESTRICTION-PRECONDITIONS`](../decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml).
 
+One level up, `config-prose-says-stopped-without-row` (`validate_config_prose_says_stopped_without_row`,
+same file, #917) catches the gap the rule above cannot see: a `type: bool` key whose `gates:` prose
+contains the word `STOPPED` or `PAUSED` (case-insensitive, whole word) and carries NO `decisionRow:`
+at all is an error on its own — exactly `RUN_SIRENE_WORKER`'s own shape before #917, where there was
+no `decisionRow:` for the rule above to bind to in the first place. Scoped to `type: bool`: the
+un-scoped rule also trips on non-toggle keys using the words in ordinary, unrelated prose
+(`SIRENE_BUDGET_MINUTES`'s sweep "stopping" cleanly; `LOG_LEVEL` citing a "paused" pipeline as an
+example), neither sensibly bindable to a decision row.
+
 ## The specs index — full detail (moved from CLAUDE.md, 2026-08-01)
 
 CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
