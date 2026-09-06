@@ -553,26 +553,23 @@ fn navigate_to(route: &str) {
 /// exactly as the screen author wrote it — this never second-guesses an explicit destination, only
 /// the generic "go home" one. A renderer rule, no spec field (ADR-20260817-105845): the SDUI
 /// `navigate` grammar is untouched, this is plain Rust deciding which literal href to hand it.
+///
+/// The actual decision (#904 R2-2) lives in [`crate::next_param::same_tab_next_override`], a
+/// native-testable pure function — this file is `#![cfg(all(target_arch = "wasm32", feature =
+/// "hydrate"))]` for the WHOLE module and so is never compiled by a native `cargo test -p web` run;
+/// this function is the thin DOM read (`window.location()`) that feeds it.
 fn navigate_home_or_next(route: &str) {
-    if route == "/" {
-        if let Some(target) = pending_next_in_current_location() {
-            navigate_to(&target);
-            return;
-        }
-    }
-    navigate_to(route);
-}
-
-/// The validated `next` a stranger's URL is STILL carrying right now, if any — never consumed
-/// (nothing to remove: this reads the live location, not a store), never twice-decoded (`safe_next`
-/// decodes once).
-fn pending_next_in_current_location() -> Option<String> {
-    let window = web_sys::window()?;
+    let Some(window) = web_sys::window() else {
+        navigate_to(route);
+        return;
+    };
     let location = window.location();
-    let host = location.host().ok()?;
-    let search = location.search().ok()?;
-    let raw = crate::next_param::extract_next(&search)?;
-    crate::router::safe_next(&host, &raw).map(str::to_string)
+    let host = location.host().unwrap_or_default();
+    let search = location.search().unwrap_or_default();
+    match crate::next_param::same_tab_next_override(&host, route, &search) {
+        Some(target) => navigate_to(&target),
+        None => navigate_to(route),
+    }
 }
 
 /// The user-facing line for a non-success outcome: the server's message when present (it is the

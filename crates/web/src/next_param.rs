@@ -60,6 +60,27 @@ pub fn take_next() -> Option<String> {
     Some(value)
 }
 
+/// The pure decision behind `interact.rs`'s "rider door" leg (#904 R2-2, ADR-20260905-101349 §13):
+/// given the DECLARED `route` an `on_success` chain is about to navigate to, the CURRENT `host`
+/// and `search`, decide whether a `?next=` still sitting in the URL should override it. Split out
+/// of `interact.rs` (which is `#![cfg(all(target_arch = "wasm32", feature = "hydrate"))]` for the
+/// WHOLE file and therefore never compiled by a native `cargo test -p web` run) so this decision
+/// is testable off-wasm — the SAME reasoning that already put `resolve_return_target` in
+/// `sign_in_return.rs` and `safe_next` in `router.rs`.
+///
+/// Only the generic "go home" route (`"/"`) is ever eligible for an override — any OTHER declared
+/// route is an explicit destination the screen author wrote, and is never second-guessed
+/// (`None`, meaning: the caller keeps `route` as-is). `None` is also the answer when the query
+/// carries no `next=`, or one that `router::safe_next` rejects (foreign host, `//`, a scheme, an
+/// unmatched path, the sign-in door itself) — the caller then falls back to `route` itself.
+pub fn same_tab_next_override(host: &str, route: &str, search: &str) -> Option<String> {
+    if route != "/" {
+        return None;
+    }
+    let raw = extract_next(search)?;
+    crate::router::safe_next(host, &raw).map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +113,39 @@ mod tests {
     fn never_reads_the_token_param_as_next() {
         assert_eq!(extract_next("?token=abc123"), None);
         assert_eq!(extract_next("?token=abc123&next=%2Forders"), Some("%2Forders".to_string()));
+    }
+
+    // ---- #904 R2-2 (ADR-20260905-101349 §13): the rider-door same-tab `next` decision ----
+
+    /// Red-first (ADR-20260905-101349:171): a mutant that skips `router::safe_next` and accepts
+    /// ANY captured `next` verbatim would let `//evil.com` through as an override, and a mutant
+    /// that always answers `Some("/")` regardless of the query would leave the valid-`next` case
+    /// unhonoured (left `"/"` right `"/deliveries"`).
+    #[test]
+    fn same_tab_next_decision_honours_a_valid_next_and_rejects_a_foreign_one() {
+        let host = "restos.captain.food";
+        assert_eq!(
+            same_tab_next_override(host, "/", "?next=/%64eliveries"),
+            Some("/deliveries".to_string()),
+            "a valid next on the generic home route is honoured"
+        );
+        assert_eq!(
+            same_tab_next_override(host, "/", "?next=//evil.com"),
+            None,
+            "an open redirect must never override the generic home route"
+        );
+    }
+
+    /// Red-first (ADR-20260905-101349:171): a mutant that drops the `route != "/"` guard and
+    /// considers a pending `next` for EVERY declared route would repoint an explicit destination
+    /// the screen author wrote (`"/orders"` becoming `"/deliveries"`) — this must never happen.
+    #[test]
+    fn a_declared_route_other_than_root_is_never_repointed() {
+        let host = "restos.captain.food";
+        assert_eq!(
+            same_tab_next_override(host, "/orders", "?next=/%64eliveries"),
+            None,
+            "an explicit declared destination is never second-guessed by a pending next"
+        );
     }
 }
