@@ -12,6 +12,7 @@
 pub mod aggregate;
 pub mod cart;
 pub mod catalog;
+pub mod catalog_as_of;
 pub mod conversation;
 pub mod customer;
 pub mod customer_credit;
