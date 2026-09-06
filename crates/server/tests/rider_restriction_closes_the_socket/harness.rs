@@ -399,6 +399,8 @@ pub fn schema_over(
             service_window_horizon: Default::default(),
             support_contact: Some(EmailAddress("support@captain.food".to_string())),
             run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(true),
+            as_of_price_authority: Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone())),
+            run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,

@@ -286,6 +286,8 @@ fn schema_over(
             // `riders`/`rider` assertions exercise `restrictionDoorOpen: true`); the door-closed
             // leg passes `false` so the read side genuinely has the key OFF too.
             run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(run_rider_restriction_door_read),
+            as_of_price_authority: Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone())),
+            run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,

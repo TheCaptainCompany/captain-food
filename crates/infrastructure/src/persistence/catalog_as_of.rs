@@ -246,7 +246,14 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
     /// verified over the same rows that produced the prices, never a second, separately-checked
     /// value. `Err` when the stream has no rows at all (the catalog does not exist yet) — never a
     /// HEAD price for a catalog that was never created.
-    async fn at_head(&self, catalog_id: CatalogId) -> Result<(AsOfCatalog, CatalogVersion), DomainError> {
+    async fn at_head(
+        &self,
+        catalog_id: CatalogId,
+        // Threaded from the priced read's request id; wired onto the `catalog.as_of.fold` span in
+        // deliverable 4 (D5). Deliverable 3 lands the signature and the caller so the observability
+        // change that follows touches no call site.
+        _correlation_id: uuid::Uuid,
+    ) -> Result<(AsOfCatalog, CatalogVersion), DomainError> {
         let stream = domain::catalog::stream(catalog_id);
         let (events, _stream_length, coordinate) = self.load_to_head(&stream).await?;
         let catalog = AsOfCatalog::from_stream(&events, coordinate);

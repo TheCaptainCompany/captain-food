@@ -315,7 +315,7 @@ async fn at_head_prices_the_live_head_and_returns_its_coordinate() {
     append_event(&pool, &stream, 3, "ProductUpdated", product(1900)).await;
 
     let repo = PgAsOfCatalogRepository::new(pool.clone());
-    let (as_of, coordinate) = repo.at_head(CatalogId(catalog_id)).await.expect("at_head reads the live head");
+    let (as_of, coordinate) = repo.at_head(CatalogId(catalog_id), uuid::Uuid::nil()).await.expect("at_head reads the live head");
     assert_eq!(coordinate, CatalogVersion::try_new(3).unwrap(), "at_head must return version 3, the live head");
     assert_eq!(as_of.coordinate(), coordinate, "AsOfCatalog::coordinate must equal the returned coordinate");
     let price = as_of.price_of(OfferId(offer_id), &[]).expect("offer exists at head");
@@ -331,7 +331,7 @@ async fn at_head_refuses_a_catalog_that_was_never_created() {
 
     let repo = PgAsOfCatalogRepository::new(pool.clone());
     let err = repo
-        .at_head(CatalogId(uuid::Uuid::new_v4()))
+        .at_head(CatalogId(uuid::Uuid::new_v4()), uuid::Uuid::nil())
         .await
         .expect_err("at_head on a never-created catalog must refuse");
     let message = format!("{err:?}");

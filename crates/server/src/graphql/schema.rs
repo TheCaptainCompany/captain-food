@@ -12,7 +12,7 @@ use async_graphql::Schema;
 use actor_client::mailbox::Mailbox;
 use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::generated::services::{IdentityService, PaymentService};
-use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
+use application::ports::{AsOfPriceAuthority, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use actor_client::supervision::MailboxLaneRepository;
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
@@ -84,12 +84,24 @@ pub struct ReadDeps {
     /// `riders`/`rider`'s `restrictionDoorOpen` — the `support_contact`/`service_window_horizon`
     /// threading precedent, a deployment fact rather than a repository.
     pub run_rider_restriction_door: RunRiderRestrictionDoor,
+    /// PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2): the fold-priced read authority the
+    /// OPEN arm of `cart.current`/`cart`/`carts` consumes through `AsOfPriceAuthority::at_head` —
+    /// a read-side port, injected here alongside `catalogs` (the closed arm's own dependency).
+    pub as_of_price_authority: Arc<dyn AsOfPriceAuthority>,
+    /// `configuration.yaml#/RUN_FOLD_PRICED_CART_READ` (D4): resolved ONCE at the composition root
+    /// — the `run_rider_restriction_door` precedent immediately above.
+    pub run_fold_priced_cart_read: RunFoldPricedCartRead,
 }
 
 /// A dedicated newtype (#639 part C step 4-iii-A) rather than a bare `bool` in `ctx.data`, so the
 /// door-key value cannot collide with any other boolean context value keyed by TypeId.
 #[derive(Debug, Clone, Copy)]
 pub struct RunRiderRestrictionDoor(pub bool);
+
+/// The same discipline as [`RunRiderRestrictionDoor`], for `RUN_FOLD_PRICED_CART_READ`
+/// (PROP-20260831-134539 slice 3a, D4).
+#[derive(Debug, Clone, Copy)]
+pub struct RunFoldPricedCartRead(pub bool);
 
 /// Write-side ports injected into the mutation resolvers' context (ADR-0035 composition root): the
 /// event store the command handlers append to, plus the Google seams the listing commands need
@@ -195,6 +207,8 @@ pub fn build_schema_for_scope(
             service_window_horizon,
             support_contact,
             run_rider_restriction_door,
+            as_of_price_authority,
+            run_fold_priced_cart_read,
         } = d;
         builder = builder.data(restaurants);
         builder = builder.data(prospection);
@@ -221,6 +235,8 @@ pub fn build_schema_for_scope(
         builder = builder.data(service_window_horizon);
         builder = builder.data(support_contact);
         builder = builder.data(run_rider_restriction_door);
+        builder = builder.data(as_of_price_authority);
+        builder = builder.data(run_fold_priced_cart_read);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

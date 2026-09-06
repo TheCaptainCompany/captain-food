@@ -7,11 +7,15 @@
 //! Three responsibilities, nothing else:
 //! - [`current_open_cart`] — the TWO-LEG `current` lookup (claim, then session);
 //! - [`readable_by`] — the by-id claim-ownership narrowing (#144/#434);
-//! - [`priced`] — money-free row → priced GraphQL `Cart` via `price_cart` over a one-read
-//!   [`CatalogSnapshot`], under the `cart-price` observability contract (span + histogram +
-//!   defect counter live HERE, the framework boundary — the pricer stays SDK-free).
+//! - [`priced`] — money-free row → priced GraphQL `Cart` under the `cart-price` observability
+//!   contract (span + histogram + defect counter live HERE, the framework boundary — both pricers
+//!   stay SDK-free): CLOSED (`RUN_FOLD_PRICED_CART_READ` off, default everywhere) prices via
+//!   `price_cart` over a one-read [`CatalogSnapshot`], unchanged since #451; OPEN prices via
+//!   `price_cart_at` over the SAME snapshot plus ONE `AsOfPriceAuthority::at_head` range read,
+//!   carrying no coordinate past this function (PROP-20260831-134539 slice 3a, D2-D4).
 
-use application::pricing::{price_cart, CatalogSnapshot};
+use application::ports::AsOfPriceAuthority;
+use application::pricing::{price_cart, price_cart_at, CatalogSnapshot};
 use application::queries::{CartReadRepository, CartRow, CatalogReadRepository, ReadScope};
 use domain::generated::entities::CartLineItem;
 use domain::generated::scalars::{CartStatus, SessionId};
@@ -115,6 +119,14 @@ pub fn readable_by(row: &CartRow, scope: &ReadScope) -> bool {
 /// that did no work.
 pub async fn priced(
     catalogs: &dyn CatalogReadRepository,
+    // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2/D4): the fold-priced read authority
+    // and the door that gates it. CLOSED (default everywhere) = today's read, below, unchanged —
+    // stated explicitly as its own arm, never as a fallback. OPEN = the SAME snapshot resolves
+    // `catalog_id`, then ONE `at_head` call returns prices AND the coordinate they were bounded at
+    // as one value; the coordinate is used to price via `price_cart_at` and DROPPED here — it
+    // reaches no reply field, no input, no command (D3).
+    authority: &dyn AsOfPriceAuthority,
+    door_open: bool,
     row: CartRow,
     // The already clock-evaluated navigation target (RSO-1): built ONCE by the resolver via
     // `Restaurant::at` with the request clock — a `RestaurantRow` here would force this seam to
@@ -146,8 +158,30 @@ pub async fn priced(
         }
 
         let priced = async {
+            // The ONE catalog read every arm performs (both today and behind the door): the
+            // projected row, for `catalog_id` and (in the OPEN arm) display metadata — never
+            // re-loaded, never a second `by_restaurant` call.
             let snapshot = CatalogSnapshot::load(catalogs, row.restaurant_id).await?;
-            price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await
+            if door_open {
+                // The CLOSED arm's own "no catalog" case falls out of `price_cart`'s per-line
+                // `offer_by_id` lookup naturally; mirrored here so the OPEN arm fails the SAME way
+                // for the SAME input rather than inventing a second unresolvable shape.
+                let Some(catalog_id) = snapshot.catalog_id() else {
+                    return Err(DomainError::rejected(
+                        "PriceUnresolvable",
+                        serde_json::json!({ "cartId": row.cart_id, "offerId": lines[0].offer_id }),
+                    ));
+                };
+                // THE mint (D2): one unbounded range read to head, returning prices and the
+                // coordinate they were bounded at as one value. `Err` here (coordinate absent,
+                // stream unreadable) falls straight through to the SAME `map_err` below as any
+                // other pricing failure — technical_error, never a HEAD/projection fallback (D4,
+                // every lens's STOP).
+                let (as_of, _coordinate) = authority.at_head(catalog_id, correlation_id).await?;
+                price_cart_at(&snapshot, &as_of, row.cart_id, row.restaurant_id, &lines).await
+            } else {
+                price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await
+            }
         }
         .await
         .map_err(|e| {

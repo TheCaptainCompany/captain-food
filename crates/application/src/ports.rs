@@ -275,7 +275,15 @@ pub trait AsOfPriceAuthority: Send + Sync {
     /// never a HEAD price for a catalog that does not exist. The returned [`CatalogVersion`] is
     /// non-`Option`, matching [`AsOfCatalog::coordinate`]: there is no code path that mints prices
     /// without a coordinate to name them.
-    async fn at_head(&self, catalog_id: CatalogId) -> Result<(AsOfCatalog, CatalogVersion), DomainError>;
+    ///
+    /// `correlation_id` (PROP-20260831-134539 slice 3a, D5) is the priced read's own request-scoped
+    /// id, recorded on `catalog.as_of.fold` — this is the mint's FIRST real caller, so the field
+    /// [`AsOfPriceAuthority::as_of`] declares but never populates gets a value here.
+    async fn at_head(
+        &self,
+        catalog_id: CatalogId,
+        correlation_id: uuid::Uuid,
+    ) -> Result<(AsOfCatalog, CatalogVersion), DomainError>;
 }
 
 /// Google Business Profile ownership-proof verification (ADR-0019: "delegate ownership proof to

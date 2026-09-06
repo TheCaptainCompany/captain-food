@@ -512,6 +512,9 @@ pub fn build_graphql_di(
     // ONCE by the caller — a parameter, like `support_contact`, so every bin passes its own
     // configured value onto `riders`/`rider`'s `restrictionDoorOpen`.
     run_rider_restriction_door: bool,
+    // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D4): `RUN_FOLD_PRICED_CART_READ`,
+    // resolved ONCE by the caller — the SAME parameter shape as `run_rider_restriction_door`.
+    run_fold_priced_cart_read: bool,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -566,6 +569,12 @@ pub fn build_graphql_di(
             pool.clone(),
         ),
     );
+    // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2): the fold-priced read authority --
+    // the SAME `pool` as `catalogs` above, a DIFFERENT read (the `Catalog-<id>` event-stream range
+    // read to head, never the `catalog` projection). Injected unconditionally, like `catalogs`
+    // itself; the door decides whether the OPEN arm ever calls it.
+    let as_of_price_authority: Arc<dyn application::ports::AsOfPriceAuthority> =
+        Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone()));
     let read = ReadDeps {
         restaurants: restaurants.clone(),
         prospection,
@@ -592,6 +601,8 @@ pub fn build_graphql_di(
         service_window_horizon,
         support_contact,
         run_rider_restriction_door: graphql::schema::RunRiderRestrictionDoor(run_rider_restriction_door),
+        as_of_price_authority,
+        run_fold_priced_cart_read: graphql::schema::RunFoldPricedCartRead(run_fold_priced_cart_read),
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -812,6 +823,7 @@ pub async fn router() -> Router {
                     ),
                     support_contact.clone(),
                     config.run_rider_restriction_door,
+                    config.run_fold_priced_cart_read,
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already

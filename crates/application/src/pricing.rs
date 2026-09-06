@@ -16,7 +16,7 @@ use domain::catalog_as_of::AsOfCatalog;
 use domain::generated::entities::{
     CartLineItem, Money, OrderLineItem, PaymentBreakdown, SelectedOption,
 };
-use domain::generated::scalars::{CartId, CurrencyCode, MoneyCents, OfferId, RestaurantId};
+use domain::generated::scalars::{CartId, CatalogId, CurrencyCode, MoneyCents, OfferId, RestaurantId};
 use domain::shared::errors::DomainError;
 use serde_json::json;
 
@@ -228,6 +228,15 @@ impl CatalogSnapshot {
         restaurant_id: RestaurantId,
     ) -> Result<Self, DomainError> {
         Ok(Self { restaurant_id, row: catalogs.by_restaurant(restaurant_id).await? })
+    }
+
+    /// The restaurant's catalog id, from the SAME row this snapshot already loaded — no second
+    /// read (PROP-20260831-134539 slice 3a, D2): the open arm resolves `catalog_id` through this
+    /// snapshot's own `catalog_id` field before calling [`crate::ports::AsOfPriceAuthority::at_head`],
+    /// which is the ONE range read the fold-priced path performs. `None` before `CatalogCreated`,
+    /// exactly like every other reader of this snapshot.
+    pub fn catalog_id(&self) -> Option<CatalogId> {
+        self.row.as_ref().map(|r| r.catalog_id)
     }
 }
 
