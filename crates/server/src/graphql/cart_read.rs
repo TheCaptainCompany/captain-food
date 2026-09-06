@@ -160,6 +160,11 @@ pub async fn priced(
     // no reply field, no input, no command (D3).
     authority: &dyn AsOfPriceAuthority,
     door: Option<FoldPricedReadOpen>,
+    // ADR-20260906-192007 D-H/D-J: mints the signed quote on the OPEN arm's success. Threaded
+    // unconditionally (like `authority`) — `priced_list` passes one too, but its own `door` is
+    // hardcoded `None`, so `minted_at_coordinate` never fills there and this reference is never
+    // actually called on that path (mirrors `authority`'s own doc comment on `priced_list`).
+    minter: &application::quote::QuoteMinter,
     row: CartRow,
     // The already clock-evaluated navigation target (RSO-1): built ONCE by the resolver via
     // `Restaurant::at` with the request clock — a `RestaurantRow` here would force this seam to
@@ -190,6 +195,11 @@ pub async fn priced(
             return Ok(unpriced_empty(&row, restaurant));
         }
 
+        // Filled ONLY on the OPEN arm's success (D-H/D-J): the coordinate the fold was bounded at
+        // and its catalog id, so a quote can be minted AFTER the priced closure returns without a
+        // second catalog/fold read. `None` on the CLOSED arm and on any failure — the CLOSED arm
+        // mints nothing (D-A: every read is null until the door opens).
+        let mut minted_at_coordinate: Option<(domain::generated::scalars::CatalogId, domain::catalog_as_of::CatalogVersion)> = None;
         let priced = async {
             // The ONE catalog read every arm performs (both today and behind the door): the
             // projected row, for `catalog_id` and (in the OPEN arm) display metadata — never
@@ -212,6 +222,7 @@ pub async fn priced(
                 // `map_err` below as any other pricing failure — technical_error, never a
                 // HEAD/projection fallback (D4, every lens's STOP).
                 let as_of = authority.at_head(catalog_id, correlation_id).await?;
+                minted_at_coordinate = Some((catalog_id, as_of.coordinate()));
                 price_cart_at(&snapshot, &as_of, row.cart_id, row.restaurant_id, &lines).await
             } else {
                 price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await
@@ -232,8 +243,10 @@ pub async fn priced(
         })?;
 
         // Domain → API shapes share the serde spelling (camelCase) — the same round-trip the Order
-        // read model uses for its jsonb items.
-        let lines = serde_json::to_value(&priced.items)
+        // read model uses for its jsonb items. Named `api_lines` (never re-shadowing `lines`): the
+        // quote mint below still needs the ORIGINAL `Vec<CartLineItem>` repricing input, not the
+        // API-mapped `OrderLineItem`s.
+        let api_lines = serde_json::to_value(&priced.items)
             .ok()
             .and_then(|v| serde_json::from_value(v).ok())
             .ok_or_else(|| async_graphql::Error::new("priced lines failed to map to the API shape"))?;
@@ -250,17 +263,31 @@ pub async fn priced(
             restaurant_id: row.restaurant_id.into(),
             customer_id: row.customer_id.map(Into::into),
             status: row.status.into(),
-            lines,
+            lines: api_lines,
             total_amount,
             breakdown: Some(breakdown),
             // The Uber-comparison estimate is a policy read this seam does not perform yet (#463
             // owns the impure survivors; the degenerate shape ships — same as checkout).
             uber_comparison: None,
-            // ADR-20260906-192007 D-A/D-J: the signed quote. `None` here for now -- the
-            // `QuoteMinter` this field is meant to carry does not exist until the quote is
-            // verified server-side (D-H); every read answers null in the meantime, one of
-            // `CartQuote`'s three documented null causes (scalars.yaml#/CartQuote).
-            quote: None,
+            // ADR-20260906-192007 D-A/D-J: the signed quote. `Some` ONLY on the OPEN arm's success
+            // (`minted_at_coordinate` is filled exactly there) — binds the SAME `lines`/`priced`
+            // this read already computed to the coordinate the fold was bounded at, never a
+            // second read. `None` on the CLOSED arm (no coordinate exists to sign — one of
+            // `CartQuote`'s three documented null causes, scalars.yaml#/CartQuote) and on the
+            // empty-cart short-circuit above (no lines, nothing to quote).
+            quote: minted_at_coordinate.map(|(catalog_id, coordinate)| {
+                minter
+                    .mint(
+                        row.cart_id,
+                        row.restaurant_id,
+                        catalog_id,
+                        coordinate,
+                        &lines,
+                        &priced.total_amount,
+                        chrono::Utc::now(),
+                    )
+                    .into()
+            }),
             updated_at: row.updated_at,
             restaurant,
         })
@@ -296,11 +323,12 @@ pub async fn priced(
 pub async fn priced_list(
     catalogs: &dyn CatalogReadRepository,
     authority: &dyn AsOfPriceAuthority,
+    minter: &application::quote::QuoteMinter,
     row: CartRow,
     restaurant: Restaurant,
     correlation_id: uuid::Uuid,
 ) -> async_graphql::Result<Cart> {
-    priced(catalogs, authority, None, row, restaurant, correlation_id).await
+    priced(catalogs, authority, None, minter, row, restaurant, correlation_id).await
 }
 
 /// The zero-lines cart: the honest sum of nothing, not a fabricated payable. Shares one

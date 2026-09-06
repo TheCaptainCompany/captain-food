@@ -515,6 +515,10 @@ pub fn build_graphql_di(
     // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D4): `RUN_FOLD_PRICED_CART_READ`,
     // resolved ONCE by the caller — the SAME parameter shape as `run_rider_restriction_door`.
     run_fold_priced_cart_read: bool,
+    // ADR-20260906-192007 D-H: `QUOTE_SIGNING_KEY_HMAC_SECRET`, resolved ONCE by the caller
+    // (`Config::resolve`) — the minter needs only the CURRENT key (never the verifier's plural
+    // set), so this is the one new parameter the read side needs.
+    quote_signing_key_hmac_secret: Option<String>,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -570,11 +574,24 @@ pub fn build_graphql_di(
         ),
     );
     // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2): the fold-priced read authority --
-    // the SAME `pool` as `catalogs` above, a DIFFERENT read (the `Catalog-<id>` event-stream range
-    // read to head, never the `catalog` projection). Injected unconditionally, like `catalogs`
-    // itself; the door decides whether the OPEN arm ever calls it.
-    let as_of_price_authority: Arc<dyn application::ports::AsOfPriceAuthority> =
-        Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone()));
+    // its OWN bulkhead pool (D-K), never the shared `pool` `catalogs` above uses -- a DIFFERENT
+    // read (the `Catalog-<id>` event-stream range read to head, never the `catalog` projection).
+    // Injected unconditionally, like `catalogs` itself; the door decides whether the OPEN arm
+    // ever calls it.
+    let as_of_price_authority: Arc<dyn application::ports::AsOfPriceAuthority> = Arc::new(
+        infrastructure::PgAsOfCatalogRepository::new(
+            infrastructure::PgAsOfCatalogRepository::bulkhead_pool(&pool),
+        ),
+    );
+    // ADR-20260906-192007 D-H: the minter's ONE current key -- `SigningKey::from_resolved_secret`
+    // falls back to the DEV-ONLY literal when unset, exactly `EmailSendPolicy::from_config`'s own
+    // precedent (the write door's verifier applies the SAME resolution, plus the boot refusal,
+    // where `CommandDeps` is built below).
+    let quote_minter: Arc<application::quote::QuoteMinter> =
+        Arc::new(application::quote::QuoteMinter::new(application::quote::SigningKey::from_resolved_secret(
+            "current",
+            quote_signing_key_hmac_secret.as_deref().unwrap_or(""),
+        )));
     let read = ReadDeps {
         restaurants: restaurants.clone(),
         prospection,
@@ -603,6 +620,7 @@ pub fn build_graphql_di(
         run_rider_restriction_door: graphql::schema::RunRiderRestrictionDoor(run_rider_restriction_door),
         as_of_price_authority,
         run_fold_priced_cart_read: graphql::schema::RunFoldPricedCartRead(run_fold_priced_cart_read),
+        quote_minter,
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -824,6 +842,7 @@ pub async fn router() -> Router {
                     support_contact.clone(),
                     config.run_rider_restriction_door,
                     config.run_fold_priced_cart_read,
+                    config.quote_signing_key_hmac_secret.clone(),
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already

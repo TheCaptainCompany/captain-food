@@ -554,6 +554,7 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let authority = ctx.data::<std::sync::Arc<dyn application::ports::AsOfPriceAuthority>>()?;
+        let minter = ctx.data::<std::sync::Arc<application::quote::QuoteMinter>>()?;
         // The `carts` fan-out never reads the door's config flag (ADR-20260906-192007 D-L): it
         // always calls `priced_list`, whose signature carries no witness parameter at all, so an
         // N-restaurant list can never mint N unbounded head folds regardless of the door's runtime
@@ -593,7 +594,7 @@ impl QueryRoot {
         let mut out = Vec::new();
         for c in rows {
             let Some(r) = by_id.get(&c.restaurant_id.0).cloned() else { continue };
-            out.push(crate::graphql::cart_read::priced_list(&**catalogs, &**authority, c, Restaurant::at(r, now, horizon), correlation_id).await?);
+            out.push(crate::graphql::cart_read::priced_list(&**catalogs, &**authority, &**minter, c, Restaurant::at(r, now, horizon), correlation_id).await?);
         }
         Ok(out)
     }
@@ -607,6 +608,7 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let authority = ctx.data::<std::sync::Arc<dyn application::ports::AsOfPriceAuthority>>()?;
+        let minter = ctx.data::<std::sync::Arc<application::quote::QuoteMinter>>()?;
         let door = crate::graphql::cart_read::FoldPricedReadOpen::from_flag(*ctx.data::<crate::graphql::schema::RunFoldPricedCartRead>()?);
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
         // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
@@ -630,7 +632,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, &**authority, door, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, &**authority, door, &**minter, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
     }
     /// The caller's CURRENT cart AT THIS STOREFRONT — the cart/mini-cart read, TWO-LEG resolution WITHIN ONE TENANT (#451/#469, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. The TENANT comes from the request Host ({slug}.captain.food -> RestaurantId, resolved once at the edge), NEVER from an argument — an argument would let a client assert whose cart to serve, and an OPTIONAL one would mean "unbounded when omitted". BOTH legs are bounded by it, in SQL. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart AT THIS RESTAURANT (ReadScope::Customer, the `myReclamations` pattern; PUBLIC is the anonymous PATH, not "no identity" — the open path reads the caller's credential and degrades to anonymous, so a signed-in customer on a storefront IS resolved here). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart at this restaurant WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. A host that names NO restaurant (the marketplace, an unknown slug) resolves NULL, never "the newest cart anywhere" — the customer's carts at other restaurants are a different query (`carts`). OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart here" — the client renders the empty state, never a fabricated 0,00 EUR payable.
     #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER).and(StandingGuard::new(&[], \"current\"))", visible = "visible_public_customer")]
@@ -642,6 +644,7 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let authority = ctx.data::<std::sync::Arc<dyn application::ports::AsOfPriceAuthority>>()?;
+        let minter = ctx.data::<std::sync::Arc<application::quote::QuoteMinter>>()?;
         let door = crate::graphql::cart_read::FoldPricedReadOpen::from_flag(*ctx.data::<crate::graphql::schema::RunFoldPricedCartRead>()?);
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
         // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
@@ -669,7 +672,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, &**authority, door, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, &**authority, door, &**minter, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
     }
     /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
     #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"orders\"))", visible = "visible_customer_restaurant_account_restaurant_admin")]

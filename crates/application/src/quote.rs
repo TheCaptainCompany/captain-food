@@ -107,21 +107,21 @@ impl SigningKey {
 /// catalog state. `total_cents`/`currency` are carried for OBSERVABILITY ONLY (never a verify-time
 /// gate — see the module doc); the CHARGE is always the fresh [`price_cart_at`] recompute.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct QuotePayload {
-    cart_id: uuid::Uuid,
-    restaurant_id: uuid::Uuid,
-    catalog_id: uuid::Uuid,
+pub struct QuotePayload {
+    pub cart_id: uuid::Uuid,
+    pub restaurant_id: uuid::Uuid,
+    pub catalog_id: uuid::Uuid,
     /// The coordinate the fold was bounded at when this quote was minted
     /// (`domain::catalog_as_of::CatalogVersion::get`).
-    catalog_version: i64,
+    pub catalog_version: i64,
     /// SHA-256 hex of the canonical JSON encoding of the cart's `Vec<CartLineItem>` at mint time —
     /// the edit-detection anchor (module doc's substitution note).
-    lines_digest: String,
-    total_cents: i64,
-    currency: String,
+    pub lines_digest: String,
+    pub total_cents: i64,
+    pub currency: String,
     /// Unix seconds — the mint instant, checked against the 30-minute `QUOTE-STALENESS` backstop.
-    minted_at: i64,
-    key_id: String,
+    pub minted_at: i64,
+    pub key_id: String,
 }
 
 /// The base64url-decoded, JSON-deserialized envelope one [`CartQuote`] token carries: the payload
@@ -274,7 +274,10 @@ impl QuoteVerifier {
     /// the 30-minute staleness backstop. Returns the decoded payload on success — the caller
     /// (`verify_quote`) still owns every LIVE-STATE comparison (cartId/restaurantId/catalogId/
     /// lines digest/coordinate), because this method holds no cart or catalog state at all.
-    fn decode_and_check_signature(
+    /// `pub`: none of `QuotePayload`'s fields are secret (the signature itself never leaves this
+    /// module), so a caller inspecting the decoded, ALREADY-VERIFIED fields (tests; a future
+    /// observability span) needs no feature-gated test-only seam.
+    pub fn decode_and_check_signature(
         &self,
         token: &CartQuote,
         now: DateTime<Utc>,

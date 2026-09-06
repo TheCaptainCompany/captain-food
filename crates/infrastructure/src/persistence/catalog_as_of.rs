@@ -64,6 +64,30 @@ impl PgAsOfCatalogRepository {
         Self { pool }
     }
 
+    /// The fold's own BULKHEAD pool (PROP-20260831-134539 slice 3b, D-K): a saturated fold read
+    /// (an unbounded `at_head`/bounded `as_of` range scan under load) must never starve the
+    /// SHARED pool every other read/write on the process depends on, and must fail FAST rather
+    /// than queue behind it. `max_connections(2)`: this pool serves exactly the priced-read OPEN
+    /// arm and the write-side verify guard, never a third caller — two connections is enough
+    /// headroom for one in-flight read of each kind without reserving a share of the shared
+    /// pool's budget. `acquire_timeout` ~250ms: fail into `technical_error` quickly rather than
+    /// let a caller wait behind a saturated bulkhead the length of the shared pool's own timeout.
+    /// `statement_timeout` set on THIS pool's OWN [`sqlx::postgres::PgConnectOptions`] (a startup
+    /// packet option, applied once per NEW connection this pool opens) — never `after_connect`
+    /// on the shared pool (which would apply the fold's timeout to every OTHER query the process
+    /// runs), never `SET` on a borrowed connection (a per-session GUC a later borrower of the
+    /// SAME pooled connection would inherit), never `SET LOCAL` (scoped to a transaction this
+    /// read never opens). Derived from the SAME [`sqlx::postgres::PgConnectOptions`] the shared
+    /// pool already resolved (`pool.connect_options()`) so there is no second `DATABASE_URL` to
+    /// keep in sync — both pools always target the identical database.
+    pub fn bulkhead_pool(pool: &PgPool) -> PgPool {
+        let options = (*pool.connect_options()).clone().options([("statement_timeout", "2000")]);
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy_with(options)
+    }
+
     /// The SQL leg alone: rows at or before `version` (inclusive, the 1-based `domain_events.version`
     /// verbatim — no conversion) on `stream_name`, in version order — `$`-prefixed technical rows
     /// included (the predicate is on the real `version` column, so it truncates correctly regardless

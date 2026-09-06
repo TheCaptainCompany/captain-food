@@ -91,6 +91,11 @@ pub struct ReadDeps {
     /// `configuration.yaml#/RUN_FOLD_PRICED_CART_READ` (D4): resolved ONCE at the composition root
     /// — the `run_rider_restriction_door` precedent immediately above.
     pub run_fold_priced_cart_read: RunFoldPricedCartRead,
+    /// ADR-20260906-192007 D-H/D-J: mints the signed quote on the OPEN arm's success
+    /// (`cart_read::priced`). Injected unconditionally, like `as_of_price_authority` — minting
+    /// only ever fires when the door (above) is open, so this holds even when the door is closed
+    /// or the resolver is `carts` (which never opens it at all, D-L).
+    pub quote_minter: Arc<application::quote::QuoteMinter>,
 }
 
 /// A dedicated newtype (#639 part C step 4-iii-A) rather than a bare `bool` in `ctx.data`, so the
@@ -209,6 +214,7 @@ pub fn build_schema_for_scope(
             run_rider_restriction_door,
             as_of_price_authority,
             run_fold_priced_cart_read,
+            quote_minter,
         } = d;
         builder = builder.data(restaurants);
         builder = builder.data(prospection);
@@ -237,6 +243,7 @@ pub fn build_schema_for_scope(
         builder = builder.data(run_rider_restriction_door);
         builder = builder.data(as_of_price_authority);
         builder = builder.data(run_fold_priced_cart_read);
+        builder = builder.data(quote_minter);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);
