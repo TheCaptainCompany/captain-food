@@ -133,6 +133,10 @@ pub fn install(
                 *socket_slot.borrow_mut() = Some(handle.clone());
             }),
             Rc::new(move |sub_id, event| d.on_push(sub_id, event)),
+            // #894 D2: this socket's restriction close bounces through the SAME per-screen rule
+            // the HTTP leg applies (`bounce::restricted_target` = `screen.restricted_route`) —
+            // `screen` is already in hand here, never a synthesised route.
+            Rc::new(move || crate::bounce::restricted_target(screen)),
         );
     }
 
@@ -535,8 +539,10 @@ fn reveal_inline_error(action: &str, text: &str) -> bool {
 
 /// `navigate` step target (#529): the special [`crate::executor::RELOAD_ROUTE`] token reloads the
 /// current location (a fresh SSR pass re-reads the now-set auth cookie); anything else is a literal
-/// href.
-fn navigate_to(route: &str) {
+/// href. `pub(crate)` (#894 D2): the app's ONE spelling of leaving a screen, reused by the socket
+/// module's restriction-close navigation (`subscriptions::browser`) rather than a second one
+/// invented there or `sign_in_return::navigate_away` (a DIFFERENT, cross-origin-capable helper).
+pub(crate) fn navigate_to(route: &str) {
     let Some(w) = web_sys::window() else { return };
     if route == crate::executor::RELOAD_ROUTE {
         let _ = w.location().reload();

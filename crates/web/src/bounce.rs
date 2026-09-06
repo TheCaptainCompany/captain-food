@@ -79,6 +79,16 @@ fn percent_encode_next(input: &str) -> String {
     out
 }
 
+/// The per-screen restricted-route rule, reused by a raw WebSocket close (#894 D2,
+/// `subscriptions::handle_close`'s `restricted` closure) — a socket close never carries a
+/// [`TransportError`], so it cannot run through [`bounce_after`]/[`bounce_target`], and must NEVER
+/// synthesise one just to get there (that would forge a server signal the socket never actually
+/// carried). `= screen.restricted_route`, never invented on a screen that declares none — the same
+/// rule the HTTP leg applies, applied here without a `TransportError` in hand.
+pub fn restricted_target(screen: &Screen) -> Option<&'static str> {
+    screen.restricted_route
+}
+
 /// Where one refused GraphQL call bounces `screen`'s visitor, or `None` to stay put. Private
 /// (#904 R2-4, compiler-first): [`bounce_target`] is the ONE public surface both call sites (the
 /// hydrate loop's per-read outcome, `interact.rs`'s pre-acceptance mutation failure) use — routing
@@ -191,6 +201,21 @@ mod tests {
     fn a_screen_without_a_restricted_route_never_bounces() {
         assert_eq!(sign_in_door().restricted_route, None, "fixture assumption");
         assert_eq!(bounce_after(&restricted_reason(), sign_in_door()), None);
+    }
+
+    // ---- #894 D2: restricted_target, the socket-close leg's per-screen rule ----
+
+    /// Equals the screen's own declared route (the jobs pair carries `Some("/restricted")`).
+    #[test]
+    fn restricted_target_equals_the_screens_declared_route() {
+        assert_eq!(restricted_target(jobs()), Some("/restricted"));
+        assert_eq!(restricted_target(job_detail()), Some("/restricted"));
+    }
+
+    /// `None` on a screen that declares none — the sign-in door, same fixture the HTTP leg uses.
+    #[test]
+    fn restricted_target_is_none_on_the_sign_in_door() {
+        assert_eq!(restricted_target(sign_in_door()), None);
     }
 
     /// A bare 401 (no session) bounces to the screen's `unauthenticated_route` — the 2c-ii leg,

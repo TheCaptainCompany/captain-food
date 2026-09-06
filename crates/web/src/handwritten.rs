@@ -523,6 +523,12 @@ pub mod mount {
                     state.set(next);
                 }
             }),
+            // #894 D2: this page never mounts the router and has no `Screen` — an explicit
+            // no-route posture, never a synthesised one. This socket carries `orderStatusChanged`
+            // for CUSTOMER order tracking, never a RIDER connection, so it can never actually
+            // receive the rider restriction close; if it somehow did, `handle_close` holds at
+            // backoff rather than inventing a route.
+            Rc::new(|| None),
         );
     }
 

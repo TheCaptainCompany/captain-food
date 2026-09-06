@@ -301,7 +301,7 @@ pub enum CloseDisposition {
     /// An ordinary drop — reconnect through [`backoff`] (today's whole-repo path, unchanged).
     Reconnect,
     /// The platform closed THIS rider's socket on purpose (ADR-20260905-065415 §3): the caller
-    /// decides where to route it (the composition seam lands in D2 of #894).
+    /// decides where to route it, per [`handle_close`].
     Restricted,
     /// A `4403` with some OTHER reason: `graphql-transport-ws`'s own terminal `Forbidden`, which
     /// the reference client never retries. No reconnect, no bounce — the HTTP leg (`bounce.rs`)
@@ -324,6 +324,33 @@ pub fn close_disposition(code: u16, reason: &str) -> CloseDisposition {
         }
     } else {
         CloseDisposition::Reconnect
+    }
+}
+
+/// The screen-agnostic composition seam (#894 D2): turns a raw close into exactly one of
+/// `reconnect` / `navigate` / neither, through [`close_disposition`] — the socket module never
+/// sees a `Screen`. `restricted` supplies the per-screen restricted route (`bounce::
+/// restricted_target`, or a fixed `None` for a caller with no screen in hand); a declared route
+/// navigates there and reconnects NEVER; no declared route holds at backoff (the DECLARED degraded
+/// mode: the `/restricted` screen itself holds a socket the server re-closes on every
+/// re-derivation, and reinstatement relies on that reconnect — a dead socket there strands a
+/// reinstated rider). Never grows logic beyond this match: the wasm `onclose` adapter and every
+/// other caller stay three lines.
+pub fn handle_close(
+    code: u16,
+    reason: &str,
+    attempt: u32,
+    reconnect: impl FnOnce(u32),
+    restricted: impl FnOnce() -> Option<&'static str>,
+    navigate: impl FnOnce(&'static str),
+) {
+    match close_disposition(code, reason) {
+        CloseDisposition::Reconnect => reconnect(attempt + 1),
+        CloseDisposition::Stop => {}
+        CloseDisposition::Restricted => match restricted() {
+            Some(route) => navigate(route),
+            None => reconnect(attempt + 1),
+        },
     }
 }
 
@@ -363,14 +390,19 @@ pub mod browser {
         /// Open the socket and drive it. `on_connect` is invoked with the fresh [`WsClient`]-backed
         /// [`Handle`] on EVERY successful handshake (first connect and every reconnect) —
         /// subscribe + re-sync there. `on_event` receives every subscription event.
+        /// `on_restricted` (#894 D2) supplies [`handle_close`]'s per-screen restricted-route rule
+        /// for a 4403 restriction close — `bounce::restricted_target(screen)` for a caller with a
+        /// `Screen` in hand, a fixed `Rc::new(|| None)` for one without (an explicit no-route
+        /// posture, never a synthesised route).
         pub fn open(
             url: String,
             auth: Option<String>,
             session: SessionId,
             on_connect: Rc<dyn Fn(&mut Handle)>,
             on_event: Rc<dyn Fn(SubId, SubscriptionEvent)>,
+            on_restricted: Rc<dyn Fn() -> Option<&'static str>>,
         ) -> Connection {
-            spawn_socket(url, auth, session, on_connect, on_event, 0);
+            spawn_socket(url, auth, session, on_connect, on_event, on_restricted, 0);
             Connection
         }
     }
@@ -413,10 +445,11 @@ pub mod browser {
         session: SessionId,
         on_connect: Rc<dyn Fn(&mut Handle)>,
         on_event: Rc<dyn Fn(SubId, SubscriptionEvent)>,
+        on_restricted: Rc<dyn Fn() -> Option<&'static str>>,
         attempt: u32,
     ) {
         let Ok(socket) = web_sys::WebSocket::new_with_str(&url, SUBPROTOCOL) else {
-            schedule_reconnect(url, auth, session, on_connect, on_event, attempt + 1);
+            schedule_reconnect(url, auth, session, on_connect, on_event, on_restricted, attempt + 1);
             return;
         };
 
@@ -471,17 +504,28 @@ pub mod browser {
             onmessage.forget();
         }
 
-        // onclose: reconnect through the backoff policy — disconnects are NORMAL (free tier).
+        // onclose: the seam decides (#894 D2) — a three-line adapter over `handle_close`, zero
+        // logic beyond reading the close frame and calling it.
         {
             let onclose = Closure::<dyn FnMut(web_sys::CloseEvent)>::new(
-                move |_e: web_sys::CloseEvent| {
-                    schedule_reconnect(
-                        url.clone(),
-                        auth.clone(),
-                        session,
-                        Rc::clone(&on_connect),
-                        Rc::clone(&on_event),
-                        attempt + 1,
+                move |e: web_sys::CloseEvent| {
+                    handle_close(
+                        e.code(),
+                        &e.reason(),
+                        attempt,
+                        |next_attempt| {
+                            schedule_reconnect(
+                                url.clone(),
+                                auth.clone(),
+                                session,
+                                Rc::clone(&on_connect),
+                                Rc::clone(&on_event),
+                                Rc::clone(&on_restricted),
+                                next_attempt,
+                            )
+                        },
+                        || on_restricted(),
+                        crate::interact::navigate_to,
                     );
                 },
             );
@@ -496,13 +540,14 @@ pub mod browser {
         session: SessionId,
         on_connect: Rc<dyn Fn(&mut Handle)>,
         on_event: Rc<dyn Fn(SubId, SubscriptionEvent)>,
+        on_restricted: Rc<dyn Fn() -> Option<&'static str>>,
         attempt: u32,
     ) {
         let delay = backoff::delay(attempt);
         wasm_bindgen_futures::spawn_local(async move {
             gloo_timers::future::TimeoutFuture::new(delay.as_millis().min(u32::MAX as u128) as u32)
                 .await;
-            spawn_socket(url, auth, session, on_connect, on_event, attempt);
+            spawn_socket(url, auth, session, on_connect, on_event, on_restricted, attempt);
         });
     }
 }
@@ -727,5 +772,61 @@ mod tests {
     fn close_disposition_reconnects_on_other_codes_regardless_of_reason() {
         assert_eq!(close_disposition(1006, ""), CloseDisposition::Reconnect);
         assert_eq!(close_disposition(1000, ""), CloseDisposition::Reconnect);
+    }
+
+    // ---- D2 (#894, ADR-20260905-065415:178): the composition seam ----
+
+    /// The restriction close routes to the declared route and NEVER reconnects (M4: make
+    /// `handle_close` call `reconnect` unconditionally — today's `onclose` body).
+    #[test]
+    fn handle_close_routes_and_never_reconnects_on_the_restriction_close() {
+        let reconnect_calls = std::cell::RefCell::new(Vec::new());
+        let navigate_calls = std::cell::RefCell::new(Vec::new());
+        handle_close(
+            shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE,
+            shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_REASON,
+            2,
+            |attempt| reconnect_calls.borrow_mut().push(attempt),
+            || Some("/restricted"),
+            |route| navigate_calls.borrow_mut().push(route),
+        );
+        assert_eq!(*reconnect_calls.borrow(), Vec::<u32>::new(), "must never reconnect");
+        assert_eq!(*navigate_calls.borrow(), vec!["/restricted"]);
+    }
+
+    /// A restriction close on a screen that declares NO restricted route holds at backoff — the
+    /// DECLARED degraded mode, never a silent dead socket (M5: on `Restricted` with no route call
+    /// neither function).
+    #[test]
+    fn handle_close_holds_at_backoff_when_no_route_is_declared() {
+        let reconnect_calls = std::cell::RefCell::new(Vec::new());
+        let navigate_calls: std::cell::RefCell<Vec<&'static str>> = std::cell::RefCell::new(Vec::new());
+        handle_close(
+            shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE,
+            shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_REASON,
+            2,
+            |attempt| reconnect_calls.borrow_mut().push(attempt),
+            || None,
+            |route| navigate_calls.borrow_mut().push(route),
+        );
+        assert_eq!(*reconnect_calls.borrow(), vec![3], "attempt + 1, the capped-backoff path");
+        assert!(navigate_calls.borrow().is_empty());
+    }
+
+    /// A 4403 with an unrecognised reason never reconnects (M6: treat `Stop` as `Reconnect`).
+    #[test]
+    fn handle_close_stops_on_an_unknown_4403() {
+        let reconnect_calls = std::cell::RefCell::new(Vec::new());
+        let navigate_calls: std::cell::RefCell<Vec<&'static str>> = std::cell::RefCell::new(Vec::new());
+        handle_close(
+            shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE,
+            "UNKNOWN_REASON",
+            0,
+            |attempt| reconnect_calls.borrow_mut().push(attempt),
+            || panic!("Stop must never consult the restricted route"),
+            |route| navigate_calls.borrow_mut().push(route),
+        );
+        assert_eq!(*reconnect_calls.borrow(), Vec::<u32>::new());
+        assert!(navigate_calls.borrow().is_empty());
     }
 }
