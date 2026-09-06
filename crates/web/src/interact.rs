@@ -197,7 +197,8 @@ pub fn install(
                 return;
             };
             // #888 D2: shares `input_value`'s cast, widened the same way (a `text_area` does not
-            // wire `on_complete` today, but a future one must not silently read 0 chars).
+            // wire `on_complete` today, but a future one must not silently read 0 chars). Same
+            // residue as `input_value`: UNREACHABLE until the renderer emits a `<textarea>`.
             let filled = el
                 .dyn_ref::<web_sys::HtmlInputElement>()
                 .map(|i| i.value())
@@ -456,10 +457,16 @@ fn current_locale() -> String {
 /// #888 D2: a `text_area` node paints a `<textarea>`, not an `<input>` — reading only
 /// `HtmlInputElement` would silently drop its value at dispatch (the honest fix the first #888
 /// card's STOP forbade, banked as a card defect). Tries `HtmlInputElement` first (the common
-/// case), falls back to `HtmlTextAreaElement`. UNTESTABLE natively: this whole driver is gated
-/// behind `cfg(wasm32 + hydrate)` (`lib.rs`) and `make wasm` is a compile check, not a DOM test —
-/// pinned by `make wasm` + `cargo clippy --target wasm32-unknown-unknown` + review, residue
-/// closed once #934 item 6 lands a real DOM gate.
+/// case), falls back to `HtmlTextAreaElement`.
+///
+/// UNREACHABLE today, not just untested (farley): `grep -rn "<textarea" crates/web/src` finds
+/// NOTHING — `text_area` still renders the no-arm `<div>` (renderer.rs), so no `<textarea>` ever
+/// reaches this driver in the served bundle. UNTESTABLE natively either way: this whole driver is
+/// gated behind `cfg(wasm32 + hydrate)` (`lib.rs`) and `make wasm` is a compile check, not a DOM
+/// test — pinned by `make wasm` + `cargo clippy --target wasm32-unknown-unknown` + review. The
+/// residue closes on TWO conditions, not one: #934 item 1 (bind the sites so the arm can land)
+/// AND #934 item 6 (a real DOM gate) — #934 item 6 alone cannot exercise this fallback while no
+/// `<textarea>` exists to exercise it against.
 fn input_value(field_id: &str) -> Option<String> {
     let doc = web_sys::window()?.document()?;
     let el = doc.get_element_by_id(field_id)?;

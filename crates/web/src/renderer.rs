@@ -1497,18 +1497,21 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
             view! { <div data-c=ty>{sections}{rest}</div> }.into_any()
         }
 
-        // ── declared, no renderer arm yet (#888: GAP(renderer)) ──────────────────────────
+        // ── declared, no renderer arm yet (GAP(renderer)) ────────────────────────────────
         //
         // `render_node_kind` is now EXHAUSTIVE over `ComponentKind` (no `_` wildcard): the
         // compiler enumerated exactly the 46 kinds below the moment the old wildcard was
         // removed, replacing the issue's own "eleven" — a number stated with no antecedent
         // (ADR-20260817-105845) and off by 35 (see the branch's hand-back for the E0004 quote).
         // Every kind here renders BYTE-IDENTICAL to the old wildcard's tagged container
-        // (title/label/value text, children, `data-group`) PLUS one marker attribute so an
-        // audit can grep the DOM for what still has no dedicated arm — `data-gap` was already
-        // taken (renderer.rs:1066, the no-backing-query sense), so this reuses the specs' own
-        // phrase for the class instead: `GAP(renderer): #888`. NO `data-action` / `data-vars` /
-        // `data-trigger` here — an inert control must never look wired (CLAUDE.md).
+        // (title/label/value text, children, `data-group`) PLUS one BARE marker attribute
+        // (`data-no-arm`, no value — evans/observability/reviewer: a ticket id baked into
+        // customer-facing HTML names a concept after the ticket that found it, and the bare
+        // attribute audits identically) so an audit can grep the DOM for what still has no
+        // dedicated arm. `data-no-arm` is the DOM spelling of the specs' `GAP(renderer)`; the
+        // DOM could not take `data-gap`, which already means no-backing-query (renderer.rs:1066).
+        // NO `data-action` / `data-vars` / `data-trigger` here — an inert control must never
+        // look wired (CLAUDE.md).
         //
         // `Badge` is listed a SECOND time, unguarded: its dedicated arm above is GUARDED
         // (`if node.prop("text").is_some()`), and a match-arm guard never counts towards
@@ -1520,11 +1523,14 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
         //
         // `text_area` and `tip_amount_selector` stay here ON PURPOSE (thirteen-lens consent,
         // ADR-20260904-013834 — a split resolved by the safer option on a legal-adjacent
-        // surface): three of `text_area`'s six DSL sites bind to no mutation and the hydrate
-        // driver cannot read a `<textarea>` today (`interact.rs` `input_value` casts to
-        // `HtmlInputElement` only) — a free-text control that silently drops a door code or an
-        // allergy note is worse than this inert div. `text_area` returns as one commit once
-        // #934 item 1 binds the sites; `tip_amount_selector` stays deferred to #887.
+        // surface). `text_area` now has exactly ONE surviving reason (holub: D2 already killed
+        // the read leg — `interact.rs input_value` reads a `<textarea>` too): three of its six
+        // DSL sites bind to NO mutation (`delivery_reason`, `delivery_instructions`;
+        // `item_instructions` rides `add_to_cart.instructions` but `CartLineInput` has no such
+        // field). Binding `item_instructions` needs a new field threaded through codegen, the
+        // GraphQL resolver, persistence and the kitchen ticket (`crates/server`) — an
+        // unquantified cost, not a promised one-commit follow-up (#934 item 1 tracks it).
+        // `tip_amount_selector` stays deferred to #887.
         ComponentKind::Screen
         | ComponentKind::Spacer
         | ComponentKind::Divider
@@ -1581,7 +1587,7 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
                 }
             };
             let group = format!("{:?}", node.kind.group());
-            view! { <div data-c=ty data-group=group data-no-arm="888">{text}{children_views(node, ctx)}</div> }
+            view! { <div data-c=ty data-group=group data-no-arm=true>{text}{children_views(node, ctx)}</div> }
                 .into_any()
         }
     }
@@ -3381,37 +3387,62 @@ mod tests {
         Node { kind, props: &[], children: &[], branches: &[] }
     }
 
-    /// The set of kinds that render `data-no-arm="888"` today must equal the frozen #888 list
-    /// EXACTLY — moving a kind out of the no-arm arm into a real rendering arm (or into it)
-    /// without updating this list reds here.
+    /// The set of kinds that render the bare `data-no-arm` marker today must equal the frozen
+    /// #888 list EXACTLY — moving a kind out of the no-arm arm into a real rendering arm (or
+    /// into it) without updating this list reds here.
     #[test]
     fn no_arm_set_is_exactly_the_declared_list() {
         let c = ctx();
         let actual: std::collections::BTreeSet<String> = ComponentKind::ALL
             .iter()
-            .filter(|k| render_node_kind(&bare_node(**k), &c).to_html().contains("data-no-arm=\"888\""))
+            .filter(|k| render_node_kind(&bare_node(**k), &c).to_html().contains("data-no-arm"))
             .map(|k| format!("{k:?}"))
             .collect();
         let frozen: std::collections::BTreeSet<String> = NO_ARM_KINDS.iter().map(|s| s.to_string()).collect();
         assert_eq!(actual, frozen, "the rendered no-arm set must equal the frozen #888 list exactly");
     }
 
+    /// beck: the guard-only-covered class (`Badge`) must fail by NAME, not only inside a
+    /// 46-element set diff — a bare `badge` (no `text`) renders the marker; a `badge` WITH
+    /// `text` renders its dedicated span and carries NO marker. Mutant quoted in the hand-back:
+    /// drop the `if node.prop("text").is_some()` guard from the dedicated `Badge` arm — it then
+    /// covers `Badge` UNCONDITIONALLY (the no-arm OR-list's `Badge` becomes an unreachable-pattern
+    /// warning, not a compile error), so the bare badge above renders the dedicated span instead
+    /// of the marker and this test reds on the first assertion.
+    #[test]
+    fn a_guarded_arm_kind_without_its_guard_condition_still_lands_in_no_arm() {
+        let c = ctx();
+        let bare_badge = bare_node(ComponentKind::Badge);
+        let bare_html = render_node_kind(&bare_badge, &c).to_html();
+        assert!(bare_html.contains("data-no-arm"), "a text-less badge must land in no-arm: {bare_html}");
+
+        let texted_badge =
+            Node { kind: ComponentKind::Badge, props: &[("text", PropValue::Text("New"))], children: &[], branches: &[] };
+        let texted_html = render_node_kind(&texted_badge, &c).to_html();
+        assert!(texted_html.contains("<span data-c=\"badge\""), "a badge with text must render its dedicated span: {texted_html}");
+        assert!(!texted_html.contains("data-no-arm"), "a badge with text must never carry the no-arm marker: {texted_html}");
+    }
+
     /// A no-arm node must carry the marker and NEVER look wired — an inert control that looks
-    /// live is worse than one that visibly is not (CLAUDE.md).
+    /// live is worse than one that visibly is not (CLAUDE.md). Fixture is `DotSeparator` (beck:
+    /// keep `TextArea` reserved for the frozen-list assertion only, not doubled up here as a
+    /// concrete fixture too).
     #[test]
     fn no_arm_nodes_carry_the_marker_and_no_action() {
         let c = ctx();
         let node = Node {
-            kind: ComponentKind::TextArea,
+            kind: ComponentKind::DotSeparator,
             props: &[("title", PropValue::Text("Untitled"))],
             children: &[],
             branches: &[],
         };
         let html = render_node_kind(&node, &c).to_html();
-        assert!(html.contains("data-no-arm=\"888\""), "no-arm node must carry the marker: {html}");
-        assert!(!html.contains("data-action"), "no-arm node must never carry data-action: {html}");
-        assert!(!html.contains("data-trigger"), "no-arm node must never carry data-trigger: {html}");
-        assert!(!html.contains("data-vars"), "no-arm node must never carry data-vars: {html}");
+        assert!(html.contains("data-no-arm"), "no-arm node must carry the marker: {html}");
+        // `!html.contains(..)` scans the WHOLE subtree, including children -- this asserts the
+        // OUTER no-arm element itself never carries these, not merely that nothing nested does.
+        assert!(!html.contains("data-action"), "no-arm outer element must never carry data-action: {html}");
+        assert!(!html.contains("data-trigger"), "no-arm outer element must never carry data-trigger: {html}");
+        assert!(!html.contains("data-vars"), "no-arm outer element must never carry data-vars: {html}");
     }
 
     /// The no-arm arm renders TODAY'S tagged container unchanged (reviewer/beck: byte-identical
