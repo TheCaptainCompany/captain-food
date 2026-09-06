@@ -312,6 +312,8 @@ screens:
     graphql_role: PUBLIC
     data_requirements: []
     actions_used: [request_rider_sign_in_code, confirm_rider_sign_in]
+    gaps:
+      - "#904 (ADR-20260905-101349 §13): a `?next=` bounce lands here silently (client-side) with no conditional 'your session ended' sentence -- the same gap the restaurant_backoffice.yaml sign_in screen's own #904 note carries (a `next`-conditioned `text` node is new SDUI grammar, not added this round, ADR-20260817-105845)."
     components:
       - type: sticky_header
         id: rider_sign_in_topbar

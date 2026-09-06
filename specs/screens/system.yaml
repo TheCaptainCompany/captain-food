@@ -355,6 +355,7 @@ screens:
     gaps:
       - "No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — \"authenticate access to Captain's internal tools\" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) plus the LCEN art. 6 III (mentions légales) obligation are NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note carries. ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here."
       - "The link-expiry countdown and a delayed resend re-enable need a client-side timer/countdown primitive this DSL does not declare (the restaurant_backoffice.yaml sign_in screen's own gap): the resend control is always active instead (the wall is server-side, harmless)."
+      - "#904 (ADR-20260905-101349 §13): a `?next=` bounce lands here silently (client-side) with no conditional 'your session ended' sentence -- the same gap the restaurant_backoffice.yaml sign_in screen's own #904 note carries (a `next`-conditioned `text` node is new SDUI grammar, not added this round, ADR-20260817-105845)."
     components:
       - type: sticky_header
         id: admin_sign_in_topbar

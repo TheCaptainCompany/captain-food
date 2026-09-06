@@ -14136,6 +14136,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 - ⚠️ The link-expiry countdown and the 60s-delayed 'Renvoyer un lien' re-enable (PROP-20260831-180622 §8.1) need a client-side timer/countdown primitive this DSL does not declare anywhere yet -- the resend control below is always active (calling the SAME identify-only action again is harmless: the wall is server-side, ADR-20260905-101349 §9) rather than a fake-disabled control that renders and does nothing.
 - ⚠️ Round 2 R2-L1 (legal, grade (b), counsel to confirm): Art. 13 information is owed AT COLLECTION -- the moment an address is typed and this form's mutation fires, whether or not it turns out to be a roster address (the no-enumeration-oracle design means Captain has already processed a non-member's address by the time any refusal could show it a notice). This screen carries no Art. 13 notice/link yet; MEMBER-SIGN-IN-DOOR-PRECONDITIONS names it as a precondition of the flip, not resolved here.
 - ⚠️ Round 3 R3-1 (ux, #870 class): the confirmation panel does not echo the typed address back to the operator -- the SDUI `text` node type has no binding to FORM-FIELD state (only to resolver data, `renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that could carry `member_email`'s dispatch-time value into the sheet's render context. A form-state-to-text binding is the shape of the fix (not built by this slice); the confirmation sentence stays self-contained (`back.sign_in.confirmation_body`) instead of ending in an empty paragraph.
+- ⚠️ #904 (ADR-20260905-101349 §13, ux Q3): the 19:40-lockout bounce lands here with `?next=` carried silently (client-side, `crates/web/src/graphql.rs`'s `RefreshingTransport` + `crates/web/src/router.rs`'s `safe_next`) -- but this screen shows NO conditional 'your session ended, sign in again to return to your orders' sentence: a `next`-conditioned `text` node would be a new SDUI grammar this round did not add (ADR-20260817-105845). The copy stays a follow-up card's `text`/`gaps.$if` addition, not built here.
 
 <a id="screen-sign_in_return"></a>
 ### 📱 `sign_in_return` · `/sign-in/return` · 🚫 not SDUI — Query-string token extraction + acceptance-first confirm/claim/route sequencing -- a hand-written page, the checkout/order_tracking precedent. · ⇄ /public/graphql
@@ -14482,6 +14483,9 @@ _Surface_ **`rider.yaml`**
 | write | `request_rider_sign_in_code` | [✏️ `requestRiderSignInCode`](#mutation-requestridersignincode) |
 | write | `confirm_rider_sign_in` | [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) |
 
+**Gaps**
+- ⚠️ #904 (ADR-20260905-101349 §13): a `?next=` bounce lands here silently (client-side) with no conditional 'your session ended' sentence -- the same gap the restaurant_backoffice.yaml sign_in screen's own #904 note carries (a `next`-conditioned `text` node is new SDUI grammar, not added this round, ADR-20260817-105845).
+
 <a id="screen-jobs"></a>
 ### 📱 `jobs` · `/` · 📱 SDUI · 🔒 auth
 
@@ -14647,6 +14651,7 @@ _Surface_ **`system.yaml`**
 **Gaps**
 - ⚠️ No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — "authenticate access to Captain's internal tools" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) plus the LCEN art. 6 III (mentions légales) obligation are NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note carries. ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here.
 - ⚠️ The link-expiry countdown and a delayed resend re-enable need a client-side timer/countdown primitive this DSL does not declare (the restaurant_backoffice.yaml sign_in screen's own gap): the resend control is always active instead (the wall is server-side, harmless).
+- ⚠️ #904 (ADR-20260905-101349 §13): a `?next=` bounce lands here silently (client-side) with no conditional 'your session ended' sentence -- the same gap the restaurant_backoffice.yaml sign_in screen's own #904 note carries (a `next`-conditioned `text` node is new SDUI grammar, not added this round, ADR-20260817-105845).
 
 <a id="screen-admin_sign_in_return"></a>
 ### 📱 `admin_sign_in_return` · `/sign-in/return` · 🚫 not SDUI — Query-string token extraction + acceptance-first confirm/claim/route sequencing -- the restaurant_backoffice.yaml sign_in_return / checkout / order_tracking precedent. · ⇄ /public/graphql
