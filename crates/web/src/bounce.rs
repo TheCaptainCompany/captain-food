@@ -14,6 +14,11 @@
 //!   * anything else (a `RoleGuard` refusal with no reason, a network failure, a malformed
 //!     envelope, a business rejection surfacing through `operationStatus` — never through here) →
 //!     `None`: the caller keeps its own degraded-render / toast posture.
+//!
+//! A third, socket-originated leg (#894 D2): a raw WebSocket close never carries a
+//! [`crate::graphql::TransportError`], so it reads the SAME per-screen rule through
+//! [`restricted_target`] instead of `bounce_after`/[`bounce_target`] — the module's scope is a
+//! refused GraphQL call OR a socket the platform closed on purpose, never a third invented signal.
 
 use crate::generated::screens::Screen;
 use crate::graphql::TransportError;

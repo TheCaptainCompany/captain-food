@@ -150,8 +150,11 @@ so no production socket can receive this close today.
   open, two config-key flips are required, production stays suspended, and the rider population is
   zero.
 - The release path (farley): `/assets/web.js` is served unhashed with no `Cache-Control`
-  (`crates/server/src/lib.rs` ~:1747, `crates/server/src/router.rs` ~:302), so "merged" does not mean
-  "riders run it" — a stale bundle against a flipped gate is exactly the hot loop this chunk deletes.
+  (`crates/server/src/lib.rs` ~:1747, `ServeDir`; the hydrate boot importing it, unhashed, is
+  `crates/web/src/router.rs:302`, `HYDRATE_SCRIPT`), so "merged" does not mean "riders run it" — a
+  stale bundle against a flipped gate is exactly the hot loop this chunk deletes. `X-VERSION`
+  (`crates/server/src/lib.rs` ~:1787) stamps every response server-side but cannot see the
+  browser's own cached copy, so the browser step of the smoke below stays necessary regardless.
   The pre-flip smoke: prove the served bundle changed (`/health` build version + a fetched `web.js`
   diff), confirm 1006 still reconnects on the new bundle, flip in staging in a real browser (`jobs`
   navigates and never reopens a socket; `/restricted` keeps reconnecting), run the stale-bundle drill
@@ -222,7 +225,8 @@ so no production socket can receive this close today.
   unreachable.
 - **legal-specialist** — consent; routing is not reasons, so ADR-20260905-065415 §11 stands
   unamended and §10 inherits only the unit-asserted "routes to the screen's declared restricted
-  route, never reconnects"; the close fires on the fact, so `/restricted`'s one-tick
+  route instead of reconnecting; holds at backoff otherwise"; the close fires on the fact, so
+  `/restricted`'s one-tick
   `details_pending` transient is now structurally reachable — a notice without its ground or dates,
   contest path intact (Art. 11(2)/11(3) Dir. 2024/2831, VERIFY-FIRST); #874 stays a blocker; not
   clearance.
