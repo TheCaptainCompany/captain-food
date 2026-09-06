@@ -266,7 +266,7 @@ mod tests {
     /// such screen should ever 401 in practice, but the rule is structural, not incidental).
     #[test]
     fn an_open_screen_never_carries_next() {
-        assert_eq!(sign_in_door().requires_auth, false, "fixture assumption");
+        assert!(!sign_in_door().requires_auth, "fixture assumption");
         // sign_in_door() declares no unauthenticated_route, so bounce_after is already None here;
         // the assertion is that `bounce_target` never invents a `next` even if it did.
         assert_eq!(bounce_target(&TransportError::Status { status: 401 }, sign_in_door(), "/sign-in"), None);
