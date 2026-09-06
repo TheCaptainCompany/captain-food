@@ -467,7 +467,7 @@ re-read, 2026-08-01). Redirect to a file and echo `$?` separately, then read bot
 it destroys the failure ENUMERATION — the per-suite detail naming which tests failed scrolls
 away above the final summary line, so a red run tells you it failed but not where, and the only
 recovery is running the whole target again (cost: one full re-run of a failing target,
-2026-08-15). Redirect to a file and grep it; never window a test run through `tail`.
+2026-08-15; again 2026-09-06 on #920 round 3, where a background `make test-crates | tail -N` left a log of doc-test noise with no verdict and cost a full DB-gated re-run). Redirect to a file IN THE SCRATCHPAD and grep it for `test result: FAILED`, `panicked` and `error[`; never window a test run through `tail`. The environment rule "never redirect a workspace test run to an uncapped log" is about a RUNAWAY suite filling the disk, not a licence to pipe through `tail` — a dispatch card that quotes the first rule must quote this one beside it.
 **The output is unreadable in BOTH directions, which is why the exit code is the only verdict.**
 A GREEN `check-drift` is SILENT — it prints no success line at all (`Makefile:74-75`: the only
 output is the failure `echo`), and the `✓ wrote <artifact>` list you see scroll past comes from its
