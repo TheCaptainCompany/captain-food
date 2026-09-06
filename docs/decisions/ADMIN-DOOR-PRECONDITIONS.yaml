@@ -15,8 +15,11 @@ question: 'What must exist before `RUN_PLATFORM_ACCESS_GRANT` (step 6-v, the pla
   mandataire under the SAS -- the SCIC conversion is deferred to M18) -- counsel + founder, upstream of the lawful
   basis (legal, business); (5) the `admin-sign-in` observability contract and the two dead-man gauges at BOTH
   composition roots, plus farley''s codegen test that every `RUN_*` key is declared unconditionally at both roots
-  with the same default; flip evidence: both gauges 1 across a deploy window, at least one `resolved`, zero
-  `admin_claim_stamp_failed_total`, `read_authorization_bridge_unresolved_total{role="ADMIN"}` flat (observability);
+  with the same default; flip evidence (metrics that actually ship with 6-v — the ADMIN path has no
+  claim stamp, so no such metric is named here): `admin_identity_resolve_total{result}` shows at
+  least one `resolved`; `read_authorization_bridge_unresolved_total{role="ADMIN"}` flat; the second
+  dead-man gauge arrives with 6-iii, so only `platform_access_grant_enforcing` is asserted 1 here
+  (observability);
   (6) for 6-iii: the System sign-in and both refusal screens exist as their OWN screens, the anonymous browser
   receives the sign-in shell and never the board (ux); (7) the `?next=` return-to-screen + silent refresh retry
   (#904) so the 19:40 lockout does not strand the only person who can make a customer whole (ux, business);
