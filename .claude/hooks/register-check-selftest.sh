@@ -522,11 +522,16 @@ expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LA
 expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
 # ── Lane D: the dispatch card (Agent surface, ADR-20260831-141500) ──────────────────────────────
-expect_d() { # expect_d <case> <want-exit> <payload> [want-reason]
-  local case="$1" want="$2" payload="$3" want_reason="${4:-}" got reason log="$FIX/case.log"
+expect_d() { # expect_d <case> <want-exit> <payload> [want-reason] [cwd]
+  local case="$1" want="$2" payload="$3" want_reason="${4:-}" cwd="${5:-}" got reason log="$FIX/case.log"
   : > "$log"
-  printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
-    REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+  if [ -n "$cwd" ]; then
+    ( cd "$cwd" && printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1 )
+  else
+    printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
+      REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+  fi
   got=$?
   if [ "$got" -ne "$want" ]; then
     echo "register-check selftest: case $case FAILED (want exit $want, got $got)" >&2
@@ -633,6 +638,18 @@ expect_d RF6-redfirst-compliant 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"su
 #    line past EOF prints nothing, and nothing cannot match the token regex) has never been seen
 #    red (#914 item 3, reviewer/beck).
 expect_d RF7-redfirst-line-past-eof 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:99 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
+# RF8/RF9 (#914 item 4, farley): no case pinned the ON-DISK `<test path>` arm, so it shipped
+# unproven by the suite. `<test path>` is derived from `$HOOK` relative to `$ROOT` -- pinning the
+# hook itself, never a hand literal or the selftest's own path -- so a rename of the hook file
+# updates this test path with it. RF8 runs with `cwd = $FIX` (a mktemp dir, never `$ROOT`) so the
+# cwd-relative `$tpath` arm of `[ ! -e "$ROOT/$tpath" ] && [ ! -e "$tpath" ]` cannot pass and only
+# the `$ROOT/$tpath` arm can -- extended `expect_d` with an optional 5th `cwd` arg rather than
+# writing the case inline, to keep the reason-check plumbing shared with every other RF case.
+TPATH_HOOK="${HOOK#"$ROOT"/}"
+# RF8 ALLOW: an EXISTING on-disk test path (the hook itself) resolves via `$ROOT/$tpath`.
+expect_d RF8-redfirst-existing-test-path 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: $TPATH_HOOK::test_x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-trail-ok "$FIX"
+# RF9 BLOCK: a test path that is neither `NEW` nor on disk anywhere -- the existence check itself.
+expect_d RF9-redfirst-missing-test-path 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: tests/does_not_exist.rs::x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "$FIX"
 
 # ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
 # A parse failure was being reported as a read declaration of read-only, so each of these was
