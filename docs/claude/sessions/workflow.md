@@ -789,7 +789,11 @@ rule 1, tracking issue [#910](https://github.com/TheCaptainCompany/captain-food/
 When the record a dispatch cites names a test, a belt or a mutant (any line matching one of the
 tokens `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`), the card carries a
 `Red-first:` section, one entry per hit — this section rides ALONGSIDE the `Register check:`/
-`Decision row:` line, never instead of it:
+`Decision row:` line, never instead of it. **A PRESENT `Red-first:` section is ALWAYS
+shape-validated (#914), whatever the hit count is**: the count decides only two refusals — a
+MISSING section is refused only when a cited record actually has a hit, and the explicit negative
+below is refused as a false negative only then too. A present section with no valid entry and no
+`none` is refused for its shape at ANY hit count, including zero.
 
 ```
 Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
@@ -811,9 +815,14 @@ tokens above (never a paraphrase — the citation must be checkable without read
 message fragment that proves it did.
 
 **Gated at dispatch by Lane D of `.claude/hooks/register-check.sh`** (Rule 1, riding after the
-trail check), proven red-first itself — the selftest cases in `register-check-selftest.sh` were
-committed FAILING before the rule existed, then turned green by it (beck, farley). **What the gate
-checks and what it does not**, the same honesty limit Lane D already states about itself:
+trail check), proven red-first itself — most of the selftest cases in `register-check-selftest.sh`
+were committed FAILING before the rule existed, then turned green by it (beck, farley). **Not
+true of every case at every stage**: RF4 (`Red-first: none` at 0 hits) was GREEN from day one, but
+for the wrong reason — the rule never fired at 0 hits, so `none` was accepted by the rule's absence,
+never by being read and found true. [#914](https://github.com/TheCaptainCompany/captain-food/issues/914)
+made the 0-hit arm actually validated and re-proved RF4 red-first against the shipped shape
+(mutant: re-gate the parse behind `rf_hit_count -gt 0`). **What the gate checks and what it does
+not**, the same honesty limit Lane D already states about itself:
 CHECKABLE — presence of the section, resolution of `<record>:<line>`, and shape of the entry.
 NOT CHECKABLE — that the named test is real, that it was EVER actually seen red, or that the
 extraction from the cited record is COMPLETE (every line that "names a test" is a judgement call

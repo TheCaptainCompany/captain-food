@@ -395,3 +395,22 @@ $GH_TOKEN" https://api.github.com/...` returned `200` from an executor subagent,
 earned the correction: believing the old sentence makes an executor hand back incomplete work
 (an un-updated issue, an uncommented PR) for a capability it actually has, and a dispatch card
 written from it says "PR mechanics are the coordinator's" when they need not be.
+
+## A second container from `create_session` with no `source_url` starts unregistered, and its clone has no fetch refspec for other branches (2026-09-06, #914 Lane B)
+
+A second container created by `create_session` with no `source_url` starts in `/home/user` with
+the repo cloned BESIDE it, not registered as this session's `.claude/` roster yet: until the
+register step lands, the repo's `.claude/agents/` roster and its `PreToolUse` hooks are **NOT
+loaded** — two lens dispatches (`Agent` calls to `beck`/`farley`) failed `Agent type not found`,
+and Lane D of `register-check.sh` had to be run **by hand** over the dispatch card in the
+meantime. Doing that by hand has its own trap: the hook's matcher expects `"tool_name":"Agent"`
+with **no space**, so piping a pretty-printed JSON payload silently falls through to the ASK
+surface instead of gating the card as a dispatch — it then refuses a decided-row citation with the
+wrong lane's reason, reading as a broken hook rather than a malformed invocation. Pipe the payload
+as **compact** JSON (`jq -c`) when driving the hook by hand. Separately: the clone this way is
+SHALLOW and tracks `main` only, so a chunk branch pushed from this container has no
+remote-tracking ref in it until a fetch refspec is added
+(`git config --add remote.origin.fetch '+refs/heads/<branch>:refs/remotes/origin/<branch>'`), and
+until then the stop hook reports "no remote branch" for a branch that is, in fact, pushed and
+live on `origin`. Cost that earned this: two failed lens dispatches, two wasted by-hand hook runs,
+and one false stop-hook report, all in the same Lane B session.
