@@ -315,8 +315,11 @@ EOF
 # #910): the fixture above stays EMPTY on purpose (0 test-naming hits), because it is shared by
 # every pre-existing Lane D case and none of them carry a `Red-first:` section -- widening it would
 # flip D2/D12/D13/D14 from ALLOW to BLOCK, exactly the "altered existing verdict" the card's STOP
-# condition forbids. This one is cited ONLY by the new RF cases below. Line 4 is the sole hit line
-# (tokens: test, belt) -- every RF case that needs a resolvable hit line points at it by number.
+# condition forbids. This one is cited ONLY by the new RF cases below. TWO lines hit the token set
+# -- line 1 ("...a record that names a test...") and line 4 ("...belt for Rule 1") -- so
+# `rf_hit_count` over this file is 2, not 1 (#914 item 2: the earlier comment here claimed line 4
+# was the SOLE hit line, which is false and was never checked by any case). Every RF case that
+# needs a resolvable hit line points at line 4 specifically, by number.
 cat > "$FIX/docs/adr/ADR-20260906-050000-fixture-redfirst.md" <<'EOF'
 # Fixture: a record that names a test (Rule 1 / red-first cases)
 
@@ -605,8 +608,21 @@ expect_d RF2-redfirst-entry-missing-fields 2 "{\"tool_name\":\"Agent\",\"tool_in
 #    token (fixture line 3) -- the anti-theatre half of Rule 1, mirroring Lane D's own D7/D15.
 expect_d RF3-redfirst-line-no-token 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:3 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
 # RF4 ALLOW: the explicit negative on a record that names NO test (the shared empty fixture,
-#    0 hits) -- a genuinely test-free citation is exactly what the negative is for.
+#    0 hits). #914 item 2: at 0 hits Rule 1 used to never enter the parse block at all, so `none`
+#    was accepted by the rule not firing, never by the rule actually reading and validating it --
+#    deleting the `[Nn]one*` ALLOW arm left this case green regardless (beck). The entry parse now
+#    runs whatever the hit count is; the count decides only two things (a MISSING section refused,
+#    and `none` refused as a false negative), both gated on hits > 0. This case pins the
+#    `[Nn]one*` ALLOW arm itself: a genuinely test-free citation, actually read and found clean.
 expect_d RF4-redfirst-negative-clean 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260821-095957 names no test\"}}" dispatch-trail-ok
+# RF4b BLOCK: at 0 hits, a POSITIVE entry pinned to the 0-hit record itself, at a line the file
+#    does not even have (the empty fixture has no line 1) -- proves the parse actually runs and
+#    actually checks the line at 0 hits too, not just that `none` is accepted there.
+expect_d RF4b-redfirst-positive-malformed-on-zero-hit-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::test_x — ADR-20260821-095957:1 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
+# RF4c ALLOW: at 0 hits, a POSITIVE entry pinned to a DIFFERENT record that DOES carry the token
+#    (an honest over-declaration, farley) -- the entry stands on its own citation, never on the
+#    trail's own hit count, so this must still ALLOW.
+expect_d RF4c-redfirst-positive-founded-elsewhere-on-zero-hit-record 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::test_x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-trail-ok
 # RF5 BLOCK: the SAME explicit-negative text, but on a record that DOES name a test -- the
 #    negative claims the opposite of what the citation shows and is refused.
 expect_d RF5-redfirst-false-negative 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-false-negative
