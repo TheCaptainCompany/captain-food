@@ -2,6 +2,78 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-06 — [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — eleven
+> declared controls render as an empty tagged div (GAP(renderer)); make `render_node_kind`
+> exhaustive over `ComponentKind`"](https://github.com/TheCaptainCompany/captain-food/issues/888)
+> SLICE 1 landed, draft [PR #932](https://github.com/TheCaptainCompany/captain-food/pull/932), Lane
+> B (session_01H3AFBVzhSiGXJcFuwKjiMQ, `888-render-node-kind-exhaustive`), `HOLD: human`
+> (Tours-facing).** `render_node_kind` is now EXHAUSTIVE over `ComponentKind` — no `_` wildcard.
+> The compiler named **46** kinds with no dedicated arm the moment the wildcard was removed, not
+> the issue's own "eleven" (off by 35, and stated with no antecedent — ADR-20260817-105845). Every
+> one of the 46 renders BYTE-IDENTICAL to the old wildcard's tagged container (title/label/value
+> text, children, `data-group`) plus one BARE marker attribute, `data-no-arm` (no value — evans/
+> observability/reviewer: a ticket id baked into customer-facing HTML names a concept after the
+> ticket that found it; the bare attribute audits identically). `data-no-arm` is the DOM spelling
+> of the specs' `GAP(renderer)`; the DOM could not take `data-gap`, which already means
+> no-backing-query. **The Badge finding**: `Badge`'s own arm is GUARDED
+> (`if node.prop("text").is_some()`), and match-arm guards never count towards exhaustivity in
+> rustc — but rustc ALSO omits a guard-only-covered variant from its E0004 list while ANY other
+> variant is fully unmatched, so the FIRST E0004 (45 kinds) never named `Badge` at all; it only
+> surfaced on a SECOND recompile after the other 45 were closed. An exhaustive match is proven only
+> by that second recompile, never the first E0004 read alone (recorded as an executable-adjacent
+> rule in `docs/claude/sessions/gates.md` §19j, with the minimal repro that confirms it).
+> `crates/web/src/interact.rs input_value` (the `{{ <id>.value }}` dispatch read) now tries
+> `HtmlTextAreaElement` after `HtmlInputElement` (`complete_len` widened the same way, for
+> symmetry) — the honest fix the FIRST #888 card's STOP forbade (card defect, banked, lifted for
+> this dispatch). This fallback is UNREACHABLE today, not merely untested: `grep -rn "<textarea"
+> crates/web/src` finds nothing, since `text_area` still renders the no-arm `<div>`.
+>
+> Reds, each isolated against its named mutant, quoted and reverted: the two tests that "cannot
+> find the marker/the set" (`no_arm_nodes_carry_the_marker_and_no_action`,
+> `no_arm_set_is_exactly_the_declared_list`) red against the pre-fix wildcard; moving `TextArea`
+> out of the no-arm arm reds the frozen-list test (`TextArea` missing from the rendered set);
+> emitting `data-action` in the no-arm arm reds the no-action test; dropping the title/label text
+> reds the unchanged-container test; the scratch-worktree `Zzz` enum mutant reds E0004 naming
+> `renderer.rs:850` (quoted, worktree discarded, generated file never touched in the branch); at
+> the checkpoint, beck's added named test
+> (`a_guarded_arm_kind_without_its_guard_condition_still_lands_in_no_arm`) reds when the `Badge`
+> arm's guard is dropped (quoted, reverted) — the guard-only-covered class now fails BY NAME, not
+> only inside the 46-element set diff.
+>
+> **Consent decision (thirteen lenses, ADR-20260904-013834 — a split resolved by the safer option
+> on a legal-adjacent surface): `text_area`'s functional arm stays DEFERRED.** Originally: three of
+> its six DSL sites bind to no mutation AND the driver could not read a `<textarea>`. D2 closed the
+> READ leg in this same slice, so **one surviving reason remains**: `delivery_reason` and
+> `delivery_instructions` bind to no mutation, and `item_instructions` rides
+> `add_to_cart.instructions` but `CartLineInput` has no such field — binding it needs a new field
+> threaded through codegen, the GraphQL resolver, persistence and the kitchen ticket
+> (`crates/server`), an UNQUANTIFIED cost (holub: the renderer's own comment previously promised
+> "one commit", which overstated it — reworded). `tip_amount_selector` stays deferred to
+> [#887](https://github.com/TheCaptainCompany/captain-food/issues/887) (its `recipient` binding is
+> dead). Tracked as [#934](https://github.com/TheCaptainCompany/captain-food/issues/934) item 1
+> (bind the sites) and item 6 (a real DOM gate — cannot exercise the textarea fallback while no
+> `<textarea>` exists to exercise it against; the residue closes on BOTH, not item 6 alone).
+>
+> **Card defects, banked**: the first #888 card's STOP forbade the honest `interact.rs` fix,
+> forcing the cast bug to survive an extra round; the card counted "five" `text_area` sites where
+> the specs actually declare **six** (`delivery_instructions` nested in the checkout section);
+> "eleven" was stated with no antecedent (ADR-20260817-105845); and the issue cited a renderer-arm
+> coverage test that does not exist in this repo (checked, none found). **A roster-width miss,
+> attributed to the coordinator's roster selection, not the executor**: the mob briefing had no
+> security/privacy lens, so the shipped-DOM exposure question — what a `data-no-arm` marker (or a
+> ticket-numbered one) reveals about internal gap-tracking to anyone reading page source — went
+> unowned until the checkpoint's evans/observability pass caught the ticket-id naming issue.
+> Observability's verbatim finding: *"`data-no-arm` is a grep-able DOM marker for kinds with no
+> dedicated renderer arm, frozen by test. It is NOT audited: no counter, no span, no boundary
+> event — production emits nothing when a no-arm node paints; `sdui_degraded_render_total`'s reason
+> set is closed and gains no value here."* Evans: *"the class had a published name in the specs
+> before it had one in the code; the code coined a second."*
+>
+> **Full mob** (reviewer, beck, farley, evans, observability, holub, graphql, business, dba, legal,
+> ux, vernon, young) — briefing + checkpoint both passed, corrections landed as D2b. No `specs/**`
+> edit, no ADR (the issue already decided compiler-first), no `STATUS.md` row (checked: none tracks
+> the renderer no-arm gap specifically — row 5 is the general SDUI-renderer placeholder).
+
 > **2026-09-06 — [#894 "Rider client: read the 4403 restricted WebSocket close and route to
 > /restricted instead of reconnecting on backoff (step 5's client leg)"](https://github.com/TheCaptainCompany/captain-food/issues/894)
 > D1/D2/D2b/D5 landed, draft [PR #929](https://github.com/TheCaptainCompany/captain-food/pull/929),

@@ -1161,3 +1161,23 @@ from `make generate` (the whole emitter run, ~1 min warm) and the regenerated re
 **Rule**: any change under `docs/decisions/` runs `make generate` + `make validate` before the push, even when the diff
 looks docs-only — the register is validated surface (`decision-index-stale`, the closed row schema, `reconsiders:` chain
 heads), and the docs lane has no CI in front of `main`.
+
+## 19j. rustc's E0004 omits a guard-only-covered variant while ANY other variant is fully unmatched — recompile once more before declaring a match exhaustive (#888, 2026-09-06)
+
+**Cost**: a match that LOOKED exhaustive after the first "close every named gap" pass would still have carried a live
+compile error, caught only because the second recompile was run anyway. `render_node_kind`'s dedicated `Badge` arm is
+GUARDED (`if node.prop("text").is_some()`); guards never count towards exhaustivity (`= note: match arms with guards
+don't count towards exhaustivity`), so a text-less `Badge` genuinely has no covering arm. Yet the FIRST E0004 (wildcard
+removed, nothing else added) never named `Badge` — only the 45 fully-unmatched variants. Confirmed with a minimal
+repro: `match e { E::A => 1, E::Badge if cond => 2, E::D => 3 }` (`D` also unmatched) reports only `E::D`; strip `D`'s
+coverage away entirely and `E::Badge` alone reports correctly. rustc's usefulness algorithm apparently stops naming a
+guard-only gap once it has already proven non-exhaustiveness some other way — the guard gap becomes VISIBLE again only
+once every fully-unmatched variant is closed and the compiler is asked again. **Rule**: after closing an E0004 list,
+recompile once more before declaring a match exhaustive, whenever the enum has ANY guarded arm anywhere in the match —
+the first clean compile is not evidence the guarded arm's fallback exists.
+
+**Also from #888**: `crates/web/src/interact.rs` is gated `cfg(all(target_arch = "wasm32", feature = "hydrate"))` in
+`lib.rs` — a native `cargo check -p web` / `cargo clippy -p web` never compiles this file at all, so a native-only gate
+pass on an `interact.rs` edit proves nothing. Only `cargo clippy -p web --target wasm32-unknown-unknown
+--no-default-features --features hydrate` and `make wasm` touch it; run both, every time, for any change under
+`interact.rs`.
