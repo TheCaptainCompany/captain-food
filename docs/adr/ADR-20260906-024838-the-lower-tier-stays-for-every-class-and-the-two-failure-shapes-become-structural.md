@@ -82,7 +82,7 @@ What the team records from them, consulted for completeness (block below), never
    class: stored shapes are never rewritten, and a key the loader accepts silently becomes history no upcaster knows
    (young). A wire-reply field stays additive-only with a tolerant reader — no hand-back (young). The item sits inside
    the protocol-mandated mechanical hand-backs of
-   [ADR-20260821-010543](ADR-20260821-010543-founder-facing-questions-carry-the-register-check-trail.md) and needs no
+   [ADR-20260821-010543](ADR-20260821-010543-agents-never-ask-an-answered-question-the-register-check-binds-every-agent.md) and needs no
    register trail (architect). Compiler-first companion, owed in #910 or its own row: a GENERATED inventory of the
    loader's declared key set under the existing drift gate, so an invented spec key is unspellable without a
    regenerate diff the reviewer sees (farley, young).
@@ -101,7 +101,7 @@ What the team records from them, consulted for completeness (block below), never
    restates the founder's 2026-09-04 answer; step 5 is merged (#895), step 6 is in its last slice (6-iii, #906). No
    register row exists for the order and none is created; the reaffirmation is a journal line. Holub's ask stands on
    the record: name the date a Tours human first touches running software — production is suspended
-   ([ADR-20260817-105844](ADR-20260817-105844-production-is-suspended.md)) and every step-6 PR has shipped dark.
+   ([ADR-20260817-105844](ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)) and every step-6 PR has shipped dark.
 
 ## Alternatives considered
 
