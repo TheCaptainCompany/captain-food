@@ -77,6 +77,29 @@ fn bare_admin_jwt(sub: uuid::Uuid) -> String {
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
 }
 
+/// A verified token asserting `role: CUSTOMER` with a bound `customer_id` -- the ordinary
+/// claim-carried customer credential (`CustomerIdentitySource::Claim`), never touching any lookup
+/// seam at all (round 2, R2-7(b)).
+fn bare_customer_jwt(sub: uuid::Uuid, customer_id: uuid::Uuid) -> String {
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+    header.kid = Some("captain-test-es256".into());
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs()
+        + 3600;
+    let claims = json!({
+        "sub": sub.to_string(),
+        "aud": "authenticated",
+        "iss": format!("{TEST_SUPABASE_URL}/auth/v1"),
+        "exp": exp,
+        "app_metadata": { "captain_food": { "role": "CUSTOMER", "customer_id": customer_id.to_string() } },
+    });
+    let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
+        .expect("test EC key parses");
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+}
+
 /// A scripted platform-grant seam: one fixed outcome for every subject, and a counter proving
 /// exactly how many times the bridge was actually consulted (the enumeration/no-oracle shape
 /// `member-sign-in`'s own tests use, transposed: here the count matters for the "never consulted
@@ -220,8 +243,12 @@ async fn an_admin_token_with_no_platform_grant_is_unbound() {
     );
 }
 
-/// The bridge is consulted on the ADMIN path and NOWHERE else: a CUSTOMER-role token never even
-/// looks at the `PlatformMember` seam (there is no cross-role leak to close).
+/// The bridge is consulted on the ADMIN path and NOWHERE else. Round 2, R2-7(b) (beck): this test
+/// exercises the ANONYMOUS case specifically (no Authorization header at all) -- previously its
+/// doc comment and the hand-back both called it "CUSTOMER-role", which it never was. The
+/// AUTHENTICATED CUSTOMER case is `an_authenticated_customer_request_never_consults_the_bridge`
+/// right below: a mutant that made the bridge fire for every authenticated non-admin request would
+/// pass THIS test (there is no auth header to trigger such a mutant) but must go red on that one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_bridge_is_not_consulted_for_a_non_admin_request() {
     let (app, scripted) = router(PlatformIdentityResolution::NoMapping).await;
@@ -241,5 +268,35 @@ async fn the_bridge_is_not_consulted_for_a_non_admin_request() {
         scripted.calls.load(std::sync::atomic::Ordering::SeqCst),
         0,
         "an anonymous /public request must never consult the PlatformMember bridge"
+    );
+}
+
+/// Round 2, R2-7(b) (beck): the AUTHENTICATED CUSTOMER variant the test above's old doc comment
+/// claimed to be -- a real, verified `role: CUSTOMER` token, carried on `/public/graphql`, must
+/// ALSO never consult the `PlatformMember` bridge. A mutant that widened the seam's admin
+/// interception to fire for every authenticated non-admin request (not just ADMIN-role tokens)
+/// would pass the anonymous test above (no token there at all) but goes RED here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_authenticated_customer_request_never_consults_the_bridge() {
+    let (app, scripted) = router(PlatformIdentityResolution::NoMapping).await;
+    let sub = uuid::Uuid::from_u128(0x639_C1);
+    let customer_id = uuid::Uuid::from_u128(0x639_C2);
+    let jwt = bare_customer_jwt(sub, customer_id);
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/public/graphql")
+        .header(axum::http::header::HOST, "chez-test.captain.food")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header(axum::http::header::AUTHORIZATION, format!("Bearer {jwt}"))
+        .body(axum::body::Body::from(
+            json!({ "query": "query { __typename }" }).to_string(),
+        ))
+        .expect("request builds");
+    let response = app.oneshot(request).await.expect("router answers");
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        scripted.calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "an authenticated CUSTOMER request must never consult the PlatformMember bridge either"
     );
 }

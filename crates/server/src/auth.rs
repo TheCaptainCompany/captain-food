@@ -3147,6 +3147,26 @@ mod read_scope_tests {
         assert_eq!(read_scope(&p), ReadScope::Restaurant(RestaurantId(uuid::Uuid::from_u128(11))));
     }
 
+    /// Round 2, R2-7(c) (beck): `role_path`'s OWN ADMIN arm, pinned DIRECTLY on `.identity` --
+    /// never through `read_scope`/`recorded_role`/`acting_role`, which also pass through
+    /// `resolve_identity_scope`'s independent admin-interception arm (a SECOND, redundant guard
+    /// the round-1 mutant testing found: reverting `role_path` alone did NOT turn the existing
+    /// `an_admin_token_with_no_platform_grant_is_unbound` test red, because that second guard
+    /// re-resolves regardless). This test isolates `role_path` so a regression THERE — restoring
+    /// the pre-#639-step-6-v role-only mint (`Identity::Admin { sub }` straight from the token) —
+    /// is caught on its own, not masked by the other guard. RED with the role-only mint restored
+    /// (`RequestRole::Admin => Identity::Admin { sub }` in place of `Identity::Unbound { sub, role: path_role }`).
+    #[test]
+    fn role_path_admin_arm_mints_unbound_never_a_bare_claim() {
+        let p = Principal::role_path(RequestRole::Admin, "sub".into(), &ProductClaims::default());
+        assert_eq!(
+            p.identity,
+            Identity::Unbound { sub: "sub".into(), role: RequestRole::Admin },
+            "role_path's ADMIN arm must mint Unbound -- a bare Identity::Admin{{sub}} here would \
+             be the exact hole #639 part C step 6-v closes, reopened"
+        );
+    }
+
     /// The serde seam the pure test cannot reach: a misspelled claim field name would silently
     /// deserialize to `None` -> Public everywhere, and the first detector would be a production
     /// smoke timeout. All four keys pinned, INSIDE the product object; a malformed uuid claim fails
