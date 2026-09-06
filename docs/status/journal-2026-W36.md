@@ -2,6 +2,67 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-06 — [#928 "#927 follow-ups (the Red-first gate, round 3)"](https://github.com/TheCaptainCompany/captain-food/issues/928)
+> items 1, 2 and 4, draft [PR #937](https://github.com/TheCaptainCompany/captain-food/pull/937),
+> Lane B (session_01H3AFBVzhSiGXJcFuwKjiMQ, `928-tripwire-wiring-and-elapsed-reading`), two-way
+> door (shell hooks).** `.claude/hooks/register-check-selftest.sh` gains `selftest_finish <elapsed>
+> <fail>`, extracted from the old `register_check_selftest_ceiling_warn` + timing block: it prints
+> the elapsed reading on EVERY run — one line, pass or fail (item 2's whole point: the failing runs
+> one most wants to time now print something) — reads `REGISTER_CHECK_SELFTEST_CEILING_SECONDS`
+> (default 120) INSIDE itself, so hard-coding the ceiling at the real call site is unspellable (no
+> parameter carries it there), and decides the exit purely from `fail` (0/2). The WARN's
+> exit-neutrality is PINNED, not unspellable (farley, checkpoint correction): `return 1` inside the
+> WARN branch is ordinary writable code, and ST1b/ST1d red it. GATE-STEP-LOCUS
+> (ADR-20260827-081500) is named at the call site as the reason this must hold everywhere: the
+> selftest runs inside the always-run `gate-scripts` job aggregated by name into the required
+> check, so a WARN that flipped the exit would block every merge repo-wide the moment a run crossed
+> an UNVERIFIED ceiling. The real call site is one line:
+> `selftest_finish "$SELFTEST_ELAPSED" "$fail"; exit $?`.
+>
+> **Item 4** (`.claude/hooks/register-check.sh`): `resolve_record` now PRINTS the resolved path on
+> stdout and returns 0/1; the global `RESOLVED_PATH` is gone repo-wide, every one of its four
+> callers captures its own local via command substitution. Reclassified from defect to LATENT
+> STRUCTURAL HAZARD (consent: reviewer, beck, farley) and closed by CONSTRUCTION rather than
+> guarded — verdict-preserving, no case added, stated verbatim: *"no red-first case exists for item
+> 4 — the clobber is unreachable at 3923614: every reader followed its own successful
+> resolve_record; closed by construction, verdict-preserving, no case."* Save/restore around the
+> none-arm's own lookup was rejected (a guard nobody can see fail).
+>
+> **Reds, quoted and reverted**: `ST1b-finish-reads-the-ceiling-from-the-environment`,
+> `ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2`,
+> `ST1d-the-warn-never-changes-the-exit` — each first seen red before `selftest_finish` existed
+> (`command not found`, wrong exit code), then again under its named mutant (hard-coded ceiling;
+> return before the elapsed echo; `return 1` in the WARN branch), each reverted. At the CHECKPOINT
+> (beck, reviewer), two in-function mutants were found to have survived the extraction GREEN — an
+> unconditional WARN (`if true` for the `-gt` test) and the default ceiling moved to `-1` — both an
+> always-firing tripwire, the exact noise the design fears. Fixed by making ST1c run
+> `(unset REGISTER_CHECK_SELFTEST_CEILING_SECONDS; selftest_finish 5 1)` and additionally asserting
+> NO TRIPWIRE line; both survivors then seen red (`"a TRIPWIRE fired under the DEFAULT ceiling with
+> the env var unset ..."`) and reverted; verified green under an ambient
+> `REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1` in the caller's shell too (the subshell's `unset`
+> covers it). A second checkpoint finding (reviewer): ST1b/ST1d merged stderr into stdout, unpinning
+> the WARN's STREAM — fixed by capturing stderr separately (`2>&1 >/dev/null`); a third (farley,
+> reviewer): the pass path printed the reading twice — folded to one line per path, the failing
+> path's reading staying on stderr. Demonstrated once on a scratch copy (not committed): a
+> deliberately broken case still prints the elapsed reading before `FAILED`, exit 2.
+>
+> **Consent decisions (reviewer, beck, farley)**: the one-line call site over re-invoking the whole
+> suite as a child (beck's recorded alternative) — rejected: +4.7s per turn forever, and it inherits
+> every unrelated failure in the suite. No `REGISTER_CHECK_SELFTEST_FORCE_FAIL`-style knob — no
+> failure backdoor in an every-turn gate.
+>
+> **Card defects**: #928 item 4 and its briefing framed a non-defect as a defect — the clobber it
+> described is unreachable at 3923614; the brief's proposed pin for it would have been green-only.
+> The first cut of `ST1c` dropped the "stays silent below the ceiling" half the ORIGINAL `ST1` case
+> asserted (a roster re-read miss, caught at the checkpoint, not at review). Items 3, 5 and 6 stay
+> open on #928 (coordinator's).
+>
+> **Declared residuals** (read by the reviewer, not pinned by a case): the one-line call site
+> itself; `SELFTEST_ELAPSED`'s own computation (a plain assignment, not itself a function); that
+> nothing pins a FIFTH caller of `resolve_record` correctly capturing its stdout, should one be
+> added later. Filed as
+> [#938 "#937 follow-ups (register-check selftest): nothing pins that a new resolve_record caller captures stdout; the extraction residuals (call site, placement, elapsed); roster notes"](https://github.com/TheCaptainCompany/captain-food/issues/938).
+
 > **2026-09-06 — [#876 "Projection lag gauges never read 0 when caught up: drain_group returns on
 > a short page and the idle gate never re-records"](https://github.com/TheCaptainCompany/captain-food/issues/876)
 > landed, draft [PR #935](https://github.com/TheCaptainCompany/captain-food/pull/935), Lane B
