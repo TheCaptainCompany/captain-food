@@ -25,6 +25,7 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    decisionRow: SIRENE-RESTART
     gates: >
       SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
       releases their payloads. OFF, staged rows stay PENDING indefinitely and registry-driven prospect
@@ -36,9 +37,13 @@ keys:
       carries no SIRET, which is the crawl's idempotency key, so un-pausing before that door shares
       the key manufactures duplicate restaurants; and a self-declared listing currently enters the
       prospect funnel. Both guards, and the decision itself, are issue #800.
+      `decisionRow` binds this key to `docs/decisions/SIRENE-RESTART.yaml` explicitly (#917), so the
+      codegen rule `decision-row-open-key-must-be-off` refuses any `deploy.production` value other
+      than `"false"` while that row stays open -- the prose and the deploy value can no longer
+      disagree unreconciled the way they did for a month.
     deploy:
-      production: "true"
-      staging: "true"
+      production: "false"
+      staging: "false"
 
 
   # #639 part C step 6-i (ADR-20260905-101349 §6): the grant door as a MECHANISM, not prose --
