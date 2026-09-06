@@ -79,7 +79,8 @@ jobs:
     # `main` with `docs-validate` skipped. Equally BLOCKING on a genuine failure -- that is kept.
     # 10 minutes is orders of magnitude above what remains here. The checkout is `fetch-depth: 0`,
     # a FULL-HISTORY clone -- the one cost that grows with the REPOSITORY rather than the diff; it
-    # holds comfortably today (~15s for the whole job), and if the clone ever dominates that is a
+    # holds comfortably today (~9-14 s for the whole job on the five most recent green ci runs on
+    # main, Actions API, 2026-09-06, 1 s granularity), and if the clone ever dominates that is a
     # capacity signal, not a hang. The cap bounds a HANG AND NOTHING ELSE.
     #
     # AND A CAP HERE CLOSES ONE DOOR OF SIX. `codegen` is `if: always()`, and `always()` still

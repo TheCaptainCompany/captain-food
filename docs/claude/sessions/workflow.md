@@ -806,24 +806,44 @@ rule 1, tracking issue [#910](https://github.com/TheCaptainCompany/captain-food/
 *cited record* — the trail block above — was seen FAILING before the change that makes it pass.
 When the record a dispatch cites names a test, a belt or a mutant (any line matching one of the
 tokens `test`, `belt`, `mutant`, `red-first`, `red first`, `assert`), the card carries a
-`Red-first:` section, one entry per hit — this section rides ALONGSIDE the `Register check:`/
-`Decision row:` line, never instead of it. **A PRESENT `Red-first:` section is ALWAYS
-shape-validated (#914), whatever the hit count is**: the count decides only two refusals — a
-MISSING section is refused only when a cited record actually has a hit, and the explicit negative
-below is refused as a false negative only then too. A present section with no valid entry and no
-`none` is refused for its shape at ANY hit count, including zero.
+`Red-first:` section — this section rides ALONGSIDE the `Register check:`/`Decision row:` line,
+never instead of it. **Restated 2026-09-06** (#926 item 2, consent decision, option (a) — the
+team's, ADR-20260904-013834): two DIFFERENT obligations here, not one, and only one of them is
+enforced by a gate. The **CARD's obligation** is one entry per hit — read at the mob briefing and
+by the independent reviewer over the full diff, never by the hook, because it cannot be: the ADR's
+own honesty limit already concedes that completeness of the extraction is NOT CHECKABLE, and a
+literal per-hit COUNT is unworkable to enforce mechanically besides (ADR-20260906-024838 itself
+carries 28 hit lines — the gate's own oracle, `grep -ciE "$REDFIRST_TOKENS"` over its resolved
+file, 2026-09-06; a coordinator brief once quoted 17 here, uncounted). What **THE HOOK checks**,
+and all it checks, is presence of AT LEAST ONE well-shaped entry (or the declared negative below)
+for the whole section — **A PRESENT
+`Red-first:` section is ALWAYS shape-validated (#914), whatever the hit count is**: the count
+decides only two refusals — a MISSING section is refused only when a cited record actually has a
+hit, and the explicit negative below is refused as a false negative only then too. A present
+section with no valid entry and no declared negative is refused for its shape at ANY hit count,
+including zero. NAMED RESIDUAL, stated rather than hidden: one valid entry excuses every OTHER hit
+in the same cited record — a card with three hits and one entry passes the hook, and only review
+catches the other two going unaccounted for.
 
 ```
 Red-first: <test path>::<name> — <record>:<line> — mutant: <planted change> — expected red: <message fragment>
 ```
 
-or, when none of the cited record's lines actually name a test, the explicit negative — which
-speaks for the WHOLE trail, not per-record: a card citing two records, one of which names a test,
-may not say `none`:
+or, when none of the cited record's lines actually name a test, the explicit negative — the
+DECLARED TEXT below, and ONLY this text (tightened 2026-09-06, #926 item 1: a bare `[Nn]one*`
+prefix used to match anything starting with "none", found live when a coordinator-authored
+sentence containing the marker followed by the word "nonesuch" was refused as a false negative) —
+which speaks for the WHOLE trail, not per-record: a card citing two records, one of which names a
+test, may not say `none`:
 
 ```
 Red-first: none — <record> names no test
 ```
+
+`<record>` must RESOLVE and must be a record THIS TRAIL CITES (membership tested by RESOLVED PATH,
+never by id string) — a resolvable-but-uncited record, an unresolvable id, or any other text
+beginning with `none` is not the declared negative and falls to the shape refusal below, exactly
+like a malformed positive entry.
 
 **The entry's shape, each clause load-bearing**: `<test path>` exists on disk or is the literal
 token `NEW` (the test does not exist yet — this card is what creates it); `<record>` is a RECORD
@@ -844,9 +864,11 @@ true of every case at every stage**: RF4 (`Red-first: none` at 0 hits) was GREEN
 for the wrong reason — the rule never fired at 0 hits, so `none` was accepted by the rule's absence,
 never by being read and found true. [#914](https://github.com/TheCaptainCompany/captain-food/issues/914)
 made the 0-hit arm actually validated and re-proved RF4 red-first against the shipped shape
-(mutant: delete the `[Nn]one*` ALLOW arm — RF4's own real mutant; re-gating the parse behind
-`rf_hit_count -gt 0` is a DIFFERENT mutant, and reds RF4b/RF4d, never RF4, since it only disables
-the validation the 0-hit arm needed, not the ALLOW arm itself). **What the gate checks and what it
+(mutant: delete the none-form ALLOW arm — RF4's own real mutant; the arm was a bare `[Nn]one*`
+prefix glob at the time, tightened 2026-09-06 by #926 item 1 to the declared form `none — <record>
+names no test` above; re-gating the parse behind `rf_hit_count -gt 0` is a DIFFERENT mutant, and
+reds RF4b/RF4d, never RF4, since it only disables the validation the 0-hit arm needed, not the
+ALLOW arm itself). **What the gate checks and what it
 does not**, the same honesty limit Lane D already states about itself:
 CHECKABLE — presence of the section, resolution of `<record>:<line>`, and shape of the entry.
 NOT CHECKABLE — that the named test is real, that it was EVER actually seen red, or that the
