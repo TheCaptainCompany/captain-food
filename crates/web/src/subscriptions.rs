@@ -293,6 +293,40 @@ pub mod backoff {
     }
 }
 
+/// What a WebSocket close means for this connection (#894, ADR-20260905-065415 §10) — decided by
+/// [`close_disposition`], pure and native-testable, so the browser driver's `onclose` need be
+/// nothing but a three-line adapter over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseDisposition {
+    /// An ordinary drop — reconnect through [`backoff`] (today's whole-repo path, unchanged).
+    Reconnect,
+    /// The platform closed THIS rider's socket on purpose (ADR-20260905-065415 §3): the caller
+    /// decides where to route it (the composition seam lands in D2 of #894).
+    Restricted,
+    /// A `4403` with some OTHER reason: `graphql-transport-ws`'s own terminal `Forbidden`, which
+    /// the reference client never retries. No reconnect, no bounce — the HTTP leg (`bounce.rs`)
+    /// stays the authoritative bounce path and the client degrades to its existing declared poll
+    /// fallback. Scoped to `4403` only in this chunk; the full 4400-4499 terminal band is a
+    /// follow-up (ADR-20260808-235113 carve-out — client-side observability first).
+    Stop,
+}
+
+/// Read a WebSocket close code + reason into a [`CloseDisposition`] — pure, no socket, no screen.
+/// `Restricted` iff BOTH the code and the reason match the platform's own restriction close: the
+/// signal is the PAIR, never `code` alone (a bounce on an unrecognised signal would invent a
+/// refusal the server never sent). Any OTHER `4403` is `Stop`, never `Reconnect`.
+pub fn close_disposition(code: u16, reason: &str) -> CloseDisposition {
+    if code == shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE {
+        if reason == shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_REASON {
+            CloseDisposition::Restricted
+        } else {
+            CloseDisposition::Stop
+        }
+    } else {
+        CloseDisposition::Reconnect
+    }
+}
+
 /// The browser driver (`hydrate`, wasm32): one `web_sys::WebSocket` in the `graphql-transport-ws`
 /// subprotocol, frames pumped through a [`WsClient`], [`Reaction::Event`]s delivered to the
 /// screen's callback. Reconnects through [`backoff`] on close; per the module contract the
@@ -636,5 +670,62 @@ mod tests {
         assert_eq!(backoff::delay(2), Duration::from_secs(2));
         assert_eq!(backoff::delay(4), Duration::from_secs(8));
         assert_eq!(backoff::delay(10), Duration::from_secs(30), "capped");
+    }
+
+    // ---- D1 (#894, ADR-20260905-065415:118): the close disposition ----
+
+    /// The ONE signal a restriction close carries: BOTH the code and the reason must match — never
+    /// `code` alone (M1: invert the code comparison).
+    #[test]
+    fn close_disposition_restricted_on_code_and_reason() {
+        assert_eq!(
+            close_disposition(
+                shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE,
+                shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_REASON,
+            ),
+            CloseDisposition::Restricted
+        );
+    }
+
+    /// 4403 with a DIFFERENT reason is terminal `Stop`, never `Reconnect` and never `Restricted`
+    /// (M2: drop the reason conjunct) — the reference `graphql-transport-ws` client does not retry
+    /// its own `Forbidden` close.
+    #[test]
+    fn close_disposition_stops_on_4403_with_another_reason() {
+        assert_eq!(
+            close_disposition(shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE, "SOME_OTHER_REASON"),
+            CloseDisposition::Stop
+        );
+    }
+
+    /// A browser delivers an absent close reason as the empty string — still `Stop`, never a
+    /// silently reconnecting hot loop (M2b: drop the reason conjunct).
+    #[test]
+    fn close_disposition_stops_on_4403_with_empty_reason() {
+        assert_eq!(
+            close_disposition(shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE, ""),
+            CloseDisposition::Stop
+        );
+    }
+
+    /// The restriction REASON on a non-terminal code (1006, an ordinary abnormal-closure drop) is
+    /// an ordinary `Reconnect`, never `Restricted` — the code half of the pair matters too (M3a:
+    /// drop the code conjunct). 1006, never 4400: 4400 would pin "any 4400 + the reason reconnects",
+    /// a promise this change never makes.
+    #[test]
+    fn close_disposition_reconnects_on_a_non_terminal_code_with_the_restricted_reason() {
+        assert_eq!(
+            close_disposition(1006, shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_REASON),
+            CloseDisposition::Reconnect
+        );
+    }
+
+    /// Anchors two more non-terminal-code cases (no dedicated isolating mutant of their own — the
+    /// coverage above already isolates the code and reason conjuncts): an abnormal closure (1006)
+    /// and a normal closure (1000), both with an empty reason, still reconnect.
+    #[test]
+    fn close_disposition_reconnects_on_other_codes_regardless_of_reason() {
+        assert_eq!(close_disposition(1006, ""), CloseDisposition::Reconnect);
+        assert_eq!(close_disposition(1000, ""), CloseDisposition::Reconnect);
     }
 }
