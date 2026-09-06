@@ -311,6 +311,19 @@ description: declares no `tools:` line, so it inherits the full set -- including
 ---
 EOF
 : > "$FIX/docs/adr/ADR-20260821-095957-fixture-record.md"
+# A SEPARATE, non-empty fixture record for Rule 1 (the red-first card step, ADR-20260906-024838 /
+# #910): the fixture above stays EMPTY on purpose (0 test-naming hits), because it is shared by
+# every pre-existing Lane D case and none of them carry a `Red-first:` section -- widening it would
+# flip D2/D12/D13/D14 from ALLOW to BLOCK, exactly the "altered existing verdict" the card's STOP
+# condition forbids. This one is cited ONLY by the new RF cases below. Line 4 is the sole hit line
+# (tokens: test, belt) -- every RF case that needs a resolvable hit line points at it by number.
+cat > "$FIX/docs/adr/ADR-20260906-050000-fixture-redfirst.md" <<'EOF'
+# Fixture: a record that names a test (Rule 1 / red-first cases)
+
+Nothing here names anything on this line.
+This line pins `test_the_gate_stays_red_first` -- treat it as the belt for Rule 1.
+Nothing here either.
+EOF
 # THE OTHER TWO FILENAME ERAS. docs/adr/ holds 164 `ADR-<stamp>-*`, 47 legacy `NNNN-*` and 54
 # PREFIXLESS `<stamp>-*` files; the first resolver globbed only the first shape and so refused 101
 # of 265 real ADRs, offering a correct trail no exit but a fabricated id or a false negative
@@ -578,6 +591,28 @@ expect_d D14-prefixless-era-resolves 0 '{"tool_name":"Agent","tool_input":{"suba
 #    cost this suite once.)
 expect_d D15-legacy-id-unknown 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-0099 (2026, open) -- covers X"}}' dispatch-trail-unresolved
 
+# ── RULE 1: the red-first card step (ADR-20260906-024838 / #910) ───────────────────────────────
+# Committed RED FIRST (D2 before D1, beck/farley): at this commit register-check.sh does not yet
+# read a `Red-first:` section at all, so RF1, RF2, RF3 and RF5 below FAIL (the hook allows what it
+# should refuse) and the suite reds as a whole -- the run is quoted in the PR before D1 lands.
+DTRAIL_RF='Register check: ADR-20260906-050000 (2026-09-06, open) -- covers the redfirst fixture, silent on Y'
+# RF1 BLOCK: the cited record names a test (fixture line 4) and the dispatch carries no
+#    `Red-first:` section at all -- the incident shape Rule 1 exists to close.
+expect_d RF1-redfirst-missing 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\"}}" dispatch-redfirst-missing
+# RF2 BLOCK: a `Red-first:` entry present but missing its `mutant:`/`expected red:` fields.
+expect_d RF2-redfirst-entry-missing-fields 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:4\"}}" dispatch-redfirst-shape
+# RF3 BLOCK: a well-shaped entry whose `<record>:<line>` resolves to a real line that holds no
+#    token (fixture line 3) -- the anti-theatre half of Rule 1, mirroring Lane D's own D7/D15.
+expect_d RF3-redfirst-line-no-token 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_x — ADR-20260906-050000:3 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape
+# RF4 ALLOW: the explicit negative on a record that names NO test (the shared empty fixture,
+#    0 hits) -- a genuinely test-free citation is exactly what the negative is for.
+expect_d RF4-redfirst-negative-clean 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260821-095957 names no test\"}}" dispatch-trail-ok
+# RF5 BLOCK: the SAME explicit-negative text, but on a record that DOES name a test -- the
+#    negative claims the opposite of what the citation shows and is refused.
+expect_d RF5-redfirst-false-negative 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-false-negative
+# RF6 ALLOW: a compliant card -- one well-shaped entry pinned to the real hit line.
+expect_d RF6-redfirst-compliant 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: NEW::test_gate_is_red_first — ADR-20260906-050000:4 — mutant: delete the token check — expected red: register-check selftest RF6 fails\"}}" dispatch-trail-ok
+
 # ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
 # A parse failure was being reported as a read declaration of read-only, so each of these was
 # exit 0 -- ungated -- on a card with no trail at all.
@@ -631,8 +666,13 @@ if [ $? -ne 0 ]; then
 fi
 # LD3: the live docs tree resolves a real record id -- the anti-theatre check is only as good as
 # its resolver, and a resolver pointed at the wrong root refuses EVERY citation (fail-shut drift
-# that would read as "the coordinator keeps writing bad trails").
-printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+# that would read as "the coordinator keeps writing bad trails"). Carries a `Red-first:` entry
+# since #910: the REAL ADR-20260821-095957 names its own test discipline (8 hit lines today), so
+# once Rule 1 exists a trail-only citation of it is refused -- keeping this card trail-only would
+# have flipped LD3's own verdict, which the card's STOP condition forbids. NAMED RESIDUAL: pinned
+# to line 17 of the live file; if that ADR is ever edited and line 17 stops naming a test, this
+# case reds for a reason unrelated to Lane D itself -- re-pin it to any surviving hit line.
+printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: NEW::proves_live_docs_resolve — ADR-20260821-095957:17 — mutant: delete the docs override guard — expected red: register-check selftest LD3 fails to resolve\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
   echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
   fail=1
