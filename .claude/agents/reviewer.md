@@ -35,6 +35,10 @@ fix.
    (generated output is in step with the DSL).
 6. **Boundaries** — no telemetry SDK calls in domain components (`c4-l3` `instrumented: false`); no
    hand-edits inside generated regions.
+7. **The hand-back line** — the executor's hand-back carries `New grammar / invented exemption:
+   <none | …>` (ADR-20260906-024838 rule 2, #910); its absence is a finding. If it names something,
+   read the diff for exactly that thing before passing — this line is the one place a mid-run
+   invention is self-reported rather than found by you.
 
 ## Channels (ADR-20260808-154005)
 

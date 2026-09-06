@@ -133,6 +133,19 @@ agents collide.
 End with: the issue, the PR link, the gate results, and one line on anything the architect should
 know — an adjacent problem you noticed, a scope surprise, or a dependency that turned out stale.
 
+**Every hand-back carries a mandatory line `New grammar / invented exemption: <none | …>`; its
+absence fails the hand-back** (ADR-20260906-024838 rule 2, verbatim scope, #910). It is
+**unconditional** whatever the tier or class on: a new spec key or generated-artifact semantics; any
+invented exemption, fence boundary or gate scope; a self-authored `rules:` recipe string; a new SDUI
+component/action name or a control bound to a declared `gap`; counsel-reviewable copy or a
+grade-(a) obligation item (FIC 1169/2011 allergens, C. consom. L221-28 withdrawal, GDPR Art. 17/21
+erasure — never clearance); and on `events`, `fold:` or snapshot keys always, since stored shapes
+are never rewritten. A wire-reply field staying additive-only with a tolerant reader needs no
+hand-back line. `none` is the correct value when nothing above fired — write it, do not omit the
+line. **This binds YOUR mid-run invention, never the team's right to change the DSL**
+(ADR-20260810-221840 — the freeze is lifted, and this line is not a narrowing of it): a `specs/**`
+edit the dispatch's recorded approval already covers is ordinary work, not an invented exemption.
+
 **Then an "Operational learnings" section — mandatory to WRITE, not mandatory to fill** (PO
 directive 2026-08-08; ADR-20260730-034635 governs). Report only what met you in the environment and
 is not derivable from the code: a gate that failed for a misleading reason, a tool or hook behaving
