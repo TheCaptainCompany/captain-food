@@ -139,6 +139,29 @@
 # those literal separators is misparsed rather than rejected outright, and no enumeration here may
 # be taken as proof that no such case exists.
 #
+# TIGHTENED 2026-09-06 (#926 item 1). The explicit negative
+#   Red-first: none — <record> names no test
+# used to be recognized by a PREFIX GLOB (`[Nn]one*`), which read ANY text starting with "none" as
+# the negative — including "nonesuch garbage" at 0 hits, found LIVE: a coordinator-authored prose
+# sentence in this very card's own first draft contained the marker followed by the word
+# "nonesuch", and Lane D refused it as `dispatch-redfirst-false-negative` at 17:26Z on a genuine
+# 52-hit trail (the card that fixes the false positive was itself caught by it — the antecedent for
+# RF10/RF15 in the selftest). The negative is now the DECLARED FORM ONLY: `<record>` must RESOLVE
+# and must be CITED IN THIS TRAIL — membership tested by RESOLVED PATH against `rf_files`, never by
+# id string, so a record that merely resolves but was never cited cannot excuse a hit elsewhere.
+# Anything else beginning with `none` is not the declared negative and falls through, uncontinued,
+# to the ordinary shape parse, blocking with the SAME `dispatch-redfirst-shape` a malformed
+# positive entry already gets — a malformed none is a malformed entry, never a free pass, and (at
+# >0 hits) never confused with the false negative above either (RF15 pins this precedence).
+#
+# #926 item 2 (consent decision, option (a) — no hook change). `rf_entry_ok` stays ONE BOOLEAN for
+# the whole section: workflow.md's "one entry per hit" is the CARD's obligation — READ by the mob
+# briefing and the independent reviewer over the full diff — and stays NOT CHECKABLE here, for the
+# same reason completeness of the extraction is not checkable above. What THIS HOOK checks, and all
+# it checks, is presence of at least one well-shaped entry (or the tightened negative). NAMED
+# RESIDUAL: one valid entry excuses every other hit in the same cited record — a card with three
+# hits and one entry passes here, and only review catches the other two going unaccounted for.
+#
 # WHAT IT PROVES — AND WHAT IT DOES NOT. It verifies envelope/trail presence and shape and row
 # STATUS on the AskUserQuestion transport; it cannot prove a search happened, cannot classify a
 # prose question that omits the envelope (the honest hole: misclassifying a decision question as
@@ -467,8 +490,20 @@ EOF
       while IFS= read -r rline; do
         [ -n "$rline" ] || continue
         entry="$(printf '%s' "$rline" | sed -E "s/^${REDFIRST_MARKER}[[:space:]]*//")"
+        # #926 item 1 -- the DECLARED none form only, not a prefix glob: see the header comment
+        # above ("TIGHTENED 2026-09-06") for the incident and rationale. `_none_id` must both
+        # RESOLVE and be a member of `rf_files` (the trail's own citations); anything else beginning
+        # with `none` falls through, uncontinued, to the ordinary shape parse below.
         case "$entry" in
-          [Nn]one*) rf_saw_none=yes; continue ;;
+          [Nn]one' — '*' names no test')
+            _none_id="${entry#*' — '}"
+            _none_id="${_none_id% names no test}"
+            if resolve_record "$_none_id"; then
+              case " $rf_files " in
+                *" $RESOLVED_PATH "*) rf_saw_none=yes ;;
+              esac
+            fi
+            continue ;;
         esac
         # Fixed-separator parse (named residual, header comment): split at the FIRST occurrence
         # of each literal separator, in order. A field that happens to repeat one of these

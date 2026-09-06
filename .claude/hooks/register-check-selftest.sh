@@ -659,6 +659,34 @@ expect_d RF8-redfirst-existing-test-path 0 "{\"tool_name\":\"Agent\",\"tool_inpu
 # RF9 BLOCK: a test path that is neither `NEW` nor on disk anywhere -- the existence check itself.
 expect_d RF9-redfirst-missing-test-path 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: tests/does_not_exist.rs::x — ADR-20260906-050000:4 — mutant: change X — expected red: message\"}}" dispatch-redfirst-shape "$FIX"
 
+# ── #926 item 1: the `none` form is the DECLARED form, not a prefix glob ────────────────────────
+# The OLD `[Nn]one*)` case matched ANY text starting with "none", so `Red-first: none` followed by
+# ARBITRARY PROSE at 0 hits read as the explicit negative -- found LIVE on this card's own first
+# draft: a coordinator sentence containing the marker followed by the word "nonesuch" tripped Lane
+# D's dispatch-redfirst-false-negative reason at 17:26Z (the antecedent for RF10 and RF15 below --
+# the card that fixes the false positive was itself refused by it, on a genuine hit-count case).
+# The negative is now `none — <record-id> names no test`, where `<record-id>` must RESOLVE and must
+# be CITED IN THIS TRAIL (tested by resolved path against `rf_files`, never by id string). Anything
+# else beginning with `none` is not the declared form and falls through to the ordinary shape
+# parse, blocking with the SAME `dispatch-redfirst-shape` a malformed positive entry already gets.
+# RF10 BLOCK: "nonesuch garbage" at 0 hits -- the exact incident shape, on the 0-hit fixture.
+expect_d RF10-none-prefix-glob-refused 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: nonesuch garbage\"}}" dispatch-redfirst-shape
+# RF11a BLOCK: the declared none form's OWN record id must resolve -- an invented id inside
+#    `none — <record> names no test` is not a free pass either.
+expect_d RF11a-none-unresolvable-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260101-000000 names no test\"}}" dispatch-redfirst-shape
+# RF11b BLOCK: the declared none form's record must also be CITED IN THIS TRAIL -- tested by
+#    RESOLVED PATH against `rf_files`, never by id string. ADR-20260906-050000 resolves (it is the
+#    redfirst fixture) but this trail (`$DTRAIL`) cites only ADR-20260821-095957 -- the negative may
+#    not borrow a citation the trail never made.
+expect_d RF11b-none-uncited-record 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\\nRed-first: none — ADR-20260906-050000 names no test\"}}" dispatch-redfirst-shape
+# RF15 BLOCK: the SAME malformed text as RF10 ("nonesuch garbage"), but on a record that DOES have
+#    hits (`$DTRAIL_RF`) -- PRECEDENCE. This must resolve to `dispatch-redfirst-shape`, never to the
+#    false negative RF5 pins: the OLD prefix glob read "nonesuch" as the negative (it starts with
+#    "none"), so at >0 hits it blocked for the WRONG reason (`dispatch-redfirst-false-negative`) --
+#    still BLOCKED either way, but a case that reds for the wrong reason is a claim without
+#    evidence (the shape E5 already cost this suite once).
+expect_d RF15-malformed-none-at-hits-is-shape 2 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL_RF\\nRed-first: nonesuch garbage\"}}" dispatch-redfirst-shape
+
 # ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
 # A parse failure was being reported as a read declaration of read-only, so each of these was
 # exit 0 -- ungated -- on a card with no trail at all.
