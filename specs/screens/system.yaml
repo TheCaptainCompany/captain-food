@@ -61,6 +61,15 @@ actions:
   phone_call: { kind: client }
   restrict_rider: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/restrictRider' }, note: "The Art. 11(5) human decision (ADR-20260904-081527/-014136, ADR-20260904-152807 §6-7); acceptance-first." }
   reinstate_rider: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/reinstateRider' }, note: "A direct Tell, no sheet, no ground, no free text (ADR-20260904-152807 §5); acceptance-first." }
+  # The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) -- the ONE action on this
+  # surface that speaks to `/public/graphql` (`graphql_role: PUBLIC` on the `sign_in` screen that
+  # binds it), the `restaurant_backoffice.yaml` member-door precedent.
+  request_admin_sign_in_link: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requestAdminSignInLink' } }
+  # Bound here so codegen mints the `ActionKey` the hand-written `sign_in_return` twin dispatches
+  # directly -- `confirmAdminSignIn` is never rendered by an SDUI control (the query-string `?token=`
+  # extraction the member door's `sign_in_return.rs` needs, this DSL declares no binding grammar
+  # for either).
+  confirm_admin_sign_in: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/confirmAdminSignIn' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # BOTTOM SHEETS — the admin's restriction act (#639 part C step 4-iii-A, ADR-20260904-152807 §6).
@@ -120,6 +129,16 @@ bottom_sheets:
           on_success: [{ type: close_sheet }, { type: navigate, route: "$reload" }]
       - { type: inline_error, id: restrict_rider_error, for_action: restrict_rider }
 
+  # The ADMIN sign-in confirmation (#639 part C step 6-iii) -- opened from `sign_in`, the
+  # `member_sign_in_confirmation_sheet` shape one level down.
+  admin_sign_in_confirmation_sheet:
+    id: admin_sign_in_confirmation_sheet
+    type: bottom_sheet
+    title: { $ref: 'system.translations.yaml#/sys.sign_in.confirmation_title' }
+    sections:
+      - { type: text, value: { $ref: 'system.translations.yaml#/sys.sign_in.confirmation_body' } }
+      - { type: button, id: admin_sign_in_confirmation_close, label: { $ref: 'system.translations.yaml#/sys.sign_in.close' }, variant: outline, action: { type: close_sheet } }
+
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
 # ──────────────────────────────────────────────────────────────────────────────
@@ -131,6 +150,10 @@ screens:
     route: "/system/mailbox"
     title: { $ref: 'system.translations.yaml#/mailbox.title' }
     sdui: true
+    # #639 part C step 6-iii (ADR-20260906-023825): the System host is routed now -- every screen
+    # on this surface gets its own door (the `restaurant_backoffice.yaml` precedent, R1/2c-ii).
+    requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [mailbox.lanes, mailbox.poisoned]
     components:
       - { type: page_header, title: { $ref: 'system.translations.yaml#/mailbox.title' }, subtitle: { $ref: 'system.translations.yaml#/mailbox.subtitle' } }
@@ -187,17 +210,17 @@ screens:
           - { type: text, value: { $ref: 'system.translations.yaml#/mailbox.guide.body' } }
 
   # SCREEN 2 — Rider roster (triage, #639 part C step 4-iii-A, ADR-20260904-152807 §5). The
-  # system host is NOT routed and no admin door exists today (§9): this screen ships DARK,
-  # declared/rendered/asserted natively; reachable through the System host + step 6's magic-link
-  # door, both owed by step 6 — the walk exercises it through GraphQL as ADMIN.
+  # System host is routed now (#639 part C step 6-iii, ADR-20260906-023825): this screen gets its
+  # own door, the mailbox_lanes precedent above.
   - id: riders
     roles: [ADMIN]
     route: "/system/riders"
     title: { $ref: 'system.translations.yaml#/roster.title' }
     sdui: true
+    requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [riders.all]
     gaps:
-      - "The System host is not routed today (crates/server/src/hosts.rs `HostRoute::System`) and `specs/screens/system.yaml` declares no `requires_auth`/`unauthenticated:` door — the mailbox supervision screen has the same status. This screen is DARK: declared and asserted by dedicated render tests, reachable from a browser only once step 6's magic-link admin door + System host routing land (ADR-20260904-152807 §9, the RIDER-RESTRICTION-PRECONDITIONS row)."
       - "The restaurant's name behind a held job is not shown on the roster (ADR §4): `heldDelivery`'s client selection deliberately does not select `restaurant { displayName }` — a delivery -> network navigation hop the D8 binding-walk gate cannot see today."
       - "`item_action` on this list is DECLARED but not yet CONSUMED by the renderer (`crates/web/src/renderer.rs` `ComponentKind::List` never reads it, in SSR or hydrate) — a pre-existing corpus-wide gap shared with `restaurant_backoffice.yaml`'s `claims_list`, found while building this screen and reported to the architect rather than fixed here (out of this dispatch's scope: it needs both an SSR row-wrapper and a hydrate click handler, a bigger lift than this card's badge-rendering fix)."
     components:
@@ -219,17 +242,18 @@ screens:
           - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.out_for_delivery' }, variant: info, visible_when: "item.heldDelivery.status == 'OUT_FOR_DELIVERY'" }
           - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.pickup_label' }, value: "{{ item.heldDelivery.pickupAddress | format_address }}", visible_when: "item.heldDelivery != null" }
 
-  # SCREEN 3 — Rider detail (#639 part C step 4-iii-A, ADR-20260904-152807 §5-7). DARK, same
-  # posture as SCREEN 2 (§9).
+  # SCREEN 3 — Rider detail (#639 part C step 4-iii-A, ADR-20260904-152807 §5-7). Routed now
+  # (#639 part C step 6-iii, ADR-20260906-023825), same posture as SCREEN 2.
   - id: rider_detail
     roles: [ADMIN]
     route: "/system/riders/:riderId"
     title: { $ref: 'system.translations.yaml#/roster.detail.title' }
     sdui: true
+    requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [rider.byId]
     actions_used: [restrict_rider, reinstate_rider, phone_call, open_bottom_sheet]
     gaps:
-      - "The System host is not routed today and no admin door exists — see the `riders` screen's own gap note (ADR-20260904-152807 §9); this screen is DARK for the same reason."
       - "The one-tick window after `$reload` in which the detail may still render \"Restreindre l'acces\" (the two projector checkpoints, `RiderRoster` and the write side, catch up independently) is accepted, not hidden: a second submit in that window is answered by the mutation's own `RiderAlreadyRestricted`, surfaced in `inline_error`, never a second event."
       - "`restrict_rider_sheet`'s `RIDER_REQUESTED` sentence (\"Conservez le message du rider (procédure).\") points at docs/legal/rider-requested-restriction-procedure.md — the filing procedure for what counts as the rider's message, where it lives, retention and open counsel questions (ADR-20260904-152807 §6)."
     components:
@@ -312,6 +336,96 @@ screens:
       # same one-tick-window race §223's `gaps:` note already accepts for `restrict_rider`) — the
       # control had no rejection surface at all.
       - { type: inline_error, id: reinstate_rider_error, for_action: reinstate_rider }
+
+  # SCREEN 4 — The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825; briefed
+  # 2026-09-06, eight lenses, option A). This surface's OWN screen -- never a reuse of
+  # `restaurant_backoffice.yaml`'s `sign_in`, whose copy is worded for restaurateurs. The ONE
+  # screen on this surface that speaks to `/public/graphql` (`graphql_role: PUBLIC`): the one
+  # mutation it binds admits PUBLIC and nothing else. Validator §26 must prove this is an open
+  # screen of this surface.
+  - id: sign_in
+    roles: [PUBLIC]
+    route: "/sign-in"
+    title: { $ref: 'system.translations.yaml#/sys.sign_in.title' }
+    sdui: true
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [request_admin_sign_in_link]
+    gaps:
+      - "No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — \"authenticate access to Captain's internal tools\" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) plus the LCEN art. 6 III (mentions légales) obligation are NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note carries. ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here."
+      - "The link-expiry countdown and a delayed resend re-enable need a client-side timer/countdown primitive this DSL does not declare (the restaurant_backoffice.yaml sign_in screen's own gap): the resend control is always active instead (the wall is server-side, harmless)."
+    components:
+      - type: sticky_header
+        id: admin_sign_in_topbar
+        slots:
+          left: [{ type: logo, asset: "/assets/logo.svg", link: "/sign-in" }]
+          center: [{ type: text, value: { $ref: 'system.translations.yaml#/sys.sign_in.header' } }]
+      - { type: page_header, title: { $ref: 'system.translations.yaml#/sys.sign_in.title' } }
+      - type: section
+        id: admin_sign_in_form
+        content:
+          - { type: email_input, id: admin_email, label: { $ref: 'system.translations.yaml#/sys.sign_in.email_label' }, placeholder: { $ref: 'system.translations.yaml#/sys.sign_in.email_placeholder' }, autofocus: true }
+          # Acceptance opens the confirmation panel (never before the response, the #529 rule).
+          # The request answers the same way for a granted admin and a stranger's (no
+          # enumeration oracle, ADR-20260906-023825 SS1), so the panel opens for both.
+          - { type: button, id: admin_request_link, label: { $ref: 'system.translations.yaml#/sys.sign_in.request_link' }, variant: primary, full_width: true, action: { type: request_admin_sign_in_link, variables: { email: "{{ admin_email.value }}" }, loading_label: { $ref: 'system.translations.yaml#/sys.sign_in.sending' }, on_success: { type: open_bottom_sheet, sheet_id: admin_sign_in_confirmation_sheet } } }
+          - { type: inline_error, id: admin_request_error, for_action: request_admin_sign_in_link }
+          - { type: text, value: { $ref: 'system.translations.yaml#/sys.sign_in.open_on_device' } }
+          - { type: text, value: { $ref: 'system.translations.yaml#/sys.sign_in.no_password' } }
+          - { type: text, value: { $ref: 'system.translations.yaml#/sys.sign_in.support_lead' } }
+
+  # SCREEN 5 — The magic-link RETURN landing (#639 part C step 6-iii). NOT SDUI -- the
+  # `restaurant_backoffice.yaml` sign_in_return / `checkout`/`order_tracking` precedent:
+  # query-string `?token=` extraction and the acceptance-first confirm/claim/route sequencing
+  # this DSL declares no binding grammar for. A System TWIN of `sign_in_return.rs` (never the
+  # SAME hand-written page reused): the confirmed action, the error/refusal routes and the
+  # translation keys all differ (confirmAdminSignIn / /sign-in/no-access / sys.*).
+  # `id: admin_sign_in_return`, DELIBERATELY not `sign_in_return` (evans/beck): `HandWrittenScreen`
+  # (`crates/web/src/handwritten.rs`) resolves a hand-written (`sdui: false`) screen GLOBALLY by
+  # id across every surface, never per-surface -- reusing the restaurant_backoffice.yaml screen's
+  # id here would make this System route silently render (and dispatch) the RESTAURANT screen's
+  # `confirmMemberSignIn` twin instead of this screen's own `confirmAdminSignIn` one, an error the
+  # `HandWrittenScreen` compile-time proofs cannot catch (they only check id-collision existence,
+  # never surface identity) -- found and fixed here, before it shipped.
+  - id: admin_sign_in_return
+    roles: [PUBLIC]
+    route: "/sign-in/return"
+    title: { $ref: 'system.translations.yaml#/sys.sign_in_return.title' }
+    sdui: false
+    sdui_reason: "Query-string token extraction + acceptance-first confirm/claim/route sequencing -- the restaurant_backoffice.yaml sign_in_return / checkout / order_tracking precedent."
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [confirm_admin_sign_in]
+    gaps:
+      - "`?next=` return-to-screen (issue #904) is a NAMED DEPENDENCY of flipping RUN_ADMIN_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the mailbox lanes board), never back to whatever page the 401 originated from."
+
+  # SCREEN 6 — The not-granted refusal (#639 part C step 6-iii, ADR-20260906-023825 SS6): its own
+  # screen, no nav, no tabs, no counts. Reached when `confirmAdminSignIn` answers the typed
+  # `AdminAccessNotGranted` rejection. UX STOP (2026-09-06 briefing): NO "Se déconnecter"/
+  # navigate-to-sign-in control here -- the still-valid ADMIN-claimed cookie fails the SAME grant
+  # test on every retry, so a navigate-to-/sign-in exit would loop on this System surface forever
+  # until #94's real sign-out lands (the restaurant_backoffice.yaml not_linked screen's exit
+  # control is NOT reused here for exactly this reason).
+  - id: no_access
+    roles: [PUBLIC]
+    route: "/sign-in/no-access"
+    title: { $ref: 'system.translations.yaml#/sys.no_access.title' }
+    sdui: true
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: []
+    gaps:
+      - "No legal/privacy link exists on this surface yet (no such page exists anywhere in the product today) -- the same absence the sign_in screen's own gaps note carries, including the LCEN art. 6 III (mentions légales) obligation."
+      - "No exit control exists on this screen by design (ux STOP, 2026-09-06 briefing): #94 (real sign-out) is the named follow-up that unblocks one, since a navigate-to-/sign-in control would loop on the still-valid ADMIN-claimed cookie."
+      - "The verified-email echo limitation (the restaurant_backoffice.yaml not_linked screen's own gap, :~994): no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, so the refused address is not printed here."
+    components:
+      - { type: page_header, title: { $ref: 'system.translations.yaml#/sys.no_access.title' } }
+      - { type: text, value: { $ref: 'system.translations.yaml#/sys.no_access.body' } }
+      - { type: text, value: { $ref: 'system.translations.yaml#/sys.no_access.write_to_us' } }
+      - { type: text, value: { $ref: 'system.translations.yaml#/sys.no_access.support_contact' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PERFORMANCE & ACCESSIBILITY (contracts — ops surface, same floor as customer)

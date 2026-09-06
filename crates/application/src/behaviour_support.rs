@@ -27,8 +27,8 @@ use domain::generated::scalars::*;
 use domain::shared::errors::DomainError;
 
 use crate::generated::services::{
-    DeliveryOfferJobInput, DeliveryService, IdentitySendEmailMagicLinkInput,
-    IdentityStampRiderClaimInput,
+    DeliveryOfferJobInput, DeliveryService, IdentitySendAdminSignInLinkInput,
+    IdentitySendEmailMagicLinkInput, IdentityStampRiderClaimInput,
     IdentitySendPhoneOtpInput, IdentityService, IdentityVerifyEmailTokenInput,
     IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
     PaymentRefundInput, PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
@@ -1515,6 +1515,13 @@ impl IdentityService for FakeIdentity {
     ) -> Result<(), DomainError> {
         Ok(())
     }
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
     async fn verify_email_token(
         &self,
         input: IdentityVerifyEmailTokenInput,
@@ -1562,6 +1569,26 @@ impl IdentityService for FakeIdentity {
             ));
         }
         *stamped = Some(member_only);
+        Ok(())
+    }
+    async fn stamp_admin_claim(
+        &self,
+        input: crate::generated::services::IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The one-subject-one-role refusal, the `stamp_member_claim` precedent: a login the
+        // provider already holds with ANOTHER claim object is refused, never overwritten.
+        let mut stamped = self.stamped.lock().expect("fake identity mutex");
+        let admin_only = serde_json::json!({ "captain_food": { "role": "ADMIN" } });
+        let holds_other = input.auth_ref.0 == FAKE_CUSTOMER_STAMPED_SUBJECT
+            || stamped.as_ref().is_some_and(|held| *held != admin_only);
+        if holds_other {
+            return Err(DomainError::rejected(
+                "AuthSubjectHoldsAnotherRole",
+                serde_json::json!({ "authRef": input.auth_ref.0 }),
+            ));
+        }
+        *stamped = Some(admin_only);
         Ok(())
     }
 }

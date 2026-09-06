@@ -17,12 +17,6 @@ PaymentMethodId:
   description: "Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'."
 
 
-EmailVerificationToken:
-  type: string
-  maxLength: 512
-  description: "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim)."
-
-
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
 # GDPR erasure (PROP-20260829-150752, founder-APPROVED Option 1 2026-08-29; tracking #708)
 # ══════════════════════════════════════════════════════════════════════════════════════════════════

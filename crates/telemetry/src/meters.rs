@@ -1335,6 +1335,90 @@ pub mod admin_identity {
     }
 }
 
+/// `admin-sign-in-door` contract (#639 part C step 6-iii, ADR-20260906-023825) -- the
+/// `member_sign_in` shape transposed to the platform context. NEVER an email/token/messageId
+/// label anywhere in this module: an `on_roster`-equivalent label at request time would CREATE the
+/// enumeration oracle the door exists to deny.
+pub mod admin_sign_in {
+    use super::*;
+
+    fn link_requested_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::ADMIN_SIGN_IN_LINK_REQUESTED_TOTAL).build())
+    }
+
+    fn confirmed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::ADMIN_SIGN_IN_CONFIRMED_TOTAL).build())
+    }
+
+    fn claim_stamp_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::ADMIN_CLAIM_STAMP_FAILED_TOTAL).build())
+    }
+
+    fn refused_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::ADMIN_SIGN_IN_REFUSED_TOTAL).build())
+    }
+
+    /// `admin_sign_in_link_requested_total{result}` -- `requestAdminSignInLink`'s outcome.
+    pub fn link_requested(result: &str) {
+        link_requested_counter().add(1, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `admin_sign_in_confirmed_total{result}` -- `confirmAdminSignIn`'s outcome (granted |
+    /// not_granted | token_invalid | token_expired | lookup_failed | door_closed |
+    /// requires_session | claim_conflict | rejected).
+    pub fn confirmed(result: &str) {
+        confirmed_counter().add(1, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `admin_claim_stamp_failed_total{reason}` -- the ADMIN stamp failed. DEFECT counter, never
+    /// ordinary user error (not_configured | claim_conflict | provider_error).
+    pub fn claim_stamp_failed(reason: &str) {
+        claim_stamp_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `admin_sign_in_refused_total{reason}` -- either mutation refused (the door gate, a
+    /// send-abuse wall reason, or a typed rejection). `reason` is bounded, never an
+    /// email/token/messageId.
+    pub fn refused(reason: &str) {
+        refused_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    // The gate-liveness gauge (the `member_sign_in::door_enforcing`/`otp_send_guard_enforcing`
+    // inverted dead-man shape, ADR-20260810-231300): `-1` = never declared, `0`/`1` re-asserted on
+    // every export cycle.
+    static DOOR_ENFORCING: AtomicI64 = AtomicI64::new(-1);
+
+    fn door_enforcing_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::ADMIN_SIGN_IN_DOOR_ENFORCING)
+                .with_callback(|observer| {
+                    let state = DOOR_ENFORCING.load(Ordering::Relaxed);
+                    if state >= 0 {
+                        observer.observe(state, &[]);
+                    }
+                })
+                .build()
+        })
+    }
+
+    /// Declare the door's liveness (`admin_sign_in_door_enforcing`): 1 while
+    /// `RUN_ADMIN_SIGN_IN_DOOR` enforces its refusal on a request, 0 the moment the composition
+    /// root boots with the key OFF. Call at composition AND wherever the gate is actually
+    /// consulted, so "zero refusals tonight" and "the door has been off since the last deploy"
+    /// stay distinguishable. Declared at BOTH composition roots (the `platform_access_grant_
+    /// enforcing` sibling shape).
+    pub fn door_enforcing(enforcing: bool) {
+        DOOR_ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
+        let _ = door_enforcing_gauge();
+    }
+}
+
 /// `restaurant-invitation` contract (#639 part C step 6-iv, ADR-20260905-101349 §2/§3): the roster
 /// and the invitation. Counters carry NO email/token/invitationId label -- the `member_sign_in`
 /// module's own posture.
@@ -1522,6 +1606,11 @@ mod tests {
         super::member_sign_in::claim_stamp_failed("not_configured");
         super::member_sign_in::refused("door_closed");
         super::member_sign_in::door_enforcing(true);
+        super::admin_sign_in::link_requested("accepted");
+        super::admin_sign_in::confirmed("granted");
+        super::admin_sign_in::claim_stamp_failed("not_configured");
+        super::admin_sign_in::refused("door_closed");
+        super::admin_sign_in::door_enforcing(true);
         super::graphql_limits::rejected("RESTAURANT", "depth");
         super::graphql_limits::observed_depth("RESTAURANT", 3);
         super::graphql_limits::observed_complexity("RESTAURANT", 12);

@@ -231,8 +231,10 @@ fn path_addressed_redirect(path: &str) -> Option<Response> {
 async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, locale: &str) -> Response {
     match route {
         // The audience SDUI surfaces: SSR the matched screen WITH live data (web::router mirrors
-        // classify_host's audience mapping — see its module docs).
-        HostRoute::Live | HostRoute::Restos | HostRoute::Riders => {
+        // classify_host's audience mapping — see its module docs). #639 part C step 6-iii
+        // (ADR-20260906-023825): System joins Live/Restos/Riders here -- the static "System
+        // backoffice" placeholder line goes, the SDUI shell (`Surface::System`) takes over.
+        HostRoute::Live | HostRoute::Restos | HostRoute::Riders | HostRoute::System => {
             match app_page(ssr, raw_host, path, locale).await {
                 Some(html) => Html(html).into_response(),
                 None => (StatusCode::NOT_FOUND, "no such page").into_response(),
@@ -240,7 +242,6 @@ async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str,
         }
         // Handled by `tenant_page` before this fn — unreachable defensively kept explicit.
         HostRoute::Tenant(_) => (StatusCode::NOT_FOUND, "no such page").into_response(),
-        HostRoute::System => text("System backoffice"),
         HostRoute::Api => text("Captain.Food API — GraphQL served at /{role}/graphql (see /public/graphql)"),
         HostRoute::Default => {
             // localhost / *.onrender.com / IPs: serve the marketplace SHELL — deliberately WITHOUT
@@ -288,6 +289,12 @@ mod tests {
         assert_eq!(bounce(false, "riders.captain.food", "/sign-in"), None, "the door itself never bounces");
         assert_eq!(bounce(false, "riders.captain.food", "/nope"), None, "no screen, no bounce (404 downstream)");
         assert_eq!(bounce(false, "chez-test.captain.food", "/orders"), None, "customer surfaces keep their sheet");
+        // #639 part C step 6-iii (ADR-20260906-023825): the System host is routed now -- the SAME
+        // property, one level down. Never a manifest diff (farley's STOP): this host already
+        // routes in both deploy trees (monolith/ingress.yaml, manifests/ingress.yaml).
+        assert_eq!(bounce(false, "system.captain.food", "/system/mailbox"), Some((StatusCode::FOUND, Some("/sign-in".into()))));
+        assert_eq!(bounce(true, "system.captain.food", "/system/mailbox"), None, "a session cookie renders");
+        assert_eq!(bounce(false, "system.captain.food", "/sign-in"), None, "the door itself never bounces");
     }
 
     use super::*;

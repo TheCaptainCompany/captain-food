@@ -56,10 +56,11 @@ boundedContexts:
       - { $ref: 'processmanager.yaml#/RefundProcess' }
       - { $ref: 'processmanager.yaml#/ReclamationProcess' }
   platform:
-    description: "Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957). No customer-facing surface; the system.captain.food ops screens are its UI."
+    description: "Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957); the ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825). No customer-facing surface; the system.captain.food ops screens are its UI."
     aggregates:
       - { $ref: 'actors.yaml#/MailboxSupervision' }
       - { $ref: 'actors.yaml#/PlatformMembership' }
+      - { $ref: 'actors.yaml#/AdminSignIn' }
   customer:
     description: "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding."
     roles: [CUSTOMER, PUBLIC]
@@ -262,6 +263,11 @@ containers:
     description: "Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION."
     realizes:
       - { $ref: 'actors.yaml#/RestaurantInvitation' }
+  actor-admin-sign-in:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains AdminSignIn lanes (#639 part C step 6-iii, ADR-20260906-023825); pure routing, emits no domain events. Ships dark behind RUN_ADMIN_SIGN_IN_DOOR."
+    realizes:
+      - { $ref: 'actors.yaml#/AdminSignIn' }
   actor-catalog:
     technology: "Rust — mailbox worker bin"
     description: "Drains Catalog lanes (incl. HubRise imports); appends its domain events."

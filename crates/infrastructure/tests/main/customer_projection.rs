@@ -84,6 +84,14 @@ impl IdentityService for AlwaysVerifiedAuth {
         Ok(())
     }
 
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: application::generated::services::IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
+
     async fn verify_email_token(
         &self,
         _input: IdentityVerifyEmailTokenInput,
@@ -95,6 +103,14 @@ impl IdentityService for AlwaysVerifiedAuth {
     async fn stamp_member_claim(
         &self,
         _input: IdentityStampMemberClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
+
+    async fn stamp_admin_claim(
+        &self,
+        _input: application::generated::services::IdentityStampAdminClaimInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         Ok(())

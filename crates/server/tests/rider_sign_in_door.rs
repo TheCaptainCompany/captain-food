@@ -38,10 +38,11 @@ use application::auth_sessions::mem::MemAuthSessionStore;
 use application::auth_sessions::AuthSessionStore;
 use application::generated::inboxes::ActorInbox;
 use application::generated::services::{
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendEmailMagicLinkInput,
-    IdentitySendPhoneOtpInput, IdentityService, IdentityStampCustomerClaimInput,
-    IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput,
-    IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendAdminSignInLinkInput,
+    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
+    IdentityStampCustomerClaimInput, IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput,
+    IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
+    ServiceCallMeta,
 };
 use application::ports::{Actor, EventStore};
 use application::queries::RiderIdentityRepository;
@@ -209,6 +210,13 @@ impl IdentityService for ScriptedIdentity {
     ) -> Result<(), DomainError> {
         panic!("the rider door never sends email")
     }
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        panic!("the rider door never sends email")
+    }
     async fn verify_email_token(
         &self,
         _input: IdentityVerifyEmailTokenInput,
@@ -222,6 +230,13 @@ impl IdentityService for ScriptedIdentity {
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         panic!("the rider door never stamps MEMBER")
+    }
+    async fn stamp_admin_claim(
+        &self,
+        _input: application::generated::services::IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        panic!("the rider door never stamps ADMIN")
     }
 }
 
@@ -374,6 +389,7 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         run_member_sign_in_door: false,
         run_restaurant_invitation: false,
         run_platform_access_grant: false,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(unused.clone())),
     };
     Door { mailbox, identity, riders, sessions, deps, app }

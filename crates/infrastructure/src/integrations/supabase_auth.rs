@@ -14,11 +14,11 @@
 
 use application::commands::canonical_phone;
 use application::generated::services::{
-    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
-    IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityStampCustomerClaimInput,
-    IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
-    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
+    IdentitySendAdminSignInLinkInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
+    IdentityService, IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput,
+    IdentityVerifyPhoneOtpInput, IdentityRefreshSessionInput, IdentityRefreshSessionOutput,
+    IdentityStampCustomerClaimInput, IdentityStampAdminClaimInput, IdentityStampMemberClaimInput,
+    IdentityStampRiderClaimInput, IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
 use domain::generated::scalars::{AuthSubject, CustomerId, EmailAddress};
@@ -107,6 +107,15 @@ impl IdentityService for FailClosedIdentityService {
         Err(not_configured("email magic link"))
     }
 
+    async fn send_admin_sign_in_link(
+        &self,
+        _input: IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // TODO(integration): Supabase Auth magic-link email delivery (admin door).
+        Err(not_configured("email magic link"))
+    }
+
     async fn verify_email_token(
         &self,
         _input: IdentityVerifyEmailTokenInput,
@@ -124,6 +133,16 @@ impl IdentityService for FailClosedIdentityService {
         // Fail CLOSED like the other two stamps (services.yaml identity.stamp_member_claim,
         // #639 part C step 6-ii): never pretend to have stamped -- the caller then parks nothing.
         Err(not_configured("member claim stamp"))
+    }
+
+    async fn stamp_admin_claim(
+        &self,
+        _input: IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // Fail CLOSED like the other three stamps (services.yaml identity.stamp_admin_claim,
+        // #639 part C step 6-iii): never pretend to have stamped -- the caller then parks nothing.
+        Err(not_configured("admin claim stamp"))
     }
 }
 
@@ -777,6 +796,152 @@ impl SupabaseIdentityService {
     }
 }
 
+// ─── The ADMIN claim stamp (#639 part C step 6-iii, services.yaml identity.stamp_admin_claim) ────
+
+/// The admin claim PUT body — PURE and `pub` for the same reason as [`stamp_member_put_body`]: it
+/// is the WIRE SHAPE, and `server::auth`'s verifier reads it. The whole `captain_food` object is
+/// `{ "role": "ADMIN" }` and NOTHING else -- no id of any kind (ADR-20260906-023825,
+/// ADR-20260818-004646): the admin's standing resolves on every request from OUR Postgres
+/// (`PlatformMember.auth_subject -> platformMembershipId`, the 6-v bridge). A FOURTH, DISTINCT
+/// function beside [`stamp_put_body`]/[`stamp_rider_put_body`]/[`stamp_member_put_body`] -- never a
+/// parameter on any of them (ADR-20260818-101500: one stamper per role, each hardcoded, selected at
+/// compile time). NEVER touches `stamp_put_body`'s signature.
+pub fn stamp_admin_put_body() -> Value {
+    json!({
+        "app_metadata": {
+            PRODUCT_CLAIM_KEY: {
+                "role": "ADMIN",
+            }
+        }
+    })
+}
+
+/// What [`SupabaseIdentityService::stamp_admin_inner`] does after reading the auth user's current
+/// `app_metadata` -- the PURE decision, unit-tested with constructed metadata. Its own type rather
+/// than a role arm on [`StampDecision`]/[`RiderStampDecision`]/[`MemberStampDecision`]: no stamper
+/// shares a branch.
+#[derive(Debug, PartialEq, Eq)]
+enum AdminStampDecision {
+    /// Already exactly `{ role: ADMIN }` -> idempotent no-op (a redelivered ConfirmAdminSignIn
+    /// must not re-write).
+    Noop,
+    /// Write [`stamp_admin_put_body`] -- a fresh user (no `captain_food` object, or an empty one).
+    Put,
+    /// The subject already holds a `captain_food` object that is NOT the one this stamper writes.
+    /// The provider replaces the object WHOLESALE, so a PUT would ERASE it: refused, never an
+    /// overwrite, until PROP-20260831-180622's `one-subject-one-role` Concern is decided.
+    HoldsOtherClaims,
+}
+
+/// The idempotence/refusal decision on the CURRENT provider metadata, before any write. Reads ONLY
+/// inside [`PRODUCT_CLAIM_KEY`] (the flat pre-#519 keys beside it are inert, as for the customer).
+fn stamp_admin_decision(metadata: &Value) -> AdminStampDecision {
+    let Some(ours) = metadata.get(PRODUCT_CLAIM_KEY).and_then(Value::as_object) else {
+        return AdminStampDecision::Put;
+    };
+    if ours.is_empty() {
+        return AdminStampDecision::Put;
+    }
+    let exactly_the_admin_role =
+        ours.len() == 1 && ours.get("role").and_then(Value::as_str) == Some("ADMIN");
+    if exactly_the_admin_role {
+        AdminStampDecision::Noop
+    } else {
+        AdminStampDecision::HoldsOtherClaims
+    }
+}
+
+/// Why an admin claim stamp failed -- each variant is one bounded `reason` label of
+/// `admin_claim_stamp_failed_total` (contract `admin-sign-in-door`).
+#[derive(Debug)]
+enum AdminStampFailure {
+    /// `SUPABASE_SECRET_KEY` absent: fail CLOSED, never pretend to have stamped.
+    NotConfigured,
+    /// The subject already holds another claim object -- the one-subject-one-role refusal.
+    ClaimConflict { auth_ref: String },
+    /// Transport failure, non-2xx admin response, or a malformed provider payload.
+    Provider(String),
+}
+
+impl AdminStampFailure {
+    fn reason(&self) -> &'static str {
+        match self {
+            AdminStampFailure::NotConfigured => "not_configured",
+            AdminStampFailure::ClaimConflict { .. } => "claim_conflict",
+            AdminStampFailure::Provider(_) => "provider_error",
+        }
+    }
+
+    fn into_domain_error(self) -> DomainError {
+        match self {
+            AdminStampFailure::NotConfigured => not_configured("admin claim stamp"),
+            AdminStampFailure::ClaimConflict { auth_ref } => {
+                DomainError::rejected("AuthSubjectHoldsAnotherRole", json!({ "authRef": auth_ref }))
+            }
+            AdminStampFailure::Provider(detail) => {
+                DomainError::Repository(format!("supabase admin claim stamp: {detail}"))
+            }
+        }
+    }
+}
+
+impl SupabaseIdentityService {
+    /// The admin stamp core (#639 part C step 6-iii): GET the auth user's current `app_metadata`
+    /// (the decision PRECEDES any write, as for rider/member/customer), then PUT
+    /// [`stamp_admin_put_body`]. Redelivery-idempotent (already `{ role: ADMIN }` -> no-op); any
+    /// OTHER claim object present -> [`AdminStampFailure::ClaimConflict`], never an overwrite.
+    async fn stamp_admin_inner(
+        &self,
+        input: &IdentityStampAdminClaimInput,
+    ) -> Result<(), AdminStampFailure> {
+        let Some(admin_key) = self.admin_key.as_deref() else {
+            return Err(AdminStampFailure::NotConfigured);
+        };
+        let url = format!("{}/auth/v1/admin/users/{}", self.base_url, input.auth_ref.0);
+
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .send()
+            .await
+            .map_err(|e| AdminStampFailure::Provider(format!("admin get transport: {e}")))?;
+        let status = resp.status();
+        let user: Value = resp.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(AdminStampFailure::Provider(format!("admin get {}: {user}", status.as_u16())));
+        }
+
+        let metadata = user.get("app_metadata").cloned().unwrap_or_else(|| json!({}));
+        match stamp_admin_decision(&metadata) {
+            AdminStampDecision::HoldsOtherClaims => {
+                return Err(AdminStampFailure::ClaimConflict { auth_ref: input.auth_ref.0.clone() });
+            }
+            AdminStampDecision::Noop => return Ok(()),
+            AdminStampDecision::Put => {}
+        }
+
+        let resp = self
+            .http
+            .put(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .json(&stamp_admin_put_body())
+            .send()
+            .await
+            .map_err(|e| AdminStampFailure::Provider(format!("admin put transport: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            return Err(AdminStampFailure::Provider(format!("admin put {}: {body}", status.as_u16())));
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl IdentityService for SupabaseIdentityService {
     async fn send_phone_otp(
@@ -902,8 +1067,27 @@ impl IdentityService for SupabaseIdentityService {
         // Round 2 R2-V1: UNCONDITIONAL — `email_guard` is never absent (compiler-first), so there
         // is no "unguarded" branch left to fall through to; a database-less deployment still
         // enforces its own process-local (in-memory) window, degraded but never bypassed.
+        // Round 2 R2-3: this call site is the MEMBER/customer path, hardcoded
+        // `SignInDoor::Member` -- `send_admin_sign_in_link` below is the admin door's own.
         self.email_guard
-            .authorize(&input.email)
+            .authorize(crate::email_authorization::SignInDoor::Member, &input.email)
+            .await
+            .map_err(|refusal| refusal.into_domain_error())?;
+        self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())
+    }
+
+    /// `identity.send_admin_sign_in_link` (#639 part C step 6-iii round 2 R2-3, ADR-20260906-023825):
+    /// the SAME provider call `send_email_magic_link` makes, at its OWN call site so the wall
+    /// attributes this send to the `admin-sign-in` contract's own counters
+    /// (ADR-20260818-101500: one send per door, hardcoded, never a door parameter).
+    /// `requestAdminSignInLink`'s ONLY caller.
+    async fn send_admin_sign_in_link(
+        &self,
+        input: IdentitySendAdminSignInLinkInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        self.email_guard
+            .authorize(crate::email_authorization::SignInDoor::Admin, &input.email)
             .await
             .map_err(|refusal| refusal.into_domain_error())?;
         self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())
@@ -951,6 +1135,23 @@ impl IdentityService for SupabaseIdentityService {
         telemetry::spans::record_claims_stamp_result(&span, result.is_ok());
         result.map_err(|failure| {
             telemetry::meters::member_sign_in::claim_stamp_failed(failure.reason());
+            failure.into_domain_error()
+        })
+    }
+
+    async fn stamp_admin_claim(
+        &self,
+        input: IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The SAME `claims.stamp` CLIENT span as the customer/rider/member stamps (it is the
+        // identity ACL's admin GET+PUT, whichever role it writes); the DEFECT counter is the
+        // `admin-sign-in-door` contract's own, never another population's.
+        let span = telemetry::spans::claims_stamp();
+        let result = self.stamp_admin_inner(&input).instrument(span.clone()).await;
+        telemetry::spans::record_claims_stamp_result(&span, result.is_ok());
+        result.map_err(|failure| {
+            telemetry::meters::admin_sign_in::claim_stamp_failed(failure.reason());
             failure.into_domain_error()
         })
     }
@@ -1227,6 +1428,37 @@ mod tests {
             stamp_member_decision(&meta(json!({ "role": "MEMBER", "member_id": "m" }))),
             MemberStampDecision::HoldsOtherClaims,
             "M2's shape: a MEMBER role travelling with an id is not what this stamper writes -- refused, not repaired"
+        );
+    }
+
+    /// m4 (#639 part C step 6-iii card): "the stamper writes a body beyond `{role: ADMIN}`" --
+    /// this is the test that REDS if the mutant is applied. Pinned exactly like
+    /// `stamp_member_put_body_is_the_role_and_nothing_else`: exactly ONE top-level key, the role
+    /// hardcoded ADMIN, and nothing else inside `captain_food` -- no id of any kind
+    /// (ADR-20260906-023825).
+    #[test]
+    fn stamp_admin_put_body_is_the_role_and_nothing_else() {
+        let body = stamp_admin_put_body();
+        let md = body["app_metadata"].as_object().expect("app_metadata object");
+        assert_eq!(md.len(), 1, "exactly ONE top-level key (#519)");
+        let ours = md[PRODUCT_CLAIM_KEY].as_object().expect("the captain_food object");
+        assert_eq!(ours["role"], json!("ADMIN"));
+        assert_eq!(ours.len(), 1, "m4: the role and NOTHING else -- no id of any kind");
+    }
+
+    /// The admin stamp never overwrites: exactly `{ role: ADMIN }` is a no-op, and ANY other claim
+    /// object is refused (the one-subject-one-role collision, PROP-20260831-180622 Concern).
+    #[test]
+    fn stamp_admin_decision_refuses_any_other_claim_object() {
+        let meta = |claims: Value| json!({ PRODUCT_CLAIM_KEY: claims });
+        assert_eq!(stamp_admin_decision(&meta(json!({ "role": "ADMIN" }))), AdminStampDecision::Noop);
+        assert_eq!(stamp_admin_decision(&json!({})), AdminStampDecision::Put);
+        assert_eq!(stamp_admin_decision(&meta(json!({}))), AdminStampDecision::Put);
+        let customer = meta(json!({ "role": "CUSTOMER", "customer_id": "00000000-0000-0000-0000-000000000437" }));
+        assert_eq!(
+            stamp_admin_decision(&customer),
+            AdminStampDecision::HoldsOtherClaims,
+            "an admin who also orders dinner is unrepresentable today: refuse, never erase the customer claim"
         );
     }
 

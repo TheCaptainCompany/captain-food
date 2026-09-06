@@ -60,3 +60,18 @@ GrantPlatformAccessIsAHumanAct:
 
 PlatformAccessGrantGatedBeforeStore:
   description: "GrantPlatformAccess refuses with the typed PlatformAccessGrantDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT is off, for BOTH the hand-issued GraphQL door and the one-shot bootstrap dispatching the same command (#639 part C step 6-v, ADR-20260905-223957 §5)."
+
+
+# --- The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) -------------------------
+
+AdminSignInDoorGatedBeforeProvider:
+  description: "RequestAdminSignInLink and ConfirmAdminSignIn both refuse with the typed AdminSignInDoorClosed BEFORE the identity provider is touched at all while configuration.yaml#/keys/RUN_ADMIN_SIGN_IN_DOOR is off (#639 part C step 6-iii, ADR-20260906-023825 SS4, the RUN_MEMBER_SIGN_IN_DOOR shape)."
+
+AdminSignInRequestLegNeverConsultsTheGrant:
+  description: "RequestAdminSignInLink never consults the PlatformMember bridge: the outcome (body, status, timing class) is identical whether or not the address holds a live platform grant -- no enumeration oracle at the request leg (#639 part C step 6-iii, ADR-20260906-023825 SS1)."
+
+AdminClaimStampedOnlyOnResolvedGrant:
+  description: "ConfirmAdminSignIn stamps the ADMIN role claim (identity.stamp_admin_claim) ONLY when PlatformMemberRepository resolves a LIVE grant for the verified auth subject; a verified email with no grant is refused (AdminAccessNotGranted) and nothing is stamped -- identify-only, never register (#639 part C step 6-iii, ADR-20260906-023825 SS1/SS3)."
+
+AdminSignInIsIdentifyOnlyNeverRegister:
+  description: "Neither RequestAdminSignInLink nor ConfirmAdminSignIn ever creates a PlatformMembership -- GrantPlatformAccess (6-v) is the only birth of that relationship. A stamped ADMIN claim with no live grant row resolves Identity::Unbound on every subsequent request, never Identity::Admin (#639 part C step 6-iii, ADR-20260906-023825 SS1, pinned from ADR-20260905-223957 SS2)."

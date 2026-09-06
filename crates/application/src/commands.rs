@@ -41,7 +41,7 @@ use domain::generated::commands::{
     GrantRestaurantAccess, GrantRestaurantAccessByInvitation, RevokeRestaurantAccess,
     RequestMemberSignInLink, ConfirmMemberSignIn,
     InviteRestaurantMember, RevokeRestaurantInvitation, AcceptRestaurantInvitation,
-    GrantPlatformAccess,
+    GrantPlatformAccess, RequestAdminSignInLink, ConfirmAdminSignIn,
 };
 use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
@@ -159,10 +159,11 @@ use domain::generated::commands::{ConsumeCustomerCredit, GrantCustomerCredit};
 use domain::generated::events::{CustomerCreditConsumed, CustomerCreditGranted};
 
 use crate::generated::services::{
-    IdentityRefreshSessionInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
-    IdentityService, IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput,
-    IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput,
-    PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentitySendAdminSignInLinkInput, IdentitySendEmailMagicLinkInput,
+    IdentitySendPhoneOtpInput, IdentityService, IdentityStampAdminClaimInput,
+    IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
+    IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
+    PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use crate::queries::{CatalogReadRepository, MemberIdentityRepository, OfferView};
@@ -4537,6 +4538,149 @@ pub async fn confirm_member_sign_in(
         Ok(())
     } else {
         Err(reject("MemberNotLinked", json!({ "email": verified.email, "supportContact": support_contact })))
+    }
+}
+
+// ─── The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) ───────────────────────
+// The member sign-in door's shape transposed to the platform context. IDENTIFY-ONLY, never
+// register: a verified email with no LIVE PlatformMembership grant is REFUSED and creates nothing
+// -- GrantPlatformAccess (6-v) is the only birth.
+
+/// Handle `commands.yaml#/RequestAdminSignInLink` — a pure EFFECT (actors.yaml: emits nothing):
+/// delegate the email magic-link send to the wrapped auth provider, exactly as
+/// [`request_member_sign_in_link`] does. It NEVER consults the `PlatformMember` bridge, so the
+/// outcome is identical for a granted admin and a stranger's (no enumeration oracle). Gated
+/// (`RUN_ADMIN_SIGN_IN_DOOR`): OFF refuses BEFORE the identity provider is touched at all.
+pub async fn request_admin_sign_in_link(
+    _store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    cmd: RequestAdminSignInLink,
+    actor: &Actor,
+    run_admin_sign_in_door: bool,
+) -> Result<(), DomainError> {
+    if !run_admin_sign_in_door {
+        return Err(reject("AdminSignInDoorClosed", json!({})));
+    }
+    // Round 2 R2-3: its OWN call site (`identity.send_admin_sign_in_link`), never the shared
+    // member/customer `send_email_magic_link` -- so the send-abuse wall can attribute this
+    // request to the `admin-sign-in` contract's own counters (ADR-20260818-101500 precedent).
+    auth.send_admin_sign_in_link(
+        IdentitySendAdminSignInLinkInput { email: cmd.email, locale: cmd.locale },
+        &ServiceCallMeta::new(actor.correlation_id),
+    )
+    .await
+}
+
+/// Handle `commands.yaml#/ConfirmAdminSignIn` — IDENTIFY-ONLY, never register (the whole reason
+/// `ConfirmMemberSignIn`'s shape is transposed rather than widening a register-or-identify
+/// command). The magic-link token is verified through the identity port; the proved subject is
+/// looked up through `PlatformMemberRepository` (the SAME read port `grant_platform_access`'s
+/// handler already consults, ADR-20260905-223957 §1) -- no live grant -> `AdminAccessNotGranted`
+/// naming the support route, NOTHING is stamped, but the session is STILL parked; a live grant ->
+/// the ADMIN role claim is stamped (`identity.stamp_admin_claim`, `{ role: ADMIN }` and nothing
+/// else), the session is rotated so the token carries it, and that POST-STAMP session is parked
+/// for `POST /auth/session` (the credential is never in the GraphQL response). Emits no event.
+/// Gated (`RUN_ADMIN_SIGN_IN_DOOR`): OFF refuses BEFORE the identity provider is touched at all.
+///
+/// The ordering (door gate -> X-SESSION-ID -> SUPPORT_CONTACT -> verify_email_token ->
+/// platform_member_by_auth_subject -> stamp only if Some -> rotate -> park) is the
+/// `confirm_member_sign_in` shape exactly (#852 review's B1, mirrored here): a misconfiguration
+/// must never burn the single-use link, and the missing-session refusal never spends the token.
+pub async fn confirm_admin_sign_in(
+    _store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    platform_members: &dyn PlatformMemberRepository,
+    sessions: &dyn crate::auth_sessions::AuthSessionStore,
+    // `configuration.yaml#/SUPPORT_CONTACT`, resolved ONCE at the composition root (required, no
+    // default). `None` is the development-only unset case.
+    support_contact: Option<&EmailAddress>,
+    cmd: ConfirmAdminSignIn,
+    // Envelope data, not command payload (ADR-0041): the dispatch-layer X-SESSION-ID that owns the
+    // parked session -- `POST /auth/session` claims it only from that same session.
+    session_id: Option<SessionId>,
+    actor: &Actor,
+    run_admin_sign_in_door: bool,
+) -> Result<(), DomainError> {
+    if !run_admin_sign_in_door {
+        return Err(reject("AdminSignInDoorClosed", json!({})));
+    }
+    // Fail CLOSED before spending the token, again (the #852 review's B1, mirrored here): the
+    // credential is parked for `POST /auth/session` under the OWNING X-SESSION-ID, and a session
+    // parked with no owner could be claimed by ANY header-less caller holding the messageId.
+    let Some(session_id) = session_id else {
+        return Err(reject("AdminSignInRequiresSession", json!({})));
+    };
+    // Moved ABOVE `verify_email_token`, the `confirm_member_sign_in` R2-R3 shape: a
+    // misconfiguration must never burn the single-use link. `support_contact` is needed only for
+    // the `AdminAccessNotGranted` refusal's context below, but checking it before the token is
+    // spent means a deploy missing `SUPPORT_CONTACT` fails the SAME way on every attempt.
+    let Some(support_contact) = support_contact else {
+        return Err(DomainError::Repository(
+            "SUPPORT_CONTACT unset -- the admin sign-in door cannot name a support route, so it \
+             refuses (configuration.yaml#/SUPPORT_CONTACT: required, no default)"
+                .into(),
+        ));
+    };
+    let verified = auth
+        .verify_email_token(
+            IdentityVerifyEmailTokenInput { token: cmd.token.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    let auth_ref = verified.auth_ref.clone();
+
+    // IDENTIFY, through the write-side arbiter's own read port. A verified email with no LIVE
+    // platform grant is refused with `AdminAccessNotGranted` (fail-closed) -- but the session is
+    // STILL parked below.
+    let platform_membership_id = platform_members
+        .platform_membership_id_by_auth_subject(auth_ref.clone())
+        .await?;
+
+    if platform_membership_id.is_some() {
+        // STAMP -> rotate -> park (the #437 ordering): `{ role: ADMIN }` and nothing else. A
+        // subject already holding another claim object is refused by the stamper itself
+        // (`AuthSubjectHoldsAnotherRole`, fail closed, never an overwrite).
+        auth.stamp_admin_claim(
+            IdentityStampAdminClaimInput { auth_ref: auth_ref.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    }
+
+    // The PRE-rotation tokens are never parked. No refresh token (a provider/mock without
+    // sessions) or no acceptance messageId (a direct handler call) means nothing to park.
+    let (Some(refresh_token), Some(message_id)) = (verified.refresh_token.clone(), actor.cause_id)
+    else {
+        tracing::warn!(
+            auth_ref = %auth_ref.0,
+            "admin sign-in verified, but the provider returned no session to rotate -- nothing parked"
+        );
+        return if platform_membership_id.is_some() {
+            Ok(())
+        } else {
+            Err(reject("AdminAccessNotGranted", json!({ "email": verified.email, "supportContact": support_contact })))
+        };
+    };
+    let rotated = auth
+        .refresh_session(
+            IdentityRefreshSessionInput { refresh_token },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    sessions
+        .park(crate::auth_sessions::ParkedAuthSession {
+            message_id,
+            session_id: Some(session_id.0),
+            access_token: rotated.access_token,
+            refresh_token: rotated.refresh_token,
+            expires_in: rotated.expires_in,
+        })
+        .await?;
+
+    if platform_membership_id.is_some() {
+        Ok(())
+    } else {
+        Err(reject("AdminAccessNotGranted", json!({ "email": verified.email, "supportContact": support_contact })))
     }
 }
 

@@ -150,6 +150,14 @@ pub use graphql::schema as graphql_schema;
 // guarantee the parallel in-crate harness cannot give. These three are that test's entry points.
 pub use hosts::{host_root, TenantLookup};
 pub use web_ssr::SsrExec;
+/// #639 part C step 6-iii RESUME (R-1): the session-cookie transport routes (`POST
+/// /auth/{session,refresh,logout}`), re-exported so the ADMIN sign-in DB-gated walk
+/// (`platform_admin_walk.rs`) can mount the SAME `/auth/session` the browser calls -- the
+/// established convention in `admin_sign_in_door.rs`/`member_sign_in_door.rs`/`rider_sign_in_door.rs`
+/// stopped short of this (asserting `sessions.parked()` only) because the module was private; this
+/// re-export widens nothing behavioural, only what a test can build against, following the exact
+/// `pub use graphql::routes::graphql_routes` precedent above for a private module.
+pub use auth_routes::{auth_routes, AuthRoutesState};
 
 /// Minimal health/edge-proof: lets the `desktop` (Tauri) shell embed the server in-process and proves the
 /// server → shared_types edge (ADR-0035). The real DI graph is built in `router()`.
@@ -1160,6 +1168,9 @@ pub async fn router() -> Router {
                         // The PlatformMember bridge's write-side arbiter (ADR-20260905-223957 §1)
                         // -- the SAME shared repository the seam above reuses.
                         platform_members: platform_member_repository.clone(),
+                        // #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door,
+                        // the SAME resolved-once-here shape.
+                        run_admin_sign_in_door: config.run_admin_sign_in_door,
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1672,6 +1683,14 @@ pub async fn router() -> Router {
         config.run_platform_access_grant,
     );
     telemetry::meters::admin_identity::grant_enforcing(config.run_platform_access_grant);
+    // #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door's own fleet-parity
+    // declaration and liveness gauge, unconditional at BOTH composition roots from birth (the
+    // `RUN_PLATFORM_ACCESS_GRANT` precedent above).
+    telemetry::meters::runtime::declare_flag(
+        "RUN_ADMIN_SIGN_IN_DOOR",
+        config.run_admin_sign_in_door,
+    );
+    telemetry::meters::admin_sign_in::door_enforcing(config.run_admin_sign_in_door);
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
     // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside

@@ -191,6 +191,14 @@ pub struct IdentitySendEmailMagicLinkInput {
     pub locale: Option<Locale>,
 }
 
+/// Input of `identity.send_admin_sign_in_link`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentitySendAdminSignInLinkInput {
+    pub email: EmailAddress,
+    pub locale: Option<Locale>,
+}
+
 /// Input of `identity.verify_email_token`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -216,6 +224,13 @@ pub struct IdentityStampMemberClaimInput {
     pub auth_ref: AuthSubject,
 }
 
+/// Input of `identity.stamp_admin_claim`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityStampAdminClaimInput {
+    pub auth_ref: AuthSubject,
+}
+
 /// Identity capability — passwordless auth wrapped behind our GraphQL (ADR-0015, Supabase ACL). Consumed by the Customer command handlers (VerifyPhone / email verification), not by a process manager; catalogued so the calling surface is one spec.
 #[async_trait]
 pub trait IdentityService: Send + Sync {
@@ -237,10 +252,16 @@ pub trait IdentityService: Send + Sync {
     /// Email a magic link to verify/link this address, localized by the stored locale.
     /// Anticipated rejections: none declared.
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
+    /// Email a magic link for the ADMIN sign-in door (#639 part C step 6-iii round 2 R2-3, ADR-20260906-023825): the SAME provider call `send_email_magic_link` makes, addressed at its OWN call site so the shared send-abuse wall (`EmailSendAuthorizer`) can attribute this request to the `admin-sign-in` contract's own `admin_sign_in_link_requested_total`/`admin_sign_in_refused_total` counters rather than `member_sign_in_*`'s (ADR-20260818-101500: one send per door, hardcoded, selected at compile time -- never a door parameter on the shared method). `requestAdminSignInLink`'s ONLY caller; the member/customer magic-link paths keep calling `send_email_magic_link`, unchanged.
+    /// Anticipated rejections: none declared.
+    async fn send_admin_sign_in_link(&self, input: IdentitySendAdminSignInLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
     /// Verify a returned magic-link token server-side with the provider; reports WHICH email the token proves.
     /// Anticipated rejections: `errors.yaml#/InvalidVerificationToken`, `errors.yaml#/VerificationCodeExpired`.
     async fn verify_email_token(&self, input: IdentityVerifyEmailTokenInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyEmailTokenOutput, DomainError>;
     /// Write the MEMBER role claim onto the provider-side auth user identified by `authRef` (#639 part C step 6-ii, ADR-20260905-101349 §7): sets `app_metadata.captain_food` = `{ role: MEMBER }` -- the role and NOTHING else. No `member_id`, no id of any kind (ADR-20260818-004646): the member's binding resolves on every request from OUR Postgres (`Member.auth_subject -> member_id`, step 6-i's bridge, then `ScopeMembership` for the restaurant scope), and a stamped id would be a cache the platform cannot invalidate. A THIRD stamper beside `stamp_customer_claim`/`stamp_rider_claim`, not a parameter on either (#437, ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time). The provider REPLACES the `captain_food` object wholesale (the shallow-merge rule of `stamp_customer_claim`), so stamping MEMBER on a subject that already carries another role's claim would ERASE that claim: a subject holding a non-MEMBER claim is REFUSED with `AuthSubjectHoldsAnotherRole` -- fail closed, never an overwrite. Idempotent on redelivery (already exactly `{ role: MEMBER }` -> no-op). FAIL-CLOSED on the credential like the other two stamps: without `SUPABASE_SECRET_KEY` it errors, and the caller then parks nothing (an unstamped token is never parked).
     /// Anticipated rejections: `errors.yaml#/AuthSubjectHoldsAnotherRole`.
     async fn stamp_member_claim(&self, input: IdentityStampMemberClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
+    /// Write the ADMIN role claim onto the provider-side auth user identified by `authRef` (#639 part C step 6-iii, ADR-20260906-023825): sets `app_metadata.captain_food` = `{ role: ADMIN }` -- the role and NOTHING else. No id of any kind (ADR-20260818-004646, ADR-20260830-234532): the admin's standing resolves on every request from OUR Postgres (`PlatformMember.auth_subject -> platformMembershipId`, step 6-v's bridge), and a stamped id would be a cache the platform cannot invalidate. A FOURTH stamper beside `stamp_customer_claim`/`stamp_rider_claim`/`stamp_member_claim`, not a parameter on any of them (#437, ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time). The provider REPLACES the `captain_food` object wholesale (the shallow-merge rule of `stamp_customer_claim`), so stamping ADMIN on a subject that already carries another role's claim would ERASE that claim: a subject holding a non-ADMIN claim is REFUSED with `AuthSubjectHoldsAnotherRole` -- fail closed, never an overwrite. Idempotent on redelivery (already exactly `{ role: ADMIN }` -> no-op). FAIL-CLOSED on the credential like the other three stamps: without `SUPABASE_SECRET_KEY` it errors, and the caller then parks nothing (an unstamped token is never parked).
+    /// Anticipated rejections: `errors.yaml#/AuthSubjectHoldsAnotherRole`.
+    async fn stamp_admin_claim(&self, input: IdentityStampAdminClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
 }

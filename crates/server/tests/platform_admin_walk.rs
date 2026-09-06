@@ -12,6 +12,19 @@
 //!
 //! Needs a real Postgres (`DATABASE_URL`); SKIPS (prints and returns) without one, same as every
 //! other DB-gated suite here (`DB_TESTS_REQUIRED=1` makes that a hard failure, beck CATCH).
+//!
+//! #639 part C step 6-iii RESUME (R-1, ADR-20260906-023825 fenced-off item 8): a SECOND walk,
+//! `requesting_and_confirming_an_admin_sign_in_opens_the_admin_door_end_to_end`, extends the SAME
+//! real mailbox-worker/real-projector stack one lane further, to the ADMIN sign-in door itself:
+//! bootstrap -> `requestAdminSignInLink` -> `confirmAdminSignIn` over the REAL `/public/graphql`
+//! router, delivered by the SAME real `MailboxWorker` (the `AdminSignIn` lane joins
+//! `ACTOR_MAILBOXES` for free) -> `POST /auth/session` claims the parked cookie -> `/admin/graphql
+//! mailboxLanes` is admitted. Only the identity PROVIDER is scripted (no real Supabase in this
+//! test run); the mailbox, the `PlatformMember` bridge and the ADMIN seam (`PgPlatformIdentity`)
+//! are all real Postgres, and the scripted rotation mints a REAL, independently verifiable JWT for
+//! the subject it just stamped (the `admin_sign_in_door.rs::jwt_of_the_admin_stamp` shape, driven
+//! through the actual rotation call instead of hand-substituted at the assertion) -- so the cookie
+//! `POST /auth/session` sets is the credential the door actually issued, not a lookalike.
 
 use std::sync::Arc;
 
@@ -74,6 +87,7 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         // THE DOOR UNDER TEST, ON: this walk proves the grant path, not the door-closed refusal
         // (that is `TestGrantPlatformAccessDoorClosed` in the behaviour suite).
         run_platform_access_grant: true,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone())),
         enforce_service_hours_guard: false,
         enforce_acceptance_timeout: false,
@@ -375,4 +389,487 @@ async fn the_admin_seam_resolves_only_after_the_grant_lands() {
     // "any grant exists at all".
     let stranger = server::ResolvePlatformIdentity::resolve(&seam, "auth-never-granted").await;
     assert_eq!(stranger, server::PlatformIdentityResolution::NoMapping);
+}
+
+// ─── #639 part C step 6-iii RESUME (R-1): the ADMIN sign-in door, end to end over Postgres ────────
+
+const SIGN_IN_TEST_EC_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTCTNdGfegiVKVsm+
+vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
+5bKnk8sNetDUBHLVIGpXoxBRFJVNSeDN6QB9IHl6rqDLaZR4iqLatScL
+-----END PRIVATE KEY-----
+";
+const SIGN_IN_TEST_SUPABASE_URL: &str = "https://captain-walk-under-test.supabase.co";
+
+async fn sign_in_jwks_endpoint() -> String {
+    let body = json!({"keys":[{"kty":"EC","crv":"P-256","use":"sig","kid":"captain-walk-es256",
+        "alg":"ES256","x":"baNA5O-X8ZdiMi8fPb8L41FpCQG_6eWyp5PLDXrQ1AQ",
+        "y":"ctUgalejEFEUlU1J4M3pAH0geXquoMtplHiKotq1Jws"}]});
+    let app = axum::Router::new().route(
+        "/jwks",
+        axum::routing::get(move || {
+            let body = body.clone();
+            async move { axum::Json(body) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{addr}/jwks")
+}
+
+fn sign_in_subject_of(email: &str) -> String {
+    format!("sub-{email}")
+}
+
+fn sign_in_token_of(email: &str) -> String {
+    format!("token-for-{email}")
+}
+
+/// Mints the SAME shape a real `/auth/refresh` rotation would deliver for a stamped ADMIN subject
+/// -- `app_metadata` read from the production stamper's OWN wire body (`stamp_admin_put_body`), so
+/// the walk's cookie is the credential the door actually issues, never a hand-spelled lookalike.
+fn sign_in_jwt_for_subject(sub: &str) -> String {
+    let body = infrastructure::integrations::supabase_auth::stamp_admin_put_body();
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+    header.kid = Some("captain-walk-es256".into());
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs()
+        + 3600;
+    let claims = json!({
+        "sub": sub,
+        "aud": "authenticated",
+        "iss": format!("{SIGN_IN_TEST_SUPABASE_URL}/auth/v1"),
+        "exp": exp,
+        "app_metadata": body["app_metadata"],
+    });
+    let key = jsonwebtoken::EncodingKey::from_ec_pem(SIGN_IN_TEST_EC_PRIVATE_KEY_PEM.as_bytes())
+        .expect("test EC key parses");
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+}
+
+/// The ONE scripted port in this walk -- the identity PROVIDER (no real Supabase in a test run).
+/// The mailbox, the `PlatformMember` bridge and the ADMIN seam stay real Postgres. `verify_email_token`
+/// recovers the email from the token deterministically (the `admin_sign_in_door.rs` harness
+/// convention); `refresh_session` mints a REAL, independently verifiable JWT for the subject it
+/// just saw stamped -- never a placeholder string -- so the cookie this walk claims is the actual
+/// credential, not a shortcut substituted at the assertion.
+#[derive(Default)]
+struct WalkScriptedIdentity {
+    sent: std::sync::Mutex<Vec<String>>,
+    admin_stamps: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl application::generated::services::IdentityService for WalkScriptedIdentity {
+    async fn send_phone_otp(
+        &self,
+        _input: application::generated::services::IdentitySendPhoneOtpInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never sends SMS")
+    }
+    async fn verify_phone_otp(
+        &self,
+        _input: application::generated::services::IdentityVerifyPhoneOtpInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<application::generated::services::IdentityVerifyPhoneOtpOutput, domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never verifies a phone OTP")
+    }
+    async fn stamp_customer_claim(
+        &self,
+        _input: application::generated::services::IdentityStampCustomerClaimInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never reaches the CUSTOMER stamper")
+    }
+    async fn stamp_rider_claim(
+        &self,
+        _input: application::generated::services::IdentityStampRiderClaimInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never reaches the RIDER stamper")
+    }
+    async fn stamp_member_claim(
+        &self,
+        _input: application::generated::services::IdentityStampMemberClaimInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never reaches the MEMBER stamper")
+    }
+    async fn send_email_magic_link(
+        &self,
+        _input: application::generated::services::IdentitySendEmailMagicLinkInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        panic!("the admin sign-in walk never calls the MEMBER/customer magic-link send -- round 2 R2-3 gave requestAdminSignInLink its own send_admin_sign_in_link call site")
+    }
+    // Round 2 R2-3 (obs/reviewer): `requestAdminSignInLink` now calls its OWN `send_admin_sign_in_link`
+    // (the `EmailSendAuthorizer`'s `SignInDoor::Admin` arm), never the shared `send_email_magic_link`
+    // the member/customer paths keep using -- so admin traffic can never land on member's counters.
+    async fn send_admin_sign_in_link(
+        &self,
+        input: application::generated::services::IdentitySendAdminSignInLinkInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        self.sent.lock().expect("walk scripted identity").push(input.email.0);
+        Ok(())
+    }
+    async fn verify_email_token(
+        &self,
+        input: application::generated::services::IdentityVerifyEmailTokenInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<application::generated::services::IdentityVerifyEmailTokenOutput, domain::shared::errors::DomainError> {
+        let email = input.token.0.trim_start_matches("token-for-").to_string();
+        Ok(application::generated::services::IdentityVerifyEmailTokenOutput {
+            auth_ref: domain::generated::scalars::AuthSubject(sign_in_subject_of(&email)),
+            email: domain::generated::scalars::EmailAddress(email),
+            access_token: Some("pre-stamp.access".into()),
+            refresh_token: Some("pre-stamp.refresh".into()),
+            expires_in: Some(3600),
+        })
+    }
+    async fn stamp_admin_claim(
+        &self,
+        input: application::generated::services::IdentityStampAdminClaimInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        self.admin_stamps.lock().expect("walk scripted identity").push(input.auth_ref.0);
+        Ok(())
+    }
+    async fn refresh_session(
+        &self,
+        _input: application::generated::services::IdentityRefreshSessionInput,
+        _meta: &application::generated::services::ServiceCallMeta,
+    ) -> Result<application::generated::services::IdentityRefreshSessionOutput, domain::shared::errors::DomainError> {
+        let stamped = self.admin_stamps.lock().expect("walk scripted identity").last().cloned();
+        let access_token = match stamped {
+            Some(sub) => sign_in_jwt_for_subject(&sub),
+            None => "rotated:none".into(),
+        };
+        Ok(application::generated::services::IdentityRefreshSessionOutput {
+            access_token,
+            refresh_token: Some("post-stamp.refresh".into()),
+            expires_in: Some(3600),
+        })
+    }
+}
+
+/// Spawn the real mailbox workers for the ADMIN sign-in walk: the `spawn_mailbox_workers` precedent
+/// above, narrowed to the THREE fields this walk overrides (`auth`, `sessions`, the door gate) --
+/// everything else (the real `platform_members` bridge in particular) is identical.
+fn spawn_mailbox_workers_for_admin_sign_in(
+    pool: &PgPool,
+    bus: actor_client::OperationStatusBus,
+    identity: Arc<WalkScriptedIdentity>,
+    sessions: Arc<application::auth_sessions::mem::MemAuthSessionStore>,
+) {
+    let deps = infrastructure::generated::command_router::CommandDeps {
+        store: Arc::new(infrastructure::PgEventStore::new(pool.clone())),
+        restaurants: Arc::new(infrastructure::PgRestaurantRepository::new(pool.clone())),
+        slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+        auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
+        ownership: Arc::new(infrastructure::FailClosedGoogleOwnershipVerifier),
+        probe: Arc::new(infrastructure::UnverifiedGbpOrderLinkProbe),
+        prospection: Arc::new(infrastructure::PgProspectionRepository::new(pool.clone())),
+        catalogs: Arc::new(infrastructure::PgCatalogRepository::new(pool.clone())),
+        // The ONE scripted port -- everything else on this deps struct is real Postgres.
+        auth: identity,
+        customers: Arc::new(infrastructure::PgCustomerRepository::new(pool.clone())),
+        sessions,
+        payments: Arc::new(infrastructure::FailClosedPaymentGateway),
+        pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone())),
+        refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone())),
+        mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        members: Arc::new(infrastructure::PgMemberRepository::new(pool.clone())),
+        support_contact: Some(domain::generated::scalars::EmailAddress("support@captain.food".into())),
+        run_rider_restriction_door: false,
+        run_member_access_grant: false,
+        run_member_sign_in_door: false,
+        run_restaurant_invitation: false,
+        // The bootstrap's OWN `GrantPlatformAccess` dispatch needs this door open too -- the
+        // walk's mailbox worker is the SAME one that must deliver the sign-in commands, so both
+        // doors are ON together (the `spawn_mailbox_workers` precedent above sets this true too).
+        run_platform_access_grant: true,
+        // THE DOOR UNDER TEST, ON.
+        run_admin_sign_in_door: true,
+        platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone())),
+        enforce_service_hours_guard: false,
+        enforce_acceptance_timeout: false,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: true,
+            place_replacement_order_to_order: false,
+            bind_cart_to_customer_to_cart: false,
+            grant_customer_credit_to_customer_credit: false,
+            mark_order_delivered_to_order: false,
+        },
+    };
+    let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
+    let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));
+    for (actor_type, width) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
+        let worker = actor_runtime::MailboxWorker::new(
+            pool.clone(),
+            "w-admin-sign-in-walk",
+            *actor_type,
+            actor_runtime::WorkerConfig { heartbeat_seconds: 1, ..Default::default() },
+            handler.clone(),
+        )
+        .with_observer(observer.clone());
+        let width = *width as i16;
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        std::mem::forget(_tx);
+        tokio::spawn(async move {
+            worker.seed(width).await.expect("seed");
+            let _ = worker.run(rx).await;
+        });
+    }
+}
+
+/// The real `/public/graphql` + `/auth/session` + `/admin/graphql` router, PgMailbox-backed (the
+/// `admin_sign_in_door.rs::door()` shape, transposed off the in-memory mailbox onto the pool the
+/// real workers above are draining).
+fn sign_in_walk_app(
+    pool: &PgPool,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
+    identity: Arc<WalkScriptedIdentity>,
+    sessions: Arc<dyn application::auth_sessions::AuthSessionStore>,
+    seam: Arc<dyn server::ResolvePlatformIdentity>,
+    jwks_url: String,
+) -> axum::Router {
+    let identity_port: Arc<dyn application::generated::services::IdentityService> = identity;
+    let mailbox_lanes: Arc<dyn actor_client::supervision::MailboxLaneRepository> =
+        Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository::new(pool.clone()));
+    // A REAL `ReadDeps` (the `rider_standing_walk.rs::schema_over` precedent) rather than `None`:
+    // `mailboxLanes` must genuinely resolve and answer with data, not merely fail differently than
+    // FORBIDDEN -- that is the bar this walk raises over `admin_sign_in_door.rs`'s narrower proof.
+    let schema = server::graphql_schema::build_schema(
+        Some(server::graphql_schema::ReadDeps {
+            restaurants: Arc::new(infrastructure::PgRestaurantRepository::new(pool.clone())),
+            prospection: Arc::new(infrastructure::PgProspectionRepository::new(pool.clone())),
+            pricing_policy: Arc::new(infrastructure::PgPricingPolicyRepository::new(pool.clone())),
+            uber_estimation_policy: Arc::new(infrastructure::PgUberEstimationPolicyRepository::new(pool.clone())),
+            uber_split_policy: Arc::new(infrastructure::PgUberSplitPolicyRepository::new(pool.clone())),
+            catalogs: Arc::new(infrastructure::PgCatalogRepository::new(pool.clone())),
+            carts: Arc::new(infrastructure::PgCartRepository::new(pool.clone())),
+            orders: Arc::new(infrastructure::PgOrderRepository::new(pool.clone())),
+            order_conversations: Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone())),
+            customers: Arc::new(infrastructure::PgCustomerRepository::new(pool.clone())),
+            deliveries: Arc::new(infrastructure::PgDeliveryRepository::new(pool.clone())),
+            rider_restrictions: Arc::new(infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone())),
+            rider_roster: Arc::new(infrastructure::persistence::rider_roster_store::PgRiderRosterRepository::new(pool.clone())),
+            member_authority: Arc::new(infrastructure::PgMemberAuthorityRepository::new(pool.clone())),
+            restaurant_roster: Arc::new(infrastructure::PgRestaurantRosterRepository::new(pool.clone())),
+            restaurant_invitations: Arc::new(infrastructure::PgRestaurantInvitationListRepository::new(pool.clone())),
+            refunds: Arc::new(infrastructure::PgRefundQueueRepository::new(pool.clone())),
+            delivery_satisfaction: Arc::new(infrastructure::PgDeliverySatisfactionRepository::new(pool.clone())),
+            delivery_partner_availabilities: Arc::new(infrastructure::PgDeliveryPartnerAvailabilityRepository::new(pool.clone())),
+            reclamations: Arc::new(infrastructure::PgReclamationRepository::new(pool.clone())),
+            customer_credit: Arc::new(infrastructure::PgCustomerCreditRepository::new(pool.clone())),
+            mailbox_lanes: mailbox_lanes.clone(),
+            service_window_horizon: Default::default(),
+            support_contact: Some(domain::generated::scalars::EmailAddress("support@captain.food".into())),
+            run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
+        }),
+        Some(server::graphql_schema::WriteDeps {
+            event_store: Arc::new(infrastructure::PgEventStore::new(pool.clone())),
+            ownership: Arc::new(infrastructure::FailClosedGoogleOwnershipVerifier),
+            gbp_probe: Arc::new(infrastructure::UnverifiedGbpOrderLinkProbe),
+            auth_provider: identity_port.clone(),
+            payments: Arc::new(infrastructure::FailClosedPaymentGateway),
+            pm_state: Arc::new(application::generated::pm_state::mem::MemPaymentProcessState::default()),
+            refund_state: Arc::new(application::generated::pm_state::mem::MemRefundProcessState::default()),
+            mailbox: mailbox.clone(),
+            status_bus: actor_client::OperationStatusBus::default(),
+            auth_sessions: sessions.clone(),
+            slug_reservations: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+        }),
+        None,
+    );
+    server::graphql_routes(
+        schema,
+        server::TenantLookup(None),
+        server::IdentitySources {
+            customer: server::CustomerIdentitySource::Claim,
+            rider: server::RiderIdentitySource::new(Arc::new(server::NoDatabaseRiderIdentity)),
+            member: server::MemberIdentitySource::new(Arc::new(server::NoDatabaseMemberIdentity)),
+            platform: server::PlatformIdentitySource::new(seam),
+        },
+    )
+    .layer(axum::Extension(server::AuthContext::from_config(jwks_url, SIGN_IN_TEST_SUPABASE_URL.into())))
+}
+
+async fn sign_in_walk_post_public(app: &axum::Router, query: &str, session: uuid::Uuid) -> serde_json::Value {
+    use tower::ServiceExt;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/public/graphql")
+        .header(axum::http::header::HOST, "system.captain.food")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header("X-SESSION-ID", session.to_string())
+        .body(axum::body::Body::from(json!({ "query": query }).to_string()))
+        .expect("request builds");
+    let response = app.clone().oneshot(request).await.expect("router answers");
+    assert_eq!(response.status(), axum::http::StatusCode::OK, "the public path never 401s");
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("body");
+    serde_json::from_slice(&bytes).expect("a GraphQL response body")
+}
+
+/// Poll a `Mutex<Vec<_>>`-backed fake until it has recorded `at_least` entries -- the real mailbox
+/// worker delivers on its own schedule, and the sign-in lane emits no `domain_events` fact this
+/// walk's `wait_for_events` could poll instead (ADR-20260906-023825: the actor is pure routing).
+async fn wait_for_len<T>(mutex: &std::sync::Mutex<Vec<T>>, at_least: usize) {
+    for _ in 0..100 {
+        if mutex.lock().expect("poll mutex").len() >= at_least {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("mutex did not reach {at_least} entries in time");
+}
+
+/// The `AuthSessionStore` sibling of [`wait_for_len`] -- `MemAuthSessionStore::parked()` returns a
+/// snapshot `Vec`, so polling it needs its own loop rather than a borrow `wait_for_len` could share.
+async fn wait_for_parked(sessions: &application::auth_sessions::mem::MemAuthSessionStore, at_least: usize) {
+    for _ in 0..100 {
+        if sessions.parked().len() >= at_least {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("sessions store did not reach {at_least} parked entries in time");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn requesting_and_confirming_an_admin_sign_in_opens_the_admin_door_end_to_end() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("admin_sign_in_walk") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let email = "walk-admin@captain.food";
+    let auth_subject = sign_in_subject_of(email);
+
+    // Bootstrap: grant platform access to the SAME subject the scripted identity provider will
+    // resolve the email to on `verify_email_token` -- otherwise this walk would prove nothing about
+    // a GRANTED admin at all.
+    let code = server::bootstrap_platform_admin::dispatch(&url, &auth_subject).await;
+    assert_eq!(code, 0, "the bootstrap dispatch must succeed");
+
+    let identity = Arc::new(WalkScriptedIdentity::default());
+    let sessions = Arc::new(application::auth_sessions::mem::MemAuthSessionStore::default());
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers_for_admin_sign_in(&pool, status_bus, identity.clone(), sessions.clone());
+
+    // Drain the bootstrap's own grant so the seam resolves BEFORE the sign-in leg is exercised --
+    // this walk's claim is about the sign-in door, not a re-proof of `the_admin_seam_resolves_
+    // only_after_the_grant_lands` above.
+    let platform_membership_id = server::bootstrap_platform_admin::platform_membership_id_for(&auth_subject);
+    let stream = format!("PlatformMembership-{}", platform_membership_id.0);
+    wait_for_events(&pool, &stream, 1).await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (grant)");
+
+    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> = Arc::new(PgMailbox::new(pool.clone()));
+    let seam: Arc<dyn server::ResolvePlatformIdentity> = Arc::new(server::PgPlatformIdentity::new(Arc::new(
+        infrastructure::PgPlatformMemberRepository::new(pool.clone()),
+    )));
+    let jwks_url = sign_in_jwks_endpoint().await;
+    let app = sign_in_walk_app(&pool, mailbox, identity.clone(), sessions.clone(), seam, jwks_url);
+
+    let session = uuid::Uuid::now_v7();
+    let req_id = uuid::Uuid::now_v7();
+    let request_query = format!(
+        r#"mutation {{ requestAdminSignInLink(input: {{ email: "{email}" }}, metadata: {{ messageId: "{req_id}" }}) {{ operationStatus }} }}"#
+    );
+    let acceptance = sign_in_walk_post_public(&app, &request_query, session).await;
+    assert!(acceptance["errors"].is_null(), "requestAdminSignInLink must be accepted: {}", acceptance["errors"]);
+    assert_eq!(acceptance["data"]["requestAdminSignInLink"]["operationStatus"], "PENDING");
+
+    // RED-BEFORE-GREEN, quoted in the hand-back: before the real worker has drained the row, the
+    // scripted provider has seen ZERO sends -- this is the seam the door-closed test at
+    // `admin_sign_in_door.rs` proves synchronously; here it is the SAME fact proven against a real
+    // asynchronous worker, so it must be awaited rather than asserted immediately.
+    wait_for_len(&identity.sent, 1).await;
+    assert_eq!(*identity.sent.lock().unwrap(), vec![email.to_string()], "the real worker delivered the request leg");
+
+    let confirm_id = uuid::Uuid::now_v7();
+    let confirm_query = format!(
+        r#"mutation {{ confirmAdminSignIn(input: {{ token: "{}" }}, metadata: {{ messageId: "{confirm_id}" }}) {{ operationStatus }} }}"#,
+        sign_in_token_of(email)
+    );
+    let acceptance = sign_in_walk_post_public(&app, &confirm_query, session).await;
+    assert!(acceptance["errors"].is_null(), "confirmAdminSignIn must be accepted: {}", acceptance["errors"]);
+    assert_eq!(acceptance["data"]["confirmAdminSignIn"]["operationStatus"], "PENDING");
+
+    wait_for_len(&identity.admin_stamps, 1).await;
+    assert_eq!(
+        *identity.admin_stamps.lock().unwrap(),
+        vec![auth_subject.clone()],
+        "the real worker stamped the granted admin's own subject, and nothing else"
+    );
+    wait_for_parked(&sessions, 1).await;
+    let parked = sessions.parked();
+    assert_eq!(parked.len(), 1, "exactly one session parked for POST /auth/session");
+    assert_eq!(parked[0].message_id, confirm_id);
+    assert_eq!(parked[0].session_id, Some(session));
+
+    // `POST /auth/session`: claim the parked cookie the SAME way a browser would.
+    let claim_request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/auth/session")
+        .header(axum::http::header::HOST, "system.captain.food")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header("X-SESSION-ID", session.to_string())
+        .body(axum::body::Body::from(json!({ "messageId": confirm_id }).to_string()))
+        .expect("request builds");
+    // `/auth/session` is not mounted on the GraphQL-only `app` above (`admin_sign_in_door.rs`
+    // never needed it); this walk needs it live, so it is merged on here, once, right before use.
+    let full_app = app.merge(server::auth_routes(server::AuthRoutesState {
+        sessions: Some(sessions.clone()),
+        identity: identity.clone(),
+        sms: None,
+        sms_hook_secret: None,
+        sms_guard: None,
+    }));
+    use tower::ServiceExt;
+    let claim_response = full_app.clone().oneshot(claim_request).await.expect("router answers");
+    assert_eq!(claim_response.status(), axum::http::StatusCode::NO_CONTENT, "the claim must succeed -- same messageId, same X-SESSION-ID");
+    let set_cookie = claim_response
+        .headers()
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .find_map(|v| v.to_str().ok().filter(|s| s.starts_with("captain_auth=")))
+        .expect("the access cookie is set")
+        .to_string();
+    let jwt = set_cookie
+        .strip_prefix("captain_auth=")
+        .and_then(|rest| rest.split(';').next())
+        .expect("cookie value parses")
+        .to_string();
+
+    // `/admin/graphql mailboxLanes`, riding the cookie `POST /auth/session` just set -- the REAL
+    // credential the door issued, claimed the way a browser would, opens the ADMIN board.
+    let admin_request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/admin/graphql")
+        .header(axum::http::header::HOST, "system.captain.food")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header(axum::http::header::COOKIE, format!("captain_auth={jwt}"))
+        .body(axum::body::Body::from(json!({ "query": "query { mailboxLanes { actorType partition } }" }).to_string()))
+        .expect("request builds");
+    let admin_response = full_app.clone().oneshot(admin_request).await.expect("router answers");
+    assert_eq!(admin_response.status(), axum::http::StatusCode::OK);
+    let bytes = axum::body::to_bytes(admin_response.into_body(), usize::MAX).await.expect("body");
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("a GraphQL response body");
+    assert!(
+        body["errors"].is_null(),
+        "a granted admin's real, issued cookie must open /admin/graphql -- got errors: {}",
+        body["errors"]
+    );
+    assert!(body["data"]["mailboxLanes"].is_array(), "mailboxLanes must be admitted and answer with data: {body}");
 }

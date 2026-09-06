@@ -5690,7 +5690,7 @@ Catalog:
         let states = emit_domain_states(&model);
         let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
         assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
-        // 0 errors, and the CALIBRATION holds: exactly FIVE commands legitimately lack their
+        // 0 errors, and the CALIBRATION holds: exactly SEVEN commands legitimately lack their
         // identity property, and they are the ones a caller WITHOUT a credential sends — the id
         // is minted (or resolved) server-side, so the lane is addressing-only: the customer's
         // RequestPhoneVerification, the rider sign-in door's RequestRiderSignInCode /
@@ -5698,12 +5698,12 @@ Catalog:
         // signs in), and the member sign-in door's RequestMemberSignInLink / ConfirmMemberSignIn
         // (#639 part C step 6-ii, same shape: no membershipId exists before the seam resolves
         // one). That is why identity-property-not-on-command is a WARN, not an error (§2d
-        // doc). An EXACT inventory by name, never a floor: a sixth is a decision taken here.
+        // doc). An EXACT inventory by name, never a floor: an eighth is a decision taken here.
         let Report { issues, .. } = validate(&model);
         for i in &issues {
             assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
         }
-        const LEGITIMATELY_UNADDRESSED: [&str; 6] = [
+        const LEGITIMATELY_UNADDRESSED: [&str; 8] = [
             "RequestPhoneVerification",
             "RequestRiderSignInCode",
             "ConfirmRiderSignIn",
@@ -5714,6 +5714,12 @@ Catalog:
             // (UUIDv5 of `invitationId`, never client-supplied), the same addressing-only shape as
             // the sign-in doors above.
             "GrantRestaurantAccessByInvitation",
+            // #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door's own pair --
+            // PUBLIC, `{email}`/`{token}` only, identify-only against the platform grant. No
+            // platformMembershipId exists before the seam resolves one, the SAME shape as the
+            // member sign-in door above.
+            "RequestAdminSignInLink",
+            "ConfirmAdminSignIn",
         ];
         let mut inventory: Vec<(String, &str)> = issues
             .iter()
@@ -5731,6 +5737,8 @@ Catalog:
         assert_eq!(
             inventory,
             vec![
+                ("actors.yaml/AdminSignIn".to_string(), "ConfirmAdminSignIn"),
+                ("actors.yaml/AdminSignIn".to_string(), "RequestAdminSignInLink"),
                 ("actors.yaml/Customer".to_string(), "RequestPhoneVerification"),
                 ("actors.yaml/RestaurantMembership".to_string(), "ConfirmMemberSignIn"),
                 ("actors.yaml/RestaurantMembership".to_string(), "GrantRestaurantAccessByInvitation"),
@@ -16892,7 +16900,10 @@ mod screen_roles_gate {
     /// declare a transport role; #639 part C step 6-ii adds the member sign-in door's THREE PUBLIC
     /// screens (`sign_in`, `sign_in_return` — round 2's magic-link return landing —, `not_linked`)
     /// on `restaurant_backoffice.yaml` alongside it; 6-iv round 2 adds a FOURTH, `invitation_accept`
-    /// (the invitation-accept landing, also PUBLIC and hand-written).
+    /// (the invitation-accept landing, also PUBLIC and hand-written). 6-iii RESUME (R-2, this
+    /// snapshot going stale is exactly the `make rust` gap the previous 6-iii run's STOP left
+    /// unverified): the ADMIN sign-in door's own THREE PUBLIC screens on `system.yaml`
+    /// (`sign_in`, `admin_sign_in_return`, `no_access`).
     #[test]
     fn the_real_corpus_is_clean_and_the_rider_door_is_the_one_declared_transport_role() {
         let model = real_model();
@@ -16934,6 +16945,11 @@ mod screen_roles_gate {
                 "screens/restaurant_backoffice.yaml/invitation_accept".to_string(),
                 "screens/restaurant_backoffice.yaml/not_linked".to_string(),
                 "screens/rider.yaml/sign_in".to_string(),
+                // #639 part C step 6-iii: the ADMIN sign-in door's own PUBLIC screens on the
+                // System surface (ADR-20260906-023825).
+                "screens/system.yaml/sign_in".to_string(),
+                "screens/system.yaml/admin_sign_in_return".to_string(),
+                "screens/system.yaml/no_access".to_string(),
             ]
         );
     }

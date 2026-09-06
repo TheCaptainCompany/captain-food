@@ -23,11 +23,21 @@ use crate::graphql::TransportError;
 /// acceptance mutation failure) may use to decide a bounce — see the module docs for the two legs.
 pub fn bounce_after(err: &TransportError, screen: &Screen) -> Option<&'static str> {
     match err {
-        TransportError::Errors { extensions, .. } => extensions
-            .iter()
-            .any(|e| e.reason.as_deref() == Some(shared_types::RIDER_RESTRICTED))
-            .then_some(())
-            .and_then(|()| screen.restricted_route),
+        TransportError::Errors { extensions, .. } => {
+            if extensions.iter().any(|e| e.reason.as_deref() == Some(shared_types::RIDER_RESTRICTED)) {
+                return screen.restricted_route;
+            }
+            // #639 part C step 6-iii (ADR-20260906-023825): an ADMIN-claimed token with no live
+            // platform grant -- the server's own re-derivation refused it (`RoleGuard`, never a
+            // client-visible claim). ONE fixed target across the whole System surface (unlike
+            // `RIDER_RESTRICTED`'s per-screen `restricted_route`): every requires_auth screen on
+            // this surface bounces here identically, there being exactly one such refusal reason
+            // for the whole surface.
+            if extensions.iter().any(|e| e.reason.as_deref() == Some(shared_types::ADMIN_ACCESS_NOT_GRANTED)) {
+                return Some("/sign-in/no-access");
+            }
+            None
+        }
         TransportError::Status { status: 401 } => screen.unauthenticated_route,
         TransportError::Status { .. } | TransportError::Network(_) | TransportError::Malformed(_) => None,
     }
@@ -54,6 +64,37 @@ mod tests {
             message: "forbidden: role RIDER is not authorized".into(),
             extensions: vec![ErrorExtensions { code: Some("FORBIDDEN".into()), reason: None }],
         }
+    }
+
+    /// #639 part C step 6-iii: an ADMIN-claimed token the seam re-derived to `Identity::Unbound`
+    /// (no live platform grant).
+    fn admin_not_granted() -> TransportError {
+        TransportError::Errors {
+            message: "forbidden: role PUBLIC is not authorized for this operation (allowed: ADMIN)".into(),
+            extensions: vec![ErrorExtensions {
+                code: Some("FORBIDDEN".into()),
+                reason: Some(shared_types::ADMIN_ACCESS_NOT_GRANTED.into()),
+            }],
+        }
+    }
+
+    fn mailbox_lanes() -> &'static Screen {
+        crate::generated::screens::system::SCREENS.iter().find(|s| s.id == "mailbox_lanes").expect("mailbox_lanes screen")
+    }
+
+    /// The reason bounces to a FIXED target, not a per-screen declared route -- unlike
+    /// `RIDER_RESTRICTED`, there is exactly one such refusal for the whole System surface.
+    #[test]
+    fn admin_access_not_granted_bounces_to_no_access() {
+        assert_eq!(bounce_after(&admin_not_granted(), mailbox_lanes()), Some("/sign-in/no-access"));
+    }
+
+    /// A bare role-mismatch FORBIDDEN (no reason at all -- the beck instruction) never bounces to
+    /// `/sign-in/no-access` either: `forbidden_no_reason()` -> `None`, exactly as for every other
+    /// screen's ordinary role refusal.
+    #[test]
+    fn forbidden_no_reason_never_bounces_to_no_access() {
+        assert_eq!(bounce_after(&forbidden_no_reason(), mailbox_lanes()), None);
     }
 
     fn jobs() -> &'static Screen {

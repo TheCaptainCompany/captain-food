@@ -37,6 +37,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "ConfigureCatalogSlug" => Some(("Catalog", Some("catalogId"), 5)),
         "ConfigureGoogleBusinessProfileOrderLink" => Some(("Restaurant", Some("restaurantId"), 5)),
         "ConfigureRestaurantSlug" => Some(("Restaurant", Some("restaurantId"), 5)),
+        "ConfirmAdminSignIn" => Some(("AdminSignIn", None, 5)),
         "ConfirmCustomerErasure" => Some(("Customer", Some("customerId"), 5)),
         "ConfirmEmailVerification" => Some(("Customer", Some("customerId"), 5)),
         "ConfirmMemberSignIn" => Some(("RestaurantMembership", None, 5)),
@@ -91,6 +92,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "RemoveRestaurant" => Some(("Restaurant", Some("restaurantId"), 5)),
         "ReopenReclamation" => Some(("Reclamation", Some("reclamationId"), 5)),
         "ReportDeliveryIssue" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
+        "RequestAdminSignInLink" => Some(("AdminSignIn", None, 5)),
         "RequestCustomerErasure" => Some(("Customer", Some("customerId"), 5)),
         "RequestEmailVerification" => Some(("Customer", Some("customerId"), 5)),
         "RequestMemberSignInLink" => Some(("RestaurantMembership", None, 5)),
@@ -134,6 +136,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
 /// registry with these widths. The widths are part of the frozen routing contract: narrowing one
 /// re-routes in-flight rows.
 pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
+    ("AdminSignIn", 5),
     ("Cart", 5),
     ("Catalog", 5),
     ("Conversation", 5),
@@ -164,6 +167,7 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
 /// enqueued. Actors that receive no inbound facts render an empty slice on purpose: absent and
 /// empty must both refuse.
 pub const ACTOR_INBOUND_FACTS: &[(&str, &[&str])] = &[
+    ("AdminSignIn", &[]),
     ("Cart", &["CartCheckedOut"]),
     ("Catalog", &["OfferStockUpdated"]),
     ("Conversation", &[]),

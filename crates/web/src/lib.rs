@@ -17,6 +17,7 @@ use app_core::health;
 use shared_types::HealthDto;
 
 pub mod actions;
+pub mod admin_sign_in_return;
 pub mod auth;
 pub mod bounce;
 pub mod checkout;

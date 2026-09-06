@@ -181,3 +181,42 @@ PlatformMembership:
         - { $ref: 'errors.yaml#/PlatformAccessGrantDoorClosed' }
         - { $ref: 'errors.yaml#/PlatformAccessAlreadyGranted' }
         - { $ref: 'errors.yaml#/PlatformMembershipIdMismatch' }
+
+
+# --- The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) -------------------------
+
+AdminSignIn:
+  type: aggregate
+  identity: { $ref: '#/AdminSignIn/state/signInId' }
+  mailbox:
+    partitions: 5   # OWN width-5 lane, never PlatformMembership (partitions: 1) -- vernon Q1c: an
+                    # anonymous PUBLIC caller here must never head-of-line block the single lane
+                    # carrying GrantPlatformAccess and the one-shot bootstrap behind IdP round trips
+                    # (the RestaurantMembership vs RestaurantInvitation split, one level down).
+  description: >
+    The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825): pure routing for lane
+    hygiene, transposing the member sign-in door's shape (ADR-20260905-101349 §7-§10) to the
+    platform context. Emits nothing and holds no stream of its own facts -- `emits: []` on both
+    messages, exactly like `RestaurantMembership`'s `RequestMemberSignInLink`/`ConfirmMemberSignIn`
+    pair. Identify-only against `application::queries::PlatformMemberRepository` (the SAME read
+    port `GrantPlatformAccess`'s handler already consults, ADR-20260905-223957 §1): a verified
+    email with no live grant is refused (`AdminAccessNotGranted`), never stamped, never created.
+  receives:
+    - message: { $ref: 'commands.yaml#/RequestAdminSignInLink' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/RateLimited' }
+        - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+        - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
+        - { $ref: 'errors.yaml#/AdminSignInDoorClosed' }
+      effect: "Delegate to the auth provider: send an email magic link, REFUSING when the email send-abuse wall says so. Never consults the PlatformMember bridge (no enumeration oracle). No event."
+    - message: { $ref: 'commands.yaml#/ConfirmAdminSignIn' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+        - { $ref: 'errors.yaml#/AdminAccessNotGranted' }
+        - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
+        - { $ref: 'errors.yaml#/AdminSignInRequiresSession' }
+        - { $ref: 'errors.yaml#/AdminSignInDoorClosed' }
+      effect: "Verify the magic-link token with the auth provider, look the proved subject up through PlatformMemberRepository (auth_subject -> platformMembershipId, step 6-v): no live grant -> AdminAccessNotGranted, nothing stamped, the session still parked; a live grant -> stamp { role: ADMIN } on the provider user and park the post-stamp session for POST /auth/session. No event."

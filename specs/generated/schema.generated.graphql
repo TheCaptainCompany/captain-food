@@ -38,6 +38,7 @@ scalar OfferName
 scalar OptionName
 scalar Tag
 scalar EmailAddress
+scalar EmailVerificationToken
 scalar PhoneNumber
 scalar AddressLine
 scalar CityName
@@ -86,7 +87,6 @@ scalar EscalationReason
 scalar TranslatedText
 scalar AddressId
 scalar PaymentMethodId
-scalar EmailVerificationToken
 scalar ErasureRequestId
 scalar ErasureConfirmationToken
 scalar DeliveryJobId
@@ -1246,6 +1246,15 @@ input GrantPlatformAccessInput {
   basis: PlatformAccessBasis!
 }
 
+input RequestAdminSignInLinkInput {
+  email: EmailAddress!
+  locale: Locale
+}
+
+input ConfirmAdminSignInInput {
+  token: EmailVerificationToken!
+}
+
 input OpenConversationInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
@@ -2172,6 +2181,8 @@ type Mutation {
   importCatalog(input: ImportCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "ImportCatalog")
   requeueMailboxMessage(input: RequeueMailboxMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RequeueMailboxMessage")
   grantPlatformAccess(input: GrantPlatformAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantPlatformAccess")
+  requestAdminSignInLink(input: RequestAdminSignInLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "RequestAdminSignInLink")
+  confirmAdminSignIn(input: ConfirmAdminSignInInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "ConfirmAdminSignIn")
   openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
   postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
   recordMessageTranslation(input: RecordMessageTranslationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "RecordMessageTranslation")

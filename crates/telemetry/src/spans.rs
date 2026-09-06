@@ -431,6 +431,41 @@ pub fn record_member_signin_confirm_result(span: &Span, result: &str) {
     }
 }
 
+/// `admin.signin.link_request` (`admin-sign-in-door` contract, #639 part C step 6-iii): opened by
+/// `requestAdminSignInLink`'s handler. No `business.result` field -- the handler's outcome is
+/// identical whether or not the address holds a platform grant (no enumeration oracle), so nothing
+/// here may vary with that fact.
+pub fn admin_signin_link_request(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "admin.signin.link_request",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+    )
+}
+
+/// `admin.signin.confirm` (`admin-sign-in-door` contract): the ONE span whose `business.result`
+/// names the whole outcome space -- linked | not_granted | token_invalid | token_expired |
+/// lookup_failed | door_closed | requires_session | claim_conflict | rejected.
+pub fn admin_signin_confirm(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "admin.signin.confirm",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the confirm span's outcome. `lookup_failed` also sets OTel ERROR status, matching the
+/// contract's `technical_error` rule; every other result (including the ordinary refusals
+/// `not_granted`/`token_invalid`/`token_expired`) is a business outcome, never a technical error.
+pub fn record_admin_signin_confirm_result(span: &Span, result: &str) {
+    span.record(attr::RESULT, result);
+    if result == "lookup_failed" {
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 /// `invitation.invite` (`restaurant-invitation` contract, #639 part C step 6-iv): opened by
 /// `inviteRestaurantMember`'s handler. `business.authority` is the INVITED authority (the command's
 /// own `authority` field), never the caller's -- the caller's own authority is not threaded to this

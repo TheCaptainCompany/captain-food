@@ -71,6 +71,81 @@ impl std::fmt::Display for InboxParseError {
 
 impl std::error::Error for InboxParseError {}
 
+/// GENERATED from `actors.yaml#/AdminSignIn/receives` — the CLOSED set of messages the `AdminSignIn`
+/// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
+/// each variant carrying its typed payload.
+///
+/// Adding a `receives:` entry adds a variant here, and the human-owned `match` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides what the new
+/// message DOES. That compile error is the whole point: before #771 the same omission shipped
+/// green and surfaced as a `FAILED "unroutable command type"` row in production.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdminSignInInbox {
+    /// COMMAND `ConfirmAdminSignIn`.
+    ConfirmAdminSignIn(domain::generated::commands::ConfirmAdminSignIn),
+    /// COMMAND `RequestAdminSignInLink`.
+    RequestAdminSignInLink(domain::generated::commands::RequestAdminSignInLink),
+}
+
+impl AdminSignInInbox {
+    /// The actors.yaml key this inbox belongs to — the `inbound_messages.actor_type` a row
+    /// must carry to be parseable here.
+    pub const ACTOR_TYPE: &'static str = "AdminSignIn";
+
+    /// Every message type this actor DECLARES it receives, in emission order — the
+    /// operator-facing answer to "is this row's type one we know?" without constructing a value.
+    pub const DECLARED: &'static [&'static str] = &["ConfirmAdminSignIn", "RequestAdminSignInLink"];
+
+    /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
+    /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
+    ///
+    /// An UNDECLARED message type is NOT an error about this payload — during a rolling deploy an
+    /// old consumer legitimately meets a message type a newer producer already emits. The caller
+    /// must treat it as TRANSIENT (retry, then park loudly), never as a terminal failure:
+    /// terminal-failing it buries a paid order.
+    pub fn parse(
+        message_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Self, InboxParseError> {
+        match message_type {
+            "ConfirmAdminSignIn" => serde_json::from_value::<domain::generated::commands::ConfirmAdminSignIn>(payload.clone())
+                .map(Self::ConfirmAdminSignIn)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "ConfirmAdminSignIn",
+                    detail: e.to_string(),
+                }),
+            "RequestAdminSignInLink" => serde_json::from_value::<domain::generated::commands::RequestAdminSignInLink>(payload.clone())
+                .map(Self::RequestAdminSignInLink)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RequestAdminSignInLink",
+                    detail: e.to_string(),
+                }),
+            other => Err(InboxParseError::UndeclaredMessage {
+                actor_type: Self::ACTOR_TYPE,
+                message_type: other.to_string(),
+            }),
+        }
+    }
+
+    /// The wire `message_type` this value came from — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::ConfirmAdminSignIn(_) => "ConfirmAdminSignIn",
+            Self::RequestAdminSignInLink(_) => "RequestAdminSignInLink",
+        }
+    }
+
+    /// The message kind — a total projection of the variant set.
+    pub fn kind(&self) -> InboxKind {
+        match self {
+            Self::ConfirmAdminSignIn(_) => InboxKind::Command,
+            Self::RequestAdminSignInLink(_) => InboxKind::Command,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Cart/receives` — the CLOSED set of messages the `Cart`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -3560,6 +3635,8 @@ impl RiderInbox {
 /// `Cart` lane is not a mis-routed value here — it is a value that cannot be constructed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActorInbox {
+    /// A row on a `AdminSignIn` lane.
+    AdminSignIn(AdminSignInInbox),
     /// A row on a `Cart` lane.
     Cart(CartInbox),
     /// A row on a `Catalog` lane.
@@ -3612,6 +3689,7 @@ impl ActorInbox {
         payload: &serde_json::Value,
     ) -> Result<Self, InboxParseError> {
         match actor_type {
+            "AdminSignIn" => AdminSignInInbox::parse(message_type, payload).map(Self::AdminSignIn),
             "Cart" => CartInbox::parse(message_type, payload).map(Self::Cart),
             "Catalog" => CatalogInbox::parse(message_type, payload).map(Self::Catalog),
             "Conversation" => ConversationInbox::parse(message_type, payload).map(Self::Conversation),
@@ -3639,6 +3717,7 @@ impl ActorInbox {
     /// The lane this row belongs to — a total projection of the variant set.
     pub fn actor_type(&self) -> &'static str {
         match self {
+            Self::AdminSignIn(_) => AdminSignInInbox::ACTOR_TYPE,
             Self::Cart(_) => CartInbox::ACTOR_TYPE,
             Self::Catalog(_) => CatalogInbox::ACTOR_TYPE,
             Self::Conversation(_) => ConversationInbox::ACTOR_TYPE,
@@ -3665,6 +3744,7 @@ impl ActorInbox {
     /// The wire `message_type` — a total projection of the variant set.
     pub fn message_type(&self) -> &'static str {
         match self {
+            Self::AdminSignIn(m) => m.message_type(),
             Self::Cart(m) => m.message_type(),
             Self::Catalog(m) => m.message_type(),
             Self::Conversation(m) => m.message_type(),
@@ -3691,6 +3771,7 @@ impl ActorInbox {
     /// The message kind — a total projection of the variant set.
     pub fn kind(&self) -> InboxKind {
         match self {
+            Self::AdminSignIn(m) => m.kind(),
             Self::Cart(m) => m.kind(),
             Self::Catalog(m) => m.kind(),
             Self::Conversation(m) => m.kind(),
@@ -3810,6 +3891,8 @@ impl ActorInbox {
     /// `ActorFactInbox` is what makes a new declared fact impossible to ignore.
     pub fn into_fact(self) -> Option<ActorFactInbox> {
         match self {
+            // The `AdminSignIn` lane declares no fact.
+            Self::AdminSignIn(_) => None,
             Self::Cart(m) => m.into_fact().map(ActorFactInbox::Cart),
             Self::Catalog(m) => m.into_fact().map(ActorFactInbox::Catalog),
             // The `Conversation` lane declares no fact.

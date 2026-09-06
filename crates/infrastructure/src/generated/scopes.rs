@@ -5,6 +5,7 @@
 
 /// `(actor_or_pm, owning scope folder)`, sorted by actor name.
 pub const ACTOR_SCOPES: &[(&str, &str)] = &[
+    ("AdminSignIn", "common"),
     ("Cart", "ordering"),
     ("CartBindingProcess", "ordering"),
     ("Catalog", "catalog"),

@@ -55,6 +55,11 @@ public_user:
       steps:
         AcceptInvitation: { $ref: 'api.yaml#/mutations/acceptRestaurantInvitation' }
         GrantAccessFromInvitation: { $ref: 'api.yaml#/mutations/grantRestaurantAccessByInvitation' }
+    SignInAsAdmin:
+      description: As a visitor on the system surface, I sign in with my email -- the platform identifies me against a LIVE platform grant (it never registers me here) and issues the ADMIN credential (#639 part C step 6-iii, ADR-20260906-023825). Held by the anonymous persona (the `SignInAsRestaurantManager` shape) because the door is walked WITHOUT a credential (op roles [PUBLIC]) -- an ADMIN persona cannot call a PUBLIC-only operation. Walked from `system.captain.food/sign-in` (`specs/screens/system.yaml`, transport role PUBLIC via `graphql_role`), then the `no_access` refusal screen when the address is verified but no live `PlatformMembership` grant exists.
+      steps:
+        RequestAdminSignInLink: { $ref: 'api.yaml#/mutations/requestAdminSignInLink' }   # identical outcome whether or not the address holds a platform grant
+        ConfirmAdminSignIn: { $ref: 'api.yaml#/mutations/confirmAdminSignIn' }   # identify-only; the session then arrives via POST /auth/session, never in the response
 
 customer:
   description: An authenticated person who orders food via Captain.Food.

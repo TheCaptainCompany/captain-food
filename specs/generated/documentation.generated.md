@@ -40,6 +40,8 @@ A visitor browsing Captain.Food without being logged in.
 |  | ConfirmMemberSignIn | [✏️ `confirmMemberSignIn`](#mutation-confirmmembersignin) |
 | 🧭 **AcceptRestaurantInvitation** | AcceptInvitation | [✏️ `acceptRestaurantInvitation`](#mutation-acceptrestaurantinvitation) |
 |  | GrantAccessFromInvitation | [✏️ `grantRestaurantAccessByInvitation`](#mutation-grantrestaurantaccessbyinvitation) |
+| 🧭 **SignInAsAdmin** | RequestAdminSignInLink | [✏️ `requestAdminSignInLink`](#mutation-requestadminsigninlink) |
+|  | ConfirmAdminSignIn | [✏️ `confirmAdminSignIn`](#mutation-confirmadminsignin) |
 
 <a id="story-customer"></a>
 ### 🎬 `customer` · 🙋 `CUSTOMER` · 🗣️ `fr-FR`
@@ -8703,9 +8705,9 @@ _criticality: **medium**_
 <a id="sec-ctx-platform"></a>
 ## 🔲 4. platform
 
-_Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957). No customer-facing surface; the system.captain.food ops screens are its UI._
+_Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957); the ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825). No customer-facing surface; the system.captain.food ops screens are its UI._
 
-### 🧰 API operations _(2)_
+### 🧰 API operations _(4)_
 
 <a id="mutation-requeuemailboxmessage"></a>
 #### ✏️ Mutation: `requeueMailboxMessage`
@@ -8721,7 +8723,21 @@ _Platform operations (cross-cutting, ADMIN-performed): supervision of the write-
 - **Roles**: ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-### 🎭 Actors _(2)_
+<a id="mutation-requestadminsigninlink"></a>
+#### ✏️ Mutation: `requestAdminSignInLink`
+
+- **Command**: [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink) → handled by [🎭 `AdminSignIn`](#actor-adminsignin)
+- **Roles**: PUBLIC · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-confirmadminsignin"></a>
+#### ✏️ Mutation: `confirmAdminSignIn`
+
+- **Command**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin) → handled by [🎭 `AdminSignIn`](#actor-adminsignin)
+- **Roles**: PUBLIC · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+### 🎭 Actors _(3)_
 
 <a id="actor-mailboxsupervision"></a>
 #### 🎭 Actor: `MailboxSupervision`
@@ -8743,6 +8759,17 @@ _🧩 aggregate_ — The platform grant and the ADMIN seam binding (#639 part C 
 | --- | --- | --- |
 | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) | [⚡ `PlatformAccessGranted`](#event-platformaccessgranted) | [⛔ `PlatformAccessGrantDoorClosed`](#error-platformaccessgrantdoorclosed), [⛔ `PlatformAccessAlreadyGranted`](#error-platformaccessalreadygranted), [⛔ `PlatformMembershipIdMismatch`](#error-platformmembershipidmismatch) |
 
+<a id="actor-adminsignin"></a>
+#### 🎭 Actor: `AdminSignIn`
+
+_🧩 aggregate_ — The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825): pure routing for lane hygiene, transposing the member sign-in door's shape (ADR-20260905-101349 §7-§10) to the platform context. Emits nothing and holds no stream of its own facts -- `emits: []` on both messages, exactly like `RestaurantMembership`'s `RequestMemberSignInLink`/`ConfirmMemberSignIn` pair. Identify-only against `application::queries::PlatformMemberRepository` (the SAME read port `GrantPlatformAccess`'s handler already consults, ADR-20260905-223957 §1): a verified email with no live grant is refused (`AdminAccessNotGranted`), never stamped, never created.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink) | _Delegate to the auth provider: send an email magic link, REFUSING when the email send-abuse wall says so. Never consults the PlatformMember bridge (no enumeration oracle). No event._ | [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted), [⛔ `AdminSignInDoorClosed`](#error-adminsignindoorclosed) |
+| [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin) | _Verify the magic-link token with the auth provider, look the proved subject up through PlatformMemberRepository (auth_subject -> platformMembershipId, step 6-v): no live grant -> AdminAccessNotGranted, nothing stamped, the session still parked; a live grant -> stamp { role: ADMIN } on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `AdminAccessNotGranted`](#error-adminaccessnotgranted), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `AdminSignInRequiresSession`](#error-adminsigninrequiressession), [⛔ `AdminSignInDoorClosed`](#error-adminsignindoorclosed) |
+
 ### 🗄️ Views (read models) _(1)_
 
 <a id="view-platformmember"></a>
@@ -8760,7 +8787,7 @@ _🧩 aggregate_ — The platform grant and the ADMIN seam binding (#639 part C 
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(2)_
+### 📩 Commands _(4)_
 
 <a id="command-requeuemailboxmessage"></a>
 #### 📩 Command: `RequeueMailboxMessage`
@@ -8789,6 +8816,33 @@ Grant one `authSubject` access to the PLATFORM itself (ADR-20260905-223957 §1/�
 | <a id="command-grantplatformaccess--platformmembershipid"></a>`platformMembershipId` | [🔤 `PlatformMembershipId`](#scalar-platformmembershipid) | ✅ |  |
 | <a id="command-grantplatformaccess--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
 | <a id="command-grantplatformaccess--basis"></a>`basis` | [🔤 `PlatformAccessBasis`](#scalar-platformaccessbasis) | ✅ |  |
+
+<a id="command-requestadminsigninlink"></a>
+#### 📩 Command: `RequestAdminSignInLink`
+
+Ask the auth provider to send an email magic link (the SAME `send_email_magic_link` port `RequestMemberSignInLink`/`RequestEmailVerification` use, and the SAME email send-abuse wall shape). Emits no event, and MUST NOT reveal whether the address holds a platform grant: the handler never consults the `PlatformMember` bridge, so the outcome is identical for a granted admin and a stranger's (no enumeration oracle) -- ADR-20260906-023825 SS1.
+
+- **Dispatched by**: [✏️ `requestAdminSignInLink`](#mutation-requestadminsigninlink) · **handled by** [🎭 `AdminSignIn`](#actor-adminsignin)
+- **Emits**: —
+- **Throws**: [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted), [⛔ `AdminSignInDoorClosed`](#error-adminsignindoorclosed)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-requestadminsigninlink--email"></a>`email` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |  |
+| <a id="command-requestadminsigninlink--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ⬜ | The email's language; no stored locale exists pre-identification, so this is caller-supplied. |
+
+<a id="command-confirmadminsignin"></a>
+#### 📩 Command: `ConfirmAdminSignIn`
+
+Verify the magic-link token with the auth provider, then IDENTIFY against the platform grant: the proved auth subject is looked up through `application::queries::PlatformMemberRepository` (the SAME read port `grant_platform_access`'s handler already consults, ADR-20260905-223957 SS1) -- no live grant -> the session is still parked (so a future sign-out control has a real cookie to act on) but NOTHING is stamped and `AdminAccessNotGranted` is thrown; a live grant -> the ADMIN role claim is stamped (`identity.stamp_admin_claim`, `{ role: ADMIN }` and nothing else) and the post-stamp provider session is parked for cookie pickup via POST /auth/session -- the credential is never in the GraphQL response. Emits no event. The stamped claim is a HINT the seam (`resolve_platform_scope`) RE-DERIVES on every subsequent request -- a stamped ADMIN claim with no live grant resolves `Identity::Unbound`, never `Identity::Admin` (ADR-20260906-023825 SS1, pinned from ADR-20260905-223957 SS2).
+
+- **Dispatched by**: [✏️ `confirmAdminSignIn`](#mutation-confirmadminsignin) · **handled by** [🎭 `AdminSignIn`](#actor-adminsignin)
+- **Emits**: —
+- **Throws**: [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `AdminAccessNotGranted`](#error-adminaccessnotgranted), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `AdminSignInRequiresSession`](#error-adminsigninrequiressession), [⛔ `AdminSignInDoorClosed`](#error-adminsignindoorclosed)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-confirmadminsignin--token"></a>`token` | [🔤 `EmailVerificationToken`](#scalar-emailverificationtoken) | ✅ |  |
 
 ### ⚡ Events _(2)_
 
@@ -8831,7 +8885,7 @@ One `authSubject` was granted access to the PLATFORM itself (#639 part C step 6-
 | <a id="scalar-platformmembershipid"></a>🔤 `PlatformMembershipId` | string _uuid_ | Identity of one `PlatformMembership` grant (#639 part C step 6-v, ADR-20260905-223957 §1) -- the relationship between one `authSubject` and the PLATFORM ITSELF, NOT a `ScopeType` instance (`ScopeType` names "one protected instance" and there is one platform and no platform id -- PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched) and NOT the `RestaurantMembership.membershipId` the `MembershipId` scalar names (a DIFFERENT relationship, a DIFFERENT aggregate). REQUIRED and CALLER-MINTED on `GrantPlatformAccess`, the `MembershipId`/`GrantRestaurantAccess` precedent exactly: the mailbox lane address needs it present to route at all, and the one-shot bootstrap (§3) mints it DETERMINISTICALLY (UUIDv5 over the granted `authSubject`) so running it twice targets the SAME stream.  |
 | <a id="scalar-platformaccessbasis"></a>🔤 `PlatformAccessBasis` | enum (CAPTAIN_ONBOARDING) | WHY a `PlatformAccessGranted` fact was recorded -- a NEW closed scalar, deliberately NOT `network.yaml#/AccessBasis` (ADR-20260905-223957 §1, evans): that scalar's four values are RESTAURANT-worded (`OWNER_DECLARATION`, `MEMBER_INVITATION`, …) and reusing it here would let a platform grant carry a value that means nothing for the platform relationship, or worse, invite a future restaurant-only value onto this door by accident. One value today -- the grant records an operational ACT (Captain onboards its own person), never a corporate/governance status (business: SAS today, SCIC conversion deferred to M18; ASSOCIE/COOPERATEUR/MANDATAIRE/SALARIE are forbidden values, on this scalar as on `AccessBasis`). Closed and additive-only, same discipline as every other basis scalar in this scope.  |
 
-### ⛔ Errors _(5)_
+### ⛔ Errors _(8)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -8840,8 +8894,11 @@ One `authSubject` was granted access to the PLATFORM itself (#639 part C step 6-
 | <a id="error-platformaccessgrantdoorclosed"></a>⛔ `PlatformAccessGrantDoorClosed` | The platform grant door is closed by `configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT` (#639 part C step 6-v, ADR-20260905-223957 §5) -- a declared, supervisable refusal while the preconditions (`docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml`) are open, never a silent no-op. Every platform grant, hand-issued or bootstrap-dispatched, is an irreversible act about a real Tours human that starts every legal clock -- the store is never touched while this is off.  | 🇬🇧 Granting platform access is not yet enabled in this environment. | 🇫🇷 L'octroi d'accès à la plateforme n'est pas encore activé dans cet environnement. | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) |
 | <a id="error-platformaccessalreadygranted"></a>⛔ `PlatformAccessAlreadyGranted` | This `authSubject` already holds a LIVE `PlatformMembership` on a DIFFERENT `platformMembershipId` (#639 part C step 6-v, ADR-20260905-223957 §1): the `PlatformMember` bridge's `auth_subject UNIQUE` is the arbiter, checked by the handler before appending (ADMIN is NOT a `PrincipalKind`, PRINCIPALS-MEMBER, so this reuses no reservation table). A resubmission of the SAME `platformMembershipId` is a DIFFERENT outcome -- the idempotent no-op the fold already grants, never this refusal.  | 🇬🇧 This login already holds platform access under a different membership. | 🇫🇷 Cette identité de connexion dispose déjà d'un accès plateforme sous une autre adhésion. | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) |
 | <a id="error-platformmembershipidmismatch"></a>⛔ `PlatformMembershipIdMismatch` | Round 2, R2-5 (young + vernon, ADR-20260905-223957 §1/§2): `platformMembershipId` is CALLER-MINTED (ADR-0034) but not FREELY so -- it must equal `UUIDv5(PLATFORM_MEMBERSHIP_ NAMESPACE, authSubject)`, the SAME formula the one-shot bootstrap already uses (`platform_membership_id_for` in `crates/application/src/commands.rs`). Collapsing the id into stream identity turns "one platform membership per subject" from a projection-read-plus-UNIQUE arbiter (which fires at projection time under `DbFaultPolicy::Skip` and can wedge the read model on a genuine race) into a set invariant the fold's own exists-once check enforces for free: two grants for one subject ALWAYS target the SAME stream. The bridge/`PlatformAccessAlreadyGranted` read stays as a belt, not the arbiter (see the comment on `grant_platform_access`).  | 🇬🇧 This platform membership id does not match the required derivation for this login. | 🇫🇷 Cet identifiant d'adhésion plateforme ne correspond pas à la dérivation requise pour cette identité de connexion. | [📩 `GrantPlatformAccess`](#command-grantplatformaccess) |
+| <a id="error-adminsignindoorclosed"></a>⛔ `AdminSignInDoorClosed` | `RUN_ADMIN_SIGN_IN_DOOR` is OFF (`configuration.yaml`, default false) -- the ADMIN sign-in door refuses BEFORE touching the identity provider (the `MemberSignInDoorClosed` shape): the writer key flips only after the preconditions in `decisions/ADMIN-DOOR-PRECONDITIONS.yaml` are met.  | 🇬🇧 Platform sign-in is not yet available. | 🇫🇷 La connexion à la plateforme n'est pas encore disponible. | [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink), [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin) |
+| <a id="error-adminsigninrequiressession"></a>⛔ `AdminSignInRequiresSession` | The sign-in confirmation arrived with no `X-SESSION-ID` (the rider/member door's #852 B1 precedent). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId. So the door refuses BEFORE the token is spent (the link stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's.  | 🇬🇧 Sign-in needs a browser session. Reload the page and try again. | 🇫🇷 La connexion nécessite une session de navigation. Rechargez la page et réessayez. | [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin) |
+| <a id="error-adminaccessnotgranted"></a>⛔ `AdminAccessNotGranted` | The magic-link token verified (the email is genuinely proven), but no LIVE `PlatformMembership` grant exists for this auth subject in the `PlatformMember` bridge (ADR-20260906-023825 SS1/SS3). NEVER "linked" and never `MemberNotLinked` reused (evans: "linked" implies two pre-existing things -- a login and a bound row -- and on the platform side there is nothing to link, no pending state, and no self-service path). NOTHING is stamped and NOTHING is created; the session is still parked. `email` carries the VERIFIED address (the token's output, never client input).  | 🇬🇧 This space is reserved for people with platform access. Write to {supportContact}. | 🇫🇷 Cet espace est réservé aux personnes disposant d'un accès plateforme. Écrivez-nous à {supportContact}. | [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin) |
 
-### 📐 Business rules _(6)_
+### 📐 Business rules _(10)_
 
 <a id="rule-onlycappoisonedmailboxrowsarerequeueable"></a>
 #### 📐 Rule: `OnlyCapPoisonedMailboxRowsAreRequeueable`
@@ -8885,7 +8942,35 @@ _GrantPlatformAccess refuses with the typed PlatformAccessGrantDoorClosed BEFORE
 
 - **Verified by**: [🧪 `TestGrantPlatformAccessDoorClosed`](#test-testgrantplatformaccessdoorclosed)
 
-### 🧪 Tests _(2)_
+<a id="rule-adminsignindoorgatedbeforeprovider"></a>
+#### 📐 Rule: `AdminSignInDoorGatedBeforeProvider`
+
+_RequestAdminSignInLink and ConfirmAdminSignIn both refuse with the typed AdminSignInDoorClosed BEFORE the identity provider is touched at all while configuration.yaml#/keys/RUN_ADMIN_SIGN_IN_DOOR is off (#639 part C step 6-iii, ADR-20260906-023825 SS4, the RUN_MEMBER_SIGN_IN_DOOR shape)._
+
+- **Verified by**: [🧪 `TestAdminRequestSignInLinkDoorClosed`](#test-testadminrequestsigninlinkdoorclosed), [🧪 `TestAdminConfirmSignInDoorClosed`](#test-testadminconfirmsignindoorclosed)
+
+<a id="rule-adminsigninrequestlegneverconsultsthegrant"></a>
+#### 📐 Rule: `AdminSignInRequestLegNeverConsultsTheGrant`
+
+_RequestAdminSignInLink never consults the PlatformMember bridge: the outcome (body, status, timing class) is identical whether or not the address holds a live platform grant -- no enumeration oracle at the request leg (#639 part C step 6-iii, ADR-20260906-023825 SS1)._
+
+- **Verified by**: [🧪 `TestAdminRequestSignInLink`](#test-testadminrequestsigninlink), [🧪 `TestAdminRequestSignInLinkForStrangerIsIdentical`](#test-testadminrequestsigninlinkforstrangerisidentical)
+
+<a id="rule-adminclaimstampedonlyonresolvedgrant"></a>
+#### 📐 Rule: `AdminClaimStampedOnlyOnResolvedGrant`
+
+_ConfirmAdminSignIn stamps the ADMIN role claim (identity.stamp_admin_claim) ONLY when PlatformMemberRepository resolves a LIVE grant for the verified auth subject; a verified email with no grant is refused (AdminAccessNotGranted) and nothing is stamped -- identify-only, never register (#639 part C step 6-iii, ADR-20260906-023825 SS1/SS3)._
+
+- **Verified by**: [🧪 `TestAdminConfirmSignInIdentifies`](#test-testadminconfirmsigninidentifies)
+
+<a id="rule-adminsigninisidentifyonlyneverregister"></a>
+#### 📐 Rule: `AdminSignInIsIdentifyOnlyNeverRegister`
+
+_Neither RequestAdminSignInLink nor ConfirmAdminSignIn ever creates a PlatformMembership -- GrantPlatformAccess (6-v) is the only birth of that relationship. A stamped ADMIN claim with no live grant row resolves Identity::Unbound on every subsequent request, never Identity::Admin (#639 part C step 6-iii, ADR-20260906-023825 SS1, pinned from ADR-20260905-223957 SS2)._
+
+- **Verified by**: [🧪 `TestAdminConfirmSignInUngrantedEmailIsRejected`](#test-testadminconfirmsigninungrantedemailisrejected), [🧪 `TestAdminConfirmSignInInvalidTokenIsRejected`](#test-testadminconfirmsignininvalidtokenisrejected), [🧪 `TestAdminConfirmSignInSubjectHoldingAnotherRoleIsRejected`](#test-testadminconfirmsigninsubjectholdinganotherroleisrejected), [🧪 `TestAdminConfirmSignInWithoutSessionIsRejected`](#test-testadminconfirmsigninwithoutsessionisrejected)
+
+### 🧪 Tests _(3)_
 
 **[🎭 `MailboxSupervision`](#actor-mailboxsupervision)**
 
@@ -8970,6 +9055,98 @@ _A platformMembershipId that does not derive from authSubject is refused before 
 - **When**: [📩 `GrantPlatformAccess`](#command-grantplatformaccess)
 - **Thrown**: [⛔ `PlatformMembershipIdMismatch`](#error-platformmembershipidmismatch)
 - **Verifies**: [📐 `PlatformMembershipIdMustBeDerivedFromAuthSubject`](#rule-platformmembershipidmustbederivedfromauthsubject)
+
+**[🎭 `AdminSignIn`](#actor-adminsignin)**
+
+<a id="test-testadminrequestsigninlink"></a>
+#### 🧪 Test: `TestAdminRequestSignInLink`
+
+_Sends an email magic link to a granted admin's address; emits nothing_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AdminSignInRequestLegNeverConsultsTheGrant`](#rule-adminsigninrequestlegneverconsultsthegrant)
+
+<a id="test-testadminrequestsigninlinkforstrangerisidentical"></a>
+#### 🧪 Test: `TestAdminRequestSignInLinkForStrangerIsIdentical`
+
+_Sends an email magic link to an address with no platform grant, identically; emits nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AdminSignInRequestLegNeverConsultsTheGrant`](#rule-adminsigninrequestlegneverconsultsthegrant)
+
+<a id="test-testadminrequestsigninlinkdoorclosed"></a>
+#### 🧪 Test: `TestAdminRequestSignInLinkDoorClosed`
+
+_requestAdminSignInLink is refused by the door key while it is OFF (the production default), before the identity provider is touched_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink)
+- **Thrown**: [⛔ `AdminSignInDoorClosed`](#error-adminsignindoorclosed)
+- **Verifies**: [📐 `AdminSignInDoorGatedBeforeProvider`](#rule-adminsignindoorgatedbeforeprovider)
+
+<a id="test-testadminconfirmsigninungrantedemailisrejected"></a>
+#### 🧪 Test: `TestAdminConfirmSignInUngrantedEmailIsRejected`
+
+_Refuses admin sign-in for a verified email with no live platform grant; creates nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin)
+- **Thrown**: [⛔ `AdminAccessNotGranted`](#error-adminaccessnotgranted)
+- **Verifies**: [📐 `AdminSignInIsIdentifyOnlyNeverRegister`](#rule-adminsigninisidentifyonlyneverregister)
+
+<a id="test-testadminconfirmsigninidentifies"></a>
+#### 🧪 Test: `TestAdminConfirmSignInIdentifies`
+
+_Verifying the magic-link token for a granted admin is accepted and appends nothing -- identify-only, never register_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AdminClaimStampedOnlyOnResolvedGrant`](#rule-adminclaimstampedonlyonresolvedgrant)
+
+<a id="test-testadminconfirmsignininvalidtokenisrejected"></a>
+#### 🧪 Test: `TestAdminConfirmSignInInvalidTokenIsRejected`
+
+_Rejects admin sign-in when the magic-link token is invalid or expired_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin)
+- **Thrown**: [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired)
+- **Verifies**: [📐 `AdminSignInIsIdentifyOnlyNeverRegister`](#rule-adminsigninisidentifyonlyneverregister)
+
+<a id="test-testadminconfirmsigninsubjectholdinganotherroleisrejected"></a>
+#### 🧪 Test: `TestAdminConfirmSignInSubjectHoldingAnotherRoleIsRejected`
+
+_Refuses admin sign-in when the verified login already holds another role's claim; overwrites nothing_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin)
+- **Thrown**: [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole)
+- **Verifies**: [📐 `AdminSignInIsIdentifyOnlyNeverRegister`](#rule-adminsigninisidentifyonlyneverregister)
+
+<a id="test-testadminconfirmsigninwithoutsessionisrejected"></a>
+#### 🧪 Test: `TestAdminConfirmSignInWithoutSessionIsRejected`
+
+_Refuses admin sign-in when the request carries no session to own the parked credential; spends no token, parks nothing_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin)
+- **Thrown**: [⛔ `AdminSignInRequiresSession`](#error-adminsigninrequiressession)
+- **Verifies**: [📐 `AdminSignInIsIdentifyOnlyNeverRegister`](#rule-adminsigninisidentifyonlyneverregister)
+
+<a id="test-testadminconfirmsignindoorclosed"></a>
+#### 🧪 Test: `TestAdminConfirmSignInDoorClosed`
+
+_confirmAdminSignIn is refused by the door key while it is OFF (the production default), before the identity provider is touched_
+
+- **Given**: [⚡ `PlatformAccessGranted`](#event-platformaccessgranted)
+- **When**: [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin)
+- **Thrown**: [⛔ `AdminSignInDoorClosed`](#error-adminsignindoorclosed)
+- **Verifies**: [📐 `AdminSignInDoorGatedBeforeProvider`](#rule-adminsignindoorgatedbeforeprovider)
 
 <a id="sec-ctx-customer"></a>
 ## 🔲 5. customer
@@ -12992,6 +13169,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-optionname"></a>🔤 `OptionName` | string |  |
 | <a id="scalar-tag"></a>🔤 `Tag` | string | Free-form label (HubRise: tags). Example: 'vegan', 'spicy', 'eco'. |
 | <a id="scalar-emailaddress"></a>🔤 `EmailAddress` | string _email_ |  |
+| <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-phonenumber"></a>🔤 `PhoneNumber` | string | Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.  |
 | <a id="scalar-addressline"></a>🔤 `AddressLine` | string |  |
 | <a id="scalar-postalcode"></a>🔤 `PostalCode` | string |  |
@@ -13038,7 +13216,6 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-dialingcode"></a>🔤 `DialingCode` | string `^\+[0-9]{1,4}$` | Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.  |
 | <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
-| <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-erasureparkreason"></a>🔤 `ErasureParkReason` | enum (OPEN_ORDER \| FUNDS_IN_FLIGHT) | Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.  |
 
 ### ⛔ Errors _(20)_
@@ -13051,22 +13228,22 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-forbidden"></a>⛔ `Forbidden` | Authenticated, but not allowed to act on this resource (e.g. not the owner). | 🇬🇧 You are not allowed to perform this action. | 🇫🇷 Vous n'êtes pas autorisé à effectuer cette action. | — |
 | <a id="error-validationerror"></a>⛔ `ValidationError` | Input failed schema validation (type, format, required, bounds). | 🇬🇧 The field '{field}' is invalid. | 🇫🇷 Le champ '{field}' est invalide. | — |
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
-| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
+| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink), [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
 | <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-phonecountrynotserved"></a>⛔ `PhoneCountryNotServed` | The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the served-country decision plus cost containment — a calling code is not a destination, and a code we do not serve can reach territories rated far above what we budgeted (the global ceiling, not this list, is the economic control against pumping) — which is why the refusal is fail-closed: an unparseable number lands here too, never on a send.  | 🇬🇧 We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us. | 🇫🇷 Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
-| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
-| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
+| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink), [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
+| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestAdminSignInLink`](#command-requestadminsigninlink), [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
 | <a id="error-invalidverificationcode"></a>⛔ `InvalidVerificationCode` | The SMS OTP code does not match (rejected by Supabase Auth). | 🇬🇧 The verification code is incorrect. Please try again. | 🇫🇷 Le code de vérification est incorrect. Veuillez réessayer. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
-| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `GrantRestaurantAccessByInvitation`](#command-grantrestaurantaccessbyinvitation), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
-| <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `GrantRestaurantAccessByInvitation`](#command-grantrestaurantaccessbyinvitation), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
-| <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in here yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
+| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin), [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `GrantRestaurantAccessByInvitation`](#command-grantrestaurantaccessbyinvitation), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
+| <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `GrantRestaurantAccessByInvitation`](#command-grantrestaurantaccessbyinvitation), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
+| <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in here yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici. | [📩 `ConfirmAdminSignIn`](#command-confirmadminsignin), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(18)_
+### 📡 Observability _(19)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -13514,6 +13691,33 @@ _criticality: **high**_
 - **Metrics**: `admin_identity_resolve_total` _(counter)_, `platform_access_granted_total` _(counter)_, `platform_access_grant_enforcing` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
+
+<a id="obs-admin-sign-in-door"></a>
+#### 📡 Contract: `admin-sign-in-door`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `admin.signin.link_request` | `INTERNAL` | ⬜ | — | `business.correlation_id`* |
+| `admin.signin.confirm` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`* |
+| `claims.stamp` | `CLIENT` | ⬜ | — | — |
+
+- **Metrics**: `admin_sign_in_link_requested_total` _(counter)_, `admin_sign_in_confirmed_total` _(counter)_, `admin_claim_stamp_failed_total` _(counter)_, `admin_sign_in_refused_total` _(counter)_, `admin_sign_in_door_enforcing` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 400ms · p99 ≤ 1200ms · error rate ≤ 1%
 
 <a id="obs-restaurant-invitation"></a>
 #### 📡 Contract: `restaurant-invitation`
@@ -14356,7 +14560,7 @@ _Surface_ **`rider.yaml`**
 _Surface_ **`system.yaml`**
 
 <a id="screen-mailbox_lanes"></a>
-### 📱 `mailbox_lanes` · `/system/mailbox` · 📱 SDUI
+### 📱 `mailbox_lanes` · `/system/mailbox` · 📱 SDUI · 🔒 auth
 
 ```
 ┌──────────────────────────────────────────┐
@@ -14376,7 +14580,7 @@ _Surface_ **`system.yaml`**
 | write | `requeue_mailbox_message` | [✏️ `requeueMailboxMessage`](#mutation-requeuemailboxmessage) |
 
 <a id="screen-riders"></a>
-### 📱 `riders` · `/system/riders` · 📱 SDUI
+### 📱 `riders` · `/system/riders` · 📱 SDUI · 🔒 auth
 
 ```
 ┌──────────────────────────────────────────┐
@@ -14392,12 +14596,11 @@ _Surface_ **`system.yaml`**
 | read | `riders.all` | [🔎 `riders`](#query-riders) |
 
 **Gaps**
-- ⚠️ The System host is not routed today (crates/server/src/hosts.rs `HostRoute::System`) and `specs/screens/system.yaml` declares no `requires_auth`/`unauthenticated:` door — the mailbox supervision screen has the same status. This screen is DARK: declared and asserted by dedicated render tests, reachable from a browser only once step 6's magic-link admin door + System host routing land (ADR-20260904-152807 §9, the RIDER-RESTRICTION-PRECONDITIONS row).
 - ⚠️ The restaurant's name behind a held job is not shown on the roster (ADR §4): `heldDelivery`'s client selection deliberately does not select `restaurant { displayName }` — a delivery -> network navigation hop the D8 binding-walk gate cannot see today.
 - ⚠️ `item_action` on this list is DECLARED but not yet CONSUMED by the renderer (`crates/web/src/renderer.rs` `ComponentKind::List` never reads it, in SSR or hydrate) — a pre-existing corpus-wide gap shared with `restaurant_backoffice.yaml`'s `claims_list`, found while building this screen and reported to the architect rather than fixed here (out of this dispatch's scope: it needs both an SSR row-wrapper and a hydrate click handler, a bigger lift than this card's badge-rendering fix).
 
 <a id="screen-rider_detail"></a>
-### 📱 `rider_detail` · `/system/riders/:riderId` · 📱 SDUI
+### 📱 `rider_detail` · `/system/riders/:riderId` · 📱 SDUI · 🔒 auth
 
 ```
 ┌──────────────────────────────────────────┐
@@ -14421,9 +14624,67 @@ _Surface_ **`system.yaml`**
 | write | `restrict_rider` | [✏️ `restrictRider`](#mutation-restrictrider) |
 
 **Gaps**
-- ⚠️ The System host is not routed today and no admin door exists — see the `riders` screen's own gap note (ADR-20260904-152807 §9); this screen is DARK for the same reason.
 - ⚠️ The one-tick window after `$reload` in which the detail may still render "Restreindre l'acces" (the two projector checkpoints, `RiderRoster` and the write side, catch up independently) is accepted, not hidden: a second submit in that window is answered by the mutation's own `RiderAlreadyRestricted`, surfaced in `inline_error`, never a second event.
 - ⚠️ `restrict_rider_sheet`'s `RIDER_REQUESTED` sentence ("Conservez le message du rider (procédure).") points at docs/legal/rider-requested-restriction-procedure.md — the filing procedure for what counts as the rider's message, where it lives, retention and open counsel questions (ADR-20260904-152807 §6).
+
+<a id="screen-sign_in"></a>
+### 📱 `sign_in` · `/sign-in` · 📱 SDUI · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Sign in                                  │
+├──────────────────────────────────────────┤
+│ sticky_header                            │
+│ page_header — Sign in                    │
+│ section                                  │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `request_admin_sign_in_link` | [✏️ `requestAdminSignInLink`](#mutation-requestadminsigninlink) |
+
+**Gaps**
+- ⚠️ No legal/privacy page exists on this surface (or any surface) yet, so the Art. 13 information owed at collection (controller, purpose — "authenticate access to Captain's internal tools" —, lawful basis, recipients incl. the IdP as processor, retention, rights + CNIL, contact) plus the LCEN art. 6 III (mentions légales) obligation are NOT yet a real page here — the same absence the restaurant_backoffice.yaml sign_in screen's own gaps note carries. ADMIN-DOOR-PRECONDITIONS names it as a flip precondition of RUN_ADMIN_SIGN_IN_DOOR, not resolved here.
+- ⚠️ The link-expiry countdown and a delayed resend re-enable need a client-side timer/countdown primitive this DSL does not declare (the restaurant_backoffice.yaml sign_in screen's own gap): the resend control is always active instead (the wall is server-side, harmless).
+
+<a id="screen-admin_sign_in_return"></a>
+### 📱 `admin_sign_in_return` · `/sign-in/return` · 🚫 not SDUI — Query-string token extraction + acceptance-first confirm/claim/route sequencing -- the restaurant_backoffice.yaml sign_in_return / checkout / order_tracking precedent. · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Signing you in…                          │
+├──────────────────────────────────────────┤
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `confirm_admin_sign_in` | [✏️ `confirmAdminSignIn`](#mutation-confirmadminsignin) |
+
+**Gaps**
+- ⚠️ `?next=` return-to-screen (issue #904) is a NAMED DEPENDENCY of flipping RUN_ADMIN_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the mailbox lanes board), never back to whatever page the 401 originated from.
+
+<a id="screen-no_access"></a>
+### 📱 `no_access` · `/sign-in/no-access` · 📱 SDUI · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Access not available                     │
+├──────────────────────────────────────────┤
+│ page_header — Access not available       │
+│ text                                     │
+│ text                                     │
+│ text                                     │
+└──────────────────────────────────────────┘
+```
+
+
+
+**Gaps**
+- ⚠️ No legal/privacy link exists on this surface yet (no such page exists anywhere in the product today) -- the same absence the sign_in screen's own gaps note carries, including the LCEN art. 6 III (mentions légales) obligation.
+- ⚠️ No exit control exists on this screen by design (ux STOP, 2026-09-06 briefing): #94 (real sign-out) is the named follow-up that unblocks one, since a navigate-to-/sign-in control would loop on the still-valid ADMIN-claimed cookie.
+- ⚠️ The verified-email echo limitation (the restaurant_backoffice.yaml not_linked screen's own gap, :~994): no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, so the refused address is not printed here.
 
 <a id="sec-translations"></a>
 ## 🌐 Translations
@@ -14947,6 +15208,27 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-roster-restrict-notice"></a>`roster.restrict.notice` | — | The rider is told in the app the next time they open it. | Le rider est informé dans l'application à sa prochaine ouverture. |
 | <a id="translation-roster-restrict-rider_requested_procedure"></a>`roster.restrict.rider_requested_procedure` | — | Keep the rider's message (procedure). | Conservez le message du rider (procédure). |
 | <a id="translation-roster-restrict-confirm"></a>`roster.restrict.confirm` | — | Restrict access now | Restreindre l'accès maintenant |
+| <a id="translation-sys-sign_in-header"></a>`sys.sign_in.header` | — | Captain.Food — internal tools | Captain.Food — outils internes |
+| <a id="translation-sys-sign_in-title"></a>`sys.sign_in.title` | — | Sign in | Connexion |
+| <a id="translation-sys-sign_in-email_label"></a>`sys.sign_in.email_label` | — | Email address | Adresse e-mail |
+| <a id="translation-sys-sign_in-email_placeholder"></a>`sys.sign_in.email_placeholder` | — | you@captain.food | vous@captain.food |
+| <a id="translation-sys-sign_in-request_link"></a>`sys.sign_in.request_link` | — | Send my sign-in link | Recevoir mon lien de connexion |
+| <a id="translation-sys-sign_in-sending"></a>`sys.sign_in.sending` | — | Sending… | Envoi en cours… |
+| <a id="translation-sys-sign_in-open_on_device"></a>`sys.sign_in.open_on_device` | — | We'll send you a link. Open it on this device. | Nous vous envoyons un lien. Ouvrez-le sur cet appareil. |
+| <a id="translation-sys-sign_in-no_password"></a>`sys.sign_in.no_password` | — | No password: the link replaces it. | Aucun mot de passe : le lien remplace le mot de passe. |
+| <a id="translation-sys-sign_in-support_lead"></a>`sys.sign_in.support_lead` | — | A problem? support@captain.food | Un problème ? support@captain.food |
+| <a id="translation-sys-sign_in-confirmation_body"></a>`sys.sign_in.confirmation_body` | — | If this address has platform access, a link has just been sent to it. | Si cette adresse dispose d'un accès plateforme, un lien vient de lui être envoyé. |
+| <a id="translation-sys-sign_in-confirmation_title"></a>`sys.sign_in.confirmation_title` | — | Check your email | Vérifiez vos e-mails |
+| <a id="translation-sys-sign_in-close"></a>`sys.sign_in.close` | — | Close | Fermer |
+| <a id="translation-sys-sign_in_return-title"></a>`sys.sign_in_return.title` | — | Signing you in… | Connexion en cours… |
+| <a id="translation-sys-sign_in_return-working"></a>`sys.sign_in_return.working` | — | Please wait, we're checking your link… | Merci de patienter, nous vérifions votre lien… |
+| <a id="translation-sys-sign_in_return-no_token"></a>`sys.sign_in_return.no_token` | — | This link is incomplete. Please request a new one. | Ce lien est incomplet. Merci d'en demander un nouveau. |
+| <a id="translation-sys-sign_in_return-failed"></a>`sys.sign_in_return.failed` | — | This link is invalid or has expired. Please request a new one. | Ce lien est invalide ou a expiré. Merci d'en demander un nouveau. |
+| <a id="translation-sys-sign_in_return-back_to_sign_in"></a>`sys.sign_in_return.back_to_sign_in` | — | Back to sign-in | Retour à la connexion |
+| <a id="translation-sys-no_access-title"></a>`sys.no_access.title` | — | Access not available | Accès non disponible |
+| <a id="translation-sys-no_access-body"></a>`sys.no_access.body` | — | This space is reserved for people with platform access. | Cet espace est réservé aux personnes disposant d'un accès plateforme. |
+| <a id="translation-sys-no_access-write_to_us"></a>`sys.no_access.write_to_us` | — | If you believe this is an error, write to us: | Si vous pensez qu'il s'agit d'une erreur, écrivez-nous : |
+| <a id="translation-sys-no_access-support_contact"></a>`sys.no_access.support_contact` | — | support@captain.food | support@captain.food |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |
@@ -14978,7 +15260,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `RestaurantMembership`](#actor-restaurantmembership), [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess) |
-| 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision), [🎭 `PlatformMembership`](#actor-platformmembership) |
+| 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315); the platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957); the ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision), [🎭 `PlatformMembership`](#actor-platformmembership), [🎭 `AdminSignIn`](#actor-adminsignin) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
 | 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess) |
 
@@ -15025,6 +15307,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `actor-restaurant-membership` | Rust — mailbox worker bin | Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT.<br>realizes: [🎭 `RestaurantMembership`](#actor-restaurantmembership) |
 | 🧱 `actor-platform-membership` | Rust — mailbox worker bin | Drains PlatformMembership lanes (#639 part C step 6-v, ADR-20260905-223957); appends its domain events. Ships dark behind RUN_PLATFORM_ACCESS_GRANT.<br>realizes: [🎭 `PlatformMembership`](#actor-platformmembership) |
 | 🧱 `actor-restaurant-invitation` | Rust — mailbox worker bin | Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION.<br>realizes: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) |
+| 🧱 `actor-admin-sign-in` | Rust — mailbox worker bin | Drains AdminSignIn lanes (#639 part C step 6-iii, ADR-20260906-023825); pure routing, emits no domain events. Ships dark behind RUN_ADMIN_SIGN_IN_DOOR.<br>realizes: [🎭 `AdminSignIn`](#actor-adminsignin) |
 | 🧱 `actor-catalog` | Rust — mailbox worker bin | Drains Catalog lanes (incl. HubRise imports); appends its domain events.<br>realizes: [🎭 `Catalog`](#actor-catalog) |
 | 🧱 `actor-customer` | Rust — mailbox worker bin | Drains Customer lanes; appends its domain events.<br>realizes: [🎭 `Customer`](#actor-customer) |
 | 🧱 `actor-cart` | Rust — mailbox worker bin | Drains Cart lanes; appends its domain events.<br>realizes: [🎭 `Cart`](#actor-cart) |

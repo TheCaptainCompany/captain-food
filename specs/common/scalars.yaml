@@ -156,6 +156,17 @@ EmailAddress:
   maxLength: 255
 
 
+# Kernel-promoted (#639 part C step 6-iii, ADR-20260906-023825): originally customer-scoped
+# (email verification), now also the magic-link token for BOTH staff doors (network's
+# `ConfirmMemberSignIn`/`AcceptRestaurantInvitation` and common's own `ConfirmAdminSignIn`) --
+# three scopes needing one type is exactly the "multi-scope derivation REQUIRES common" case
+# (docs/claude/dsl.md SS14). Refs are kind-logical, so this move rewrites no `$ref` anywhere.
+EmailVerificationToken:
+  type: string
+  maxLength: 512
+  description: "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim)."
+
+
 PhoneNumber:
   type: string
   maxLength: 32

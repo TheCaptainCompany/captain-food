@@ -630,6 +630,8 @@ pub enum ActionKey {
     RequeueMailboxMessage,
     RestrictRider,
     ReinstateRider,
+    RequestAdminSignInLink,
+    ConfirmAdminSignIn,
 }
 
 impl ActionKey {
@@ -702,6 +704,8 @@ impl ActionKey {
         ActionKey::RequeueMailboxMessage,
         ActionKey::RestrictRider,
         ActionKey::ReinstateRider,
+        ActionKey::RequestAdminSignInLink,
+        ActionKey::ConfirmAdminSignIn,
     ];
 
     /// The spec key this action is declared under — 1:1 with the DSL.
@@ -774,6 +778,8 @@ impl ActionKey {
             ActionKey::RequeueMailboxMessage => "requeue_mailbox_message",
             ActionKey::RestrictRider => "restrict_rider",
             ActionKey::ReinstateRider => "reinstate_rider",
+            ActionKey::RequestAdminSignInLink => "request_admin_sign_in_link",
+            ActionKey::ConfirmAdminSignIn => "confirm_admin_sign_in",
         }
     }
 
@@ -847,6 +853,8 @@ impl ActionKey {
             "requeue_mailbox_message" => Some(ActionKey::RequeueMailboxMessage),
             "restrict_rider" => Some(ActionKey::RestrictRider),
             "reinstate_rider" => Some(ActionKey::ReinstateRider),
+            "request_admin_sign_in_link" => Some(ActionKey::RequestAdminSignInLink),
+            "confirm_admin_sign_in" => Some(ActionKey::ConfirmAdminSignIn),
             _ => None,
         }
     }
@@ -921,6 +929,8 @@ impl ActionKey {
             ActionKey::RequeueMailboxMessage => ActionKind::Mutation,
             ActionKey::RestrictRider => ActionKind::Mutation,
             ActionKey::ReinstateRider => ActionKind::Mutation,
+            ActionKey::RequestAdminSignInLink => ActionKind::Mutation,
+            ActionKey::ConfirmAdminSignIn => ActionKind::Mutation,
         }
     }
 
@@ -994,6 +1004,8 @@ impl ActionKey {
             ActionKey::RequeueMailboxMessage => Some("requeueMailboxMessage"),
             ActionKey::RestrictRider => Some("restrictRider"),
             ActionKey::ReinstateRider => Some("reinstateRider"),
+            ActionKey::RequestAdminSignInLink => Some("requestAdminSignInLink"),
+            ActionKey::ConfirmAdminSignIn => Some("confirmAdminSignIn"),
         }
     }
 
@@ -1069,6 +1081,8 @@ impl ActionKey {
             ActionKey::RequeueMailboxMessage => Some("RequeueMailboxMessageInput"),
             ActionKey::RestrictRider => Some("RestrictRiderInput"),
             ActionKey::ReinstateRider => Some("ReinstateRiderInput"),
+            ActionKey::RequestAdminSignInLink => Some("RequestAdminSignInLinkInput"),
+            ActionKey::ConfirmAdminSignIn => Some("ConfirmAdminSignInInput"),
         }
     }
 
@@ -1142,6 +1156,8 @@ impl ActionKey {
             ActionKey::RequeueMailboxMessage => None,
             ActionKey::RestrictRider => None,
             ActionKey::ReinstateRider => None,
+            ActionKey::RequestAdminSignInLink => None,
+            ActionKey::ConfirmAdminSignIn => None,
         }
     }
 }

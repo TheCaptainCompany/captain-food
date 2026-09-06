@@ -22,6 +22,7 @@ pub use actor_client::generated::addresses::{mailbox_address, ACTOR_MAILBOXES};
 /// An absent spec block renders as `(true, None)` — enabled under the global gate, passivating
 /// at the global `ACTOR_ACTIVATION_IDLE_SECONDS`.
 pub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[
+    ("AdminSignIn", true, None),
     ("Cart", true, None),
     ("Catalog", true, None),
     ("Conversation", true, None),

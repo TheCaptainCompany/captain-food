@@ -412,6 +412,25 @@ pub mod metric {
     /// with the key OFF -- registered at BOTH composition roots unconditionally.
     pub const PLATFORM_ACCESS_GRANT_ENFORCING: &str = "platform_access_grant_enforcing";
 
+    // --- admin-sign-in-door (#639 part C step 6-iii, ADR-20260906-023825) -- the ADMIN sign-in
+    // door itself, its OWN contract split from `admin-sign-in`'s seam-probe latency budget --------
+
+    /// `requestAdminSignInLink`'s outcome, attribute `result` (accepted | refused).
+    pub const ADMIN_SIGN_IN_LINK_REQUESTED_TOTAL: &str = "admin_sign_in_link_requested_total";
+    /// `confirmAdminSignIn`'s outcome, attribute `result` (granted | not_granted | token_invalid |
+    /// token_expired | lookup_failed | door_closed | requires_session | claim_conflict | rejected).
+    pub const ADMIN_SIGN_IN_CONFIRMED_TOTAL: &str = "admin_sign_in_confirmed_total";
+    /// The ADMIN claim stamp (`identity.stamp_admin_claim`) failed -- the
+    /// `member_claim_stamp_failed_total` pattern under this contract's own name. Attribute `reason`
+    /// (not_configured | claim_conflict | provider_error).
+    pub const ADMIN_CLAIM_STAMP_FAILED_TOTAL: &str = "admin_claim_stamp_failed_total";
+    /// Either mutation refused, attribute `reason` (bounded, never an email/token/messageId).
+    pub const ADMIN_SIGN_IN_REFUSED_TOTAL: &str = "admin_sign_in_refused_total";
+    /// GATE LIVENESS (the `member_sign_in_door_enforcing` shape): 1 while `RUN_ADMIN_SIGN_IN_DOOR`
+    /// enforces its refusal on a request, 0 the moment the composition root boots with the key OFF
+    /// -- registered at BOTH composition roots unconditionally.
+    pub const ADMIN_SIGN_IN_DOOR_ENFORCING: &str = "admin_sign_in_door_enforcing";
+
     // --- restaurant-invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3) ----------------
     /// `inviteRestaurantMember`'s outcome, attribute `authority` (the INVITED authority, never the
     /// caller's).

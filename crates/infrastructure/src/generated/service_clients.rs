@@ -184,10 +184,16 @@ impl IdentityService for HttpIdentityService {
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/send-email-magic-link", input, meta).await
     }
+    async fn send_admin_sign_in_link(&self, input: IdentitySendAdminSignInLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/identity/send-admin-sign-in-link", input, meta).await
+    }
     async fn verify_email_token(&self, input: IdentityVerifyEmailTokenInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyEmailTokenOutput, DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/verify-email-token", input, meta).await
     }
     async fn stamp_member_claim(&self, input: IdentityStampMemberClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/stamp-member-claim", input, meta).await
+    }
+    async fn stamp_admin_claim(&self, input: IdentityStampAdminClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/identity/stamp-admin-claim", input, meta).await
     }
 }
