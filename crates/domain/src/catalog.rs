@@ -11,8 +11,21 @@ use std::collections::HashSet;
 use crate::generated::entities::{CatalogCategory, Offer, OptionList, Product};
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
-    ExternalReference, OfferId, OptionListId, ProductCategoryId, ProductId, RestaurantId, Slug,
+    CatalogId, ExternalReference, OfferId, OptionListId, ProductCategoryId, ProductId,
+    RestaurantId, Slug,
 };
+
+/// The stream-category prefix; the stream is `"Catalog-<catalogId>"` — same shape as the `Aggregate`
+/// trait impl (`aggregate.rs`, `impl_aggregate!(CatalogState, CatalogId, "Catalog", …)`) and the
+/// Payment precedent (`payment.rs:23-28`): declared here, once, so callers that only need the stream
+/// name (the as-of read adapter, slice 2 of PROP-20260831-134539) need not depend on the `Aggregate`
+/// trait or its generic `Repository`. [`catalog_stream_name_has_one_owner`] pins the two in sync.
+pub const CATEGORY: &str = "Catalog";
+
+/// This aggregate's event-stream name for `id`.
+pub fn stream(id: CatalogId) -> String {
+    format!("{CATEGORY}-{}", id.0)
+}
 
 /// What the Catalog command handlers need to know to accept or reject a command. `None` (from
 /// [`fold`]) means the catalog does not exist → `CatalogNotFound` (or the entity-level not-found the
@@ -211,4 +224,25 @@ fn upsert_product(s: &mut CatalogState, product: &Product) {
 fn upsert_option_list(s: &mut CatalogState, option_list: &OptionList) {
     s.option_lists.retain(|l| l.id != option_list.id);
     s.option_lists.push(option_list.clone());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aggregate::Aggregate;
+
+    /// Slice 2 of PROP-20260831-134539: the as-of read adapter builds the Catalog stream name
+    /// through the free-function [`stream`] rather than a fourth `format!("Catalog-{}")` literal
+    /// (vernon CATCH). This pins it against the `Aggregate` trait impl the write path already uses
+    /// (`aggregate.rs`), so the two can never drift to different prefixes.
+    #[test]
+    fn catalog_stream_name_has_one_owner() {
+        let id = CatalogId(uuid::Uuid::nil());
+        let via_trait = CatalogState::stream(id);
+        let via_free_fn = stream(id);
+        assert_eq!(
+            via_trait, via_free_fn,
+            "fold stream differs from catalog::stream: {via_trait} vs {via_free_fn}"
+        );
+    }
 }
