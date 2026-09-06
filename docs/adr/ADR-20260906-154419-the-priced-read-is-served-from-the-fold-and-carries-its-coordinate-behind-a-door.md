@@ -107,7 +107,7 @@ EXISTING unresolvable-at-read path (`ADR-20260810-112836` §6; the same `PriceUn
 classification `price_cart` already uses) — NEVER a HEAD/projection fallback (every lens's STOP).
 **No timeout, `LIMIT` or `statement_timeout` bounds `at_head` today** (the pool sets only
 `acquire_timeout`) — a slow fold is unbounded; the deadline arm (a bounded L or a statement timeout
-on the read) is a named flip precondition, not a shipped behaviour (register row item added below).
+on the read) is a named flip precondition, not a shipped behaviour (register row item (8)).
 New register row `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open, team) names what must hold
 before the flip: the phase-0 budget (D6), the observability contract rows (D5), the walk drill
 (farley), 3b's signed quote (D4/holub), and dba's preconditions (D9).
@@ -134,15 +134,25 @@ escalate line; ALL `UNVERIFIED input` — lab, one container, peak-unverified; p
 deliberately suspended, ADR-20260817-105844, so no distribution exists to compare against).
 "Observed production L" is NOT a blocking precondition (holub: unsatisfiable while suspended) — the
 CONTRACT ROW is; the max-L NUMBER is deferred, the BEHAVIOUR above it is decided now: refuse
-(`technical_error`), never HEAD. Cheapest lever order: `payload_bytes` read from Postgres
-(`sum(octet_length(payload::text))` in the same SELECT) or sampled, never re-serialized per row >
-content-hash import suppression (#921 item 2) > narrow fold > refuse; SNAP-1 last.
+(`technical_error`), never HEAD. Arm (c)'s native `at_head` median measured 113.8 ms (max of 10 =
+116.6 ms) BEFORE this lever, and measures 89.6 ms AFTER it (executor hand-back, round 2, same
+L=2,000 fixture, 10 iterations, lab, one container, `UNVERIFIED input`, not re-run in CI). The
+head-of-list lever — `payload_bytes` read from Postgres (`sum(octet_length(payload::text))` in the
+same SELECT) rather than re-serialized per row — is now LANDED, in slice 3a's own round-2 commit;
+the next lever, now at the head, is **sampled** (business: `payload::text` still renders jsonb per
+row INSIDE Postgres, on the pool-of-5 tier, so the ~28 ms this lever removed may have MOVED rather
+than gone — sampled is the preferred end state, re-measure owed at 3b with the contract rows live) >
+content-hash import suppression (#921 item 2) > narrow fold > refuse; SNAP-1 last. Against 89.6 ms
+rather than the superseded 113.8 ms, PROP §12's crossing claim is +5% over arm (b)'s 85.6 ms
+end-to-end median (not +33%), the max-drift-to-140-ms antecedent (#920) unchanged, and the claim is
+about the p95 of a distribution that does not exist yet — production suspended,
+ADR-20260817-105844 — never about the median.
 
 **D7 — refusal states are the screen's business, not 3a's.** 3a changes NO reply shape: a fold
 failure surfaces through the existing `technical_error` path, exactly like today's
 `PriceUnresolvable`. ux's three no-price states (no number on the total row/CTA; the pay button not
 pressable; a timeout with explicit no-charge reassurance; never a stale total, never a zero, never
-price-change wording for a defect) are recorded in PROP §4/§11 for 3b/4.
+price-change wording for a defect) are recorded in PROP §4/§11, owed at item 5 (slice 4).
 
 **D8 — legal (never clearance).** 3a does NOT discharge B1 and does NOT close #816: the coordinate
 is unsigned, uncarried by the customer, and unstored. `TaxRate` stays the whole per-mode object; no

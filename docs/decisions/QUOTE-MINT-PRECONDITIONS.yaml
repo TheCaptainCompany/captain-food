@@ -30,11 +30,14 @@ question: 'What must exist before `RUN_FOLD_PRICED_CART_READ` is flipped in prod
   named (`pg_statio_user_tables` hit ratio on `domain_events`); (6) dba''s option (a) (a projected
   `catalog.version` column + a two-folds-agree gate) stays on the record as the alternative,
   re-weighed at 3b/4 on MEASURED cost if the fold-priced read''s wall crossing proves too dear --
-  discharged when 3b/4''s MEASURED cost of the fold-priced read on the production distribution is
-  recorded on this row and option (a) is either adopted by a new ADR or struck here; (7) the door MAY NOT open on `carts` until the fan-out is bounded or the list is excluded from the
+  discharged when the fold-priced read''s cost is recorded on this row from the contract rows of
+  item (2) and the peak-shape drill of item (13) (not a production distribution that needs the door
+  open to exist), and option (a) is either adopted by a new ADR or struck here; (7) the door MAY NOT
+  open on `carts` until the fan-out is bounded or the list is excluded from the
   open arm -- preferred shape at 3b (graphql): narrow the door to the two single-cart reads
   `cart.current` and `cart`; the row''s phase-0 budget models ONE leg per read and has no per-request
-  multiplier; (8) the deadline arm -- a bounded L or a statement timeout on the `at_head` read --
+  multiplier -- with ONE flag, this means the flag may not be flipped at all until `carts` is
+  narrowed or excluded; (8) the deadline arm -- a bounded L or a statement timeout on the `at_head` read --
   exists before the flip; today a slow fold is unbounded (no timeout, `LIMIT` or
   `statement_timeout` bounds it; the pool sets only `acquire_timeout`); (9) the customer-facing
   no-price cart state (no number on the total row/CTA) is what the customer sees on a fold refusal;
@@ -61,7 +64,8 @@ evidence: 'The write path already reads the Catalog projection at every add-to-c
   (ADR-20260817-105844) and the rider/customer population is zero; nothing in this row is urgent by
   a calendar clock, but the door stays pinned `false` until the items above are discharged in a
   recorded decision (gate-then-stabilize, ADR-20260808-144738).'
-note: 'The key is consumed at the READ door only, never a write: `cart.current`/`cart`/`carts`
+note: 'The door opens ONCE, after §11 item 5 lands (items (9) and (11) are item-5 content); 3a and
+  item 4 both ship dark. The key is consumed at the READ door only, never a write: `cart.current`/`cart`/`carts`
   (`crates/server/src/graphql/cart_read.rs::priced`) resolve OFF as the closed arm (today''s
   projection-priced read, unchanged) and ON as the fold-priced open arm
   (`AsOfPriceAuthority::at_head` + `application::pricing::price_cart_at`). Nothing else reads this
