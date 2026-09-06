@@ -20107,6 +20107,14 @@ mod graphql_role_limits_gate {
     // `crates/infrastructure/src/mailbox/standalone.rs`), with the SAME default, or a rolling
     // deploy in which one process's resolved value disagrees with another's is invisible to
     // `runtime_flag_state`. Derived from the MODEL, never a hand-kept key list.
+    //
+    // #917 round 2: this gate used to filter its door population on `decisionRow.is_some()` as a
+    // PROXY for "is a per-request door" -- a proxy round 1's own honest bind on `RUN_SIRENE_WORKER`
+    // falsified (a resident WORKER can carry a release-gate row too). The population is now the
+    // DECLARED `runKind:` attribute (`config.rs::RunKind`, closed set `door | worker`, required on
+    // every `RUN_*` bool key) -- never a hand-kept name list here; the classification lives at each
+    // key's own spec declaration (`specs/**/configuration.yaml`), derivable and re-derived from the
+    // MODEL, not restated in this doc comment.
     mod run_flag_parity {
         use super::*;
 
@@ -20119,23 +20127,25 @@ mod graphql_role_limits_gate {
                 .unwrap_or_else(|e| panic!("read {rel}: {e}"))
         }
 
-        /// Every `RUN_*` boolean key configuration.yaml declares AS A SUPERVISABLE BUSINESS DOOR
-        /// -- filtered on `decisionRow:` (spec-derivable, never a hand-kept name list): the class
-        /// `declare_flag`'s fleet-parity discipline targets is "a per-request/connection
-        /// enforcement gate bound to a preconditions record" (RUN_MEMBER_ACCESS_GRANT,
-        /// RUN_MEMBER_SIGN_IN_DOOR, RUN_RESTAURANT_INVITATION, RUN_RIDER_RESTRICTION_DOOR,
-        /// RUN_RIDER_RESTRICTION_SOCKET_CLOSE, RUN_PLATFORM_ACCESS_GRANT all carry one), never a
-        /// process-topology toggle deciding whether a WHOLE SUBSYSTEM runs in this pod at all
-        /// (RUN_MAILBOX_WORKERS, RUN_PROJECTOR, RUN_PROCESS_MANAGERS, RUN_EVENT_PUSH,
-        /// RUN_MAILBOX_PUSH, RUN_DELETION_ENGINE, RUN_RETENTION_SWEEP,
-        /// RUN_DELIVERY_OFFER_TIMEOUT, RUN_SIRENE_WORKER -- none carries a `decisionRow:` and none
-        /// is a candidate for a rolling-deploy behaviour SPLIT the way a per-request door is,
-        /// verified against the real corpus below rather than assumed).
-        fn declared_run_flags() -> Vec<(String, bool)> {
+        fn real_run_keys() -> Vec<ConfigKey> {
             let model = load_model(&repo_root().join("specs")).expect("load real specs");
             parse_config_keys(&model)
                 .into_iter()
-                .filter(|k| k.name.starts_with("RUN_") && k.ty == "bool" && k.decision_row.is_some())
+                .filter(|k| k.name.starts_with("RUN_") && k.ty == "bool")
+                .collect()
+        }
+
+        /// Every `RUN_*` boolean key configuration.yaml declares AS A SUPERVISABLE BUSINESS DOOR --
+        /// filtered on `runKind: door` (declared, spec-derivable, never a hand-kept name list): the
+        /// class `declare_flag`'s fleet-parity discipline targets is "a per-request/connection
+        /// enforcement gate bound to a preconditions record", never a process-topology toggle
+        /// deciding whether a WHOLE SUBSYSTEM runs in this pod at all (`runKind: worker`) -- the
+        /// door/worker split itself is `config-run-kind-missing`/`config-run-kind-unknown`-enforced
+        /// at every key, so this test never needs to re-verify it is reading a complete population.
+        fn declared_run_flags() -> Vec<(String, bool)> {
+            real_run_keys()
+                .into_iter()
+                .filter(|k| k.run_kind() == Some(RunKind::Door))
                 .map(|k| (k.name.clone(), k.default.as_deref() == Some("true")))
                 .collect()
         }
@@ -20144,6 +20154,15 @@ mod graphql_role_limits_gate {
         fn every_run_key_is_declared_unconditionally_at_both_composition_roots() {
             let flags = declared_run_flags();
             assert!(!flags.is_empty(), "the RUN_* corpus is empty -- this scan is reading nothing");
+            // #917 round 2: a mass-misclassification (every door mistakenly written as `worker`,
+            // which would empty `flags` above WITHOUT tripping the non-empty assert on IT, because
+            // that assert only guards against reading nothing at all) must be LOUD too -- assert the
+            // worker population is also non-empty, from the SAME real-corpus read.
+            let workers = real_run_keys()
+                .into_iter()
+                .filter(|k| k.run_kind() == Some(RunKind::Worker))
+                .count();
+            assert!(workers > 0, "the RUN_* worker population is empty -- a mass-misclassification?");
 
             let lib_rs = read("crates/server/src/lib.rs");
             let standalone_rs = read("crates/infrastructure/src/mailbox/standalone.rs");
@@ -20206,6 +20225,41 @@ mod graphql_role_limits_gate {
                 "the standalone root's env_flag(..) literal default disagrees with the spec's \
                  declared default: {}",
                 wrong_standalone_default.join("; ")
+            );
+        }
+
+        /// #917 round 2 (beck): the CONVERSE of the test above, derived from the SAME two
+        /// composition roots the gate already reads, never a hand-kept list. A `RUN_*` key
+        /// `declare_flag`'d at BOTH roots is, by construction, exactly the class
+        /// `declare_flag`/`run_flag_parity` exist for -- a per-request door whose fleet-wide
+        /// agreement matters. If such a key were classified `worker` in the spec, `runKind:` would
+        /// contradict the code that already implements it as a door, and nothing would catch the
+        /// mismatch (the test above only reads FORWARD, spec -> code; this one reads BACKWARD,
+        /// code -> spec).
+        #[test]
+        fn every_declare_flagged_key_is_declared_a_door() {
+            let lib_rs = read("crates/server/src/lib.rs");
+            let standalone_rs = read("crates/infrastructure/src/mailbox/standalone.rs");
+            let keys = real_run_keys();
+
+            let mut misclassified = Vec::new();
+            for k in &keys {
+                let declare_re = regex::Regex::new(&format!(
+                    r#"declare_flag\(\s*"{}""#,
+                    regex::escape(&k.name)
+                ))
+                .expect("valid regex");
+                let declared_at_both = declare_re.is_match(&lib_rs) && declare_re.is_match(&standalone_rs);
+                if declared_at_both && k.run_kind() != Some(RunKind::Door) {
+                    misclassified.push(k.name.clone());
+                }
+            }
+            assert!(
+                misclassified.is_empty(),
+                "declared `declare_flag(\"KEY\", ...)` at BOTH composition roots but classified \
+                 worker (or unclassified) in the spec, contradicting the code that already \
+                 implements it as a door: {}",
+                misclassified.join(", ")
             );
         }
 
