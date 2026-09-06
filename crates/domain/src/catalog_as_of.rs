@@ -162,8 +162,17 @@ struct ResolvedOffer {
 /// The catalog's priced state at a fixed coordinate (`up_to`, inclusive) — a RESOLVED value, no repo
 /// handle inside (vernon Q1). Built once via [`AsOfCatalog::from_stream`], read many times via
 /// [`AsOfCatalog::price_of`].
+///
+/// **Carries its own coordinate** (PROP-20260831-134539 slice 3a, D2): the CEILING the fold was
+/// bounded at (`up_to`, verbatim — never "the highest applied business version", which can be
+/// LOWER than `up_to` whenever no business event occupies the exact requested slot, e.g. a
+/// technical row or a gap). There is no constructor that omits it — [`AsOfCatalog::narrow`] is the
+/// only place the struct is built, and it always takes one — so a caller can never end up holding a
+/// priced value with no coordinate, and there is deliberately no `Option<CatalogVersion>` anywhere
+/// on this type: "which prefix priced this" is answered exactly once, at construction, always.
 #[derive(Debug)]
 pub struct AsOfCatalog {
+    coordinate: CatalogVersion,
     offers: HashMap<OfferId, ResolvedOffer>,
 }
 
@@ -178,12 +187,23 @@ impl AsOfCatalog {
     pub fn from_stream(events: &[(CatalogVersion, DomainEvent)], up_to: CatalogVersion) -> AsOfCatalog {
         let truncated: Vec<DomainEvent> =
             events.iter().filter(|(version, _)| *version <= up_to).map(|(_, event)| event.clone()).collect();
-        Self::narrow(catalog::fold(&truncated))
+        Self::narrow(catalog::fold(&truncated), up_to)
+    }
+
+    /// The coordinate this value was bounded at — the CEILING [`AsOfCatalog::from_stream`] was
+    /// called with, never "the highest version that actually had a business event at or below it".
+    /// A stream whose last applied business event is version 2, folded with `up_to = 3` (version 3
+    /// a technical row, or simply absent), still carries coordinate 3: the fold answers "what was
+    /// priced at V=3", and 3 is the V, whatever did or did not land on that exact slot.
+    pub fn coordinate(&self) -> CatalogVersion {
+        self.coordinate
     }
 
     /// Narrow a fully-folded [`catalog::CatalogState`] into the price-only shape this capability
-    /// exposes — the boundary where availability/stock/existence are dropped for good.
-    fn narrow(state: Option<catalog::CatalogState>) -> AsOfCatalog {
+    /// exposes — the boundary where availability/stock/existence are dropped for good. `coordinate`
+    /// is threaded straight through: this is the ONLY constructor of [`AsOfCatalog`], so there is no
+    /// path to a value that does not carry one.
+    fn narrow(state: Option<catalog::CatalogState>, coordinate: CatalogVersion) -> AsOfCatalog {
         let mut offers = HashMap::new();
         if let Some(state) = state {
             for product in &state.products {
@@ -207,7 +227,7 @@ impl AsOfCatalog {
                 }
             }
         }
-        AsOfCatalog { offers }
+        AsOfCatalog { coordinate, offers }
     }
 
     /// This offer's price at the coordinate, with `options` priced separately. `None` means no price
@@ -603,6 +623,26 @@ mod tests {
         let price = as_of.price_of(OfferId(uid(20)), &[OptionId(uid(40))]).unwrap();
         assert_eq!(price.unit_price, eur(1500));
         assert_eq!(price.option_prices, vec![(OptionId(uid(40)), eur(200))]);
+    }
+
+    /// PROP-20260831-134539:547 (slice 3a, D2) — the coordinate carried is the CEILING the fold was
+    /// bounded at, never "the highest applied business version". Mutant: `from_stream` stores the
+    /// max applied business version instead of `up_to`.
+    #[test]
+    fn the_coordinate_carried_is_the_ceiling_the_fold_was_bounded_at() {
+        let events = vec![
+            (v(1), fx_catalog_created()),
+            (v(2), fx_product_added(1500)),
+            // Version 3 is a technical row -- already dropped by the decoder, absent here. The
+            // last APPLIED business event is version 2; the requested ceiling is 3.
+        ];
+        let as_of = AsOfCatalog::from_stream(&events, v(3));
+        assert_eq!(
+            as_of.coordinate(),
+            v(3),
+            "coordinate must be the ceiling the fold was bounded at (3), not the highest applied \
+             business version (2)"
+        );
     }
 
     /// An id that only ever appears in a DIFFERENT offer's stream is never confused with `off-1`'s

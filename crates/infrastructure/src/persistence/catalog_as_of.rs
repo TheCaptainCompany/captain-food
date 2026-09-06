@@ -96,6 +96,33 @@ impl PgAsOfCatalogRepository {
         Ok(out)
     }
 
+    /// The unbounded range read: EVERY row of `stream_name`, in version order — the leg
+    /// [`AsOfPriceAuthority::at_head`] needs (PROP-20260831-134539 slice 3a, D2), where the
+    /// coordinate is NOT known before reading, unlike [`Self::fetch_rows`], which bounds at a
+    /// caller-KNOWN coordinate and fails closed against it. Never a `latest_version()`-style
+    /// separate lookup: this is the ONE read at-head performs, and the coordinate it returns is
+    /// derived from these SAME rows (the highest raw version among them), never a second query.
+    /// Kept `pub` for the same benchmark reason as [`Self::fetch_rows`]/[`Self::decode_rows`].
+    pub async fn fetch_all_rows(&self, stream_name: &str) -> Result<Vec<RawRow>, DomainError> {
+        let rows = sqlx::query(
+            "SELECT version, event_type, payload FROM domain_events \
+             WHERE stream_name = $1 ORDER BY version",
+        )
+        .bind(stream_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let row_version: i32 = row.try_get("version").map_err(db_err)?;
+            let event_type: String = row.try_get("event_type").map_err(db_err)?;
+            let payload: serde_json::Value = row.try_get("payload").map_err(db_err)?;
+            out.push((row_version as i64, event_type, payload));
+        }
+        Ok(out)
+    }
+
     /// The decode leg alone: business events only (`$`-prefixed technical rows are skipped, same
     /// EventStore convention `load_inner` follows — ADR-20260731-160000 §5), paired with their OWN
     /// stream version — never a slice position (round 2: this is what makes
@@ -151,6 +178,37 @@ impl PgAsOfCatalogRepository {
         let events = Self::decode_rows(rows)?;
         Ok((events, stream_length))
     }
+
+    /// The unbounded leg for [`AsOfPriceAuthority::at_head`] (slice 3a, D2): read EVERY row of
+    /// `stream`, then take the CEILING as the max over the RAW rows returned (technical rows
+    /// included, before [`Self::decode_rows`] drops them) — the SAME technique
+    /// [`Self::load_range`]'s fail-closed check uses, repurposed here as the SOURCE of the
+    /// coordinate rather than as a verification against a caller-supplied number, because at-head
+    /// there is no separately-requested version to check against: whatever the highest row is IS
+    /// the head, by construction of reading everything. `Err` when the stream has no rows at all —
+    /// the catalog does not exist yet — never a HEAD price for a catalog that was never created.
+    ///
+    /// DELIBERATELY NO SPAN here in this slice (3a deliverable 1, structural/dark): the
+    /// `catalog.as_of.fold` span (`telemetry::spans::catalog_as_of_fold`) is constructed from a
+    /// KNOWN coordinate, which `at_head` does not have until after this read returns — instrumenting
+    /// this leg honestly (including the fold, per `as_of`'s own round-3 correction) is deliverable
+    /// 4's job in this card, deferred with it (see the hand-back's fence finding).
+    async fn load_to_head(
+        &self,
+        stream: &str,
+    ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize, CatalogVersion), DomainError> {
+        let rows = self.fetch_all_rows(stream).await?;
+        let stream_length = rows.len();
+        let highest = rows.iter().map(|(v, _, _)| *v).max();
+        let Some(coordinate) = highest.and_then(CatalogVersion::try_new) else {
+            return Err(db_err(format!(
+                "stream {stream} has no rows: catalog not created (highest available version: \
+                 {highest:?})"
+            )));
+        };
+        let events = Self::decode_rows(rows)?;
+        Ok((events, stream_length, coordinate))
+    }
 }
 
 #[async_trait]
@@ -181,5 +239,17 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
         }
         .instrument(span)
         .await
+    }
+
+    /// ONE unbounded range read to head (slice 3a, D2): the coordinate carried is the CEILING the
+    /// fold was bounded at — the highest RAW row version returned by [`Self::load_to_head`],
+    /// verified over the same rows that produced the prices, never a second, separately-checked
+    /// value. `Err` when the stream has no rows at all (the catalog does not exist yet) — never a
+    /// HEAD price for a catalog that was never created.
+    async fn at_head(&self, catalog_id: CatalogId) -> Result<(AsOfCatalog, CatalogVersion), DomainError> {
+        let stream = domain::catalog::stream(catalog_id);
+        let (events, _stream_length, coordinate) = self.load_to_head(&stream).await?;
+        let catalog = AsOfCatalog::from_stream(&events, coordinate);
+        Ok((catalog, coordinate))
     }
 }

@@ -286,6 +286,61 @@ async fn a_coordinate_beyond_head_is_refused_never_head_priced() {
     );
 }
 
+/// PROP-20260831-134539:547 (slice 3a, D2) — `at_head` prices the LIVE head and returns the exact
+/// coordinate it verified — the SAME number a subsequent `as_of` call at that coordinate would
+/// demand, never a HEAD price with no coordinate to name it.
+#[tokio::test]
+async fn at_head_prices_the_live_head_and_returns_its_coordinate() {
+    let Some(db) = common::TestDb::acquire("as_of_catalog_read_at_head").await else { return };
+    let pool = db.pool();
+
+    let catalog_id = uuid::Uuid::new_v4();
+    let restaurant_id = uuid::Uuid::new_v4();
+    let product_id = uuid::Uuid::new_v4();
+    let offer_id = uuid::Uuid::new_v4();
+    let stream = domain::catalog::stream(CatalogId(catalog_id));
+
+    append_event(
+        &pool,
+        &stream,
+        1,
+        "CatalogCreated",
+        serde_json::json!({ "catalogId": catalog_id, "restaurantId": restaurant_id, "name": "Main" }),
+    )
+    .await;
+    let product = |price_cents: i64| {
+        product_payload(catalog_id, restaurant_id, product_id, offer_id, "Margherita", price_cents)
+    };
+    append_event(&pool, &stream, 2, "ProductAdded", product(1500)).await;
+    append_event(&pool, &stream, 3, "ProductUpdated", product(1900)).await;
+
+    let repo = PgAsOfCatalogRepository::new(pool.clone());
+    let (as_of, coordinate) = repo.at_head(CatalogId(catalog_id)).await.expect("at_head reads the live head");
+    assert_eq!(coordinate, CatalogVersion::try_new(3).unwrap(), "at_head must return version 3, the live head");
+    assert_eq!(as_of.coordinate(), coordinate, "AsOfCatalog::coordinate must equal the returned coordinate");
+    let price = as_of.price_of(OfferId(offer_id), &[]).expect("offer exists at head");
+    assert_eq!(price.unit_price.amount_cents.0, 1900, "at_head must price the LATEST update, not a stale one");
+}
+
+/// PROP-20260831-134539:547 (slice 3a, D2) — a catalog that was never created (empty stream) is
+/// REFUSED, never a HEAD price for a coordinate that does not exist.
+#[tokio::test]
+async fn at_head_refuses_a_catalog_that_was_never_created() {
+    let Some(db) = common::TestDb::acquire("as_of_catalog_read_at_head_absent").await else { return };
+    let pool = db.pool();
+
+    let repo = PgAsOfCatalogRepository::new(pool.clone());
+    let err = repo
+        .at_head(CatalogId(uuid::Uuid::new_v4()))
+        .await
+        .expect_err("at_head on a never-created catalog must refuse");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("no rows") || message.contains("catalog not created"),
+        "unexpected error shape (at_head returned Ok? or a different message): {message}"
+    );
+}
+
 /// PROP-20260831-134539:547 (red-first, round 2; THE FARLEY GATE) — the version RETURNED by a real
 /// `EventStore::append` is the exact coordinate `as_of` reads: appending a further event must never
 /// be visible through a read at the version returned BEFORE that append. Mutant: reintroduce the `+1`

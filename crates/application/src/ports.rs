@@ -261,6 +261,21 @@ pub trait AsOfPriceAuthority: Send + Sync {
         catalog_id: CatalogId,
         version: CatalogVersion,
     ) -> Result<AsOfCatalog, DomainError>;
+
+    /// The catalog's prices AT HEAD (PROP-20260831-134539 slice 3a, D2): ONE unbounded range read
+    /// of the `Catalog-<catalogId>` stream, returning the resolved prices AND the coordinate they
+    /// were bounded at — the CEILING the adapter verified (the highest RAW row version returned,
+    /// technical rows included) — as ONE value, never two reads and never a caller-supplied
+    /// expectation to check against (that is [`AsOfPriceAuthority::as_of`]'s job, for a caller who
+    /// already holds a coordinate). Named for what it does, deliberately NOT `latest_version()`
+    /// (vernon CATCH, slice 2): a bare version-returning method invites a caller to ask for "the
+    /// current version" as a number and reconstruct the priced read elsewhere, splitting price
+    /// authority from coordinate authority across two calls — the exact mixed-authority mint this
+    /// port refuses to offer. `Err` when the stream has no rows at all (no catalog created yet) —
+    /// never a HEAD price for a catalog that does not exist. The returned [`CatalogVersion`] is
+    /// non-`Option`, matching [`AsOfCatalog::coordinate`]: there is no code path that mints prices
+    /// without a coordinate to name them.
+    async fn at_head(&self, catalog_id: CatalogId) -> Result<(AsOfCatalog, CatalogVersion), DomainError>;
 }
 
 /// Google Business Profile ownership-proof verification (ADR-0019: "delegate ownership proof to
