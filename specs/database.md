@@ -12,13 +12,13 @@ rationale — the generated SQL is the source of truth; do not hand-write DDL he
 sequence of one aggregate instance; it maps 1:1 to a domain aggregate (`actors.yaml`). Key columns:
 `position` (the `$all` total order, identity PK, projection checkpoint), `id` (idempotent append,
 unique), `stream_name` (`<Category>-<id>`, e.g. `Catalog-12345`; category = prefix before the first `-`),
-`version` (0-based; `UNIQUE (stream_name, version)` gives expected-version concurrency), `event_type`,
+`version` (1-based, first event = 1; `UNIQUE (stream_name, version)` gives expected-version concurrency), `event_type`,
 `payload` (JSONB), `occurred_at`, and `expired_at` (per-event TTL). The mapping:
 
 | EventStore concept | Column / mechanism here |
 |---|---|
 | Stream name (`<CatalogCategory>-<id>`, e.g. `Catalog-12345`) | `stream_name` — category = prefix, so **no `stream_type` column** |
-| Event number / stream revision (0-based) | `version` — `UNIQUE (stream_name, version)` gives expected-version concurrency |
+| Event number / stream revision (1-based, first event = 1) | `version` — `UNIQUE (stream_name, version)` gives expected-version concurrency |
 | `$all` global position | `position` (identity) — total order; projections track a checkpoint on it |
 | Event id (idempotent append) | `id` — `UNIQUE` |
 | Event type | `event_type` |

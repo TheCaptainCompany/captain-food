@@ -14,7 +14,7 @@ domain_events:
     position:       { type: bigint,      identity: true, pk: true, note: "$all total order; projections checkpoint on it" }
     id:             { type: uuid,        unique: true,             note: "event id — idempotency key, deduped on append" }
     stream_name:    { type: text,                                  note: "'<Category>-<id>', e.g. 'Catalog-12345'" }
-    version:        { type: integer,                               note: "0-based event number within the stream" }
+    version:        { type: integer,                               note: "1-based event number within the stream; first event = 1 (the writer is expected_version + index + 1)" }
     user_id:        { type: { $ref: 'scalars.yaml#/UserId' },       note: "the acting user — envelope metadata, ADR-0041 (not in payloads)" }
     user_type:      { type: { $ref: 'scalars.yaml#/UserType' },     note: "role of the acting user; enum → stored as its TEXT value verbatim (ADR-20260728)" }
     correlation_id: { type: { $ref: 'scalars.yaml#/CorrelationId' } }
