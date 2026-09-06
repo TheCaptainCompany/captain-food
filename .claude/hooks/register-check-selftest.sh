@@ -20,6 +20,7 @@
 # -- a reversal opens a NEW row, never reopens the file).
 set -uo pipefail
 
+SELFTEST_START_TS="$(date +%s)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$ROOT/.claude/hooks/register-check.sh"
 [ -f "$HOOK" ] || { echo "register-check selftest: cannot find $HOOK" >&2; exit 2; }
@@ -939,9 +940,46 @@ if ! grep -q 'every_record_in_the_corpus_is_citable_through_lane_d' "$ROOT/tools
   fail=1
 fi
 
+# ── #926 item 5, RESHAPED by farley: a WARN-only regression TRIPWIRE, never a hang bound ────────
+# A post-hoc self-timer cannot BE a hang bound: a hung script never reaches the line that would
+# read it -- CI's `gate-scripts` job already carries `timeout-minutes: 10` for that, at the JOB
+# level. What a self-timer CAN do is make growth VISIBLE: the elapsed wall time is printed on
+# every run (a reading visible in every CI log), and crossing
+# REGISTER_CHECK_SELFTEST_CEILING_SECONDS (default 120s) prints exactly ONE WARN line to stderr,
+# naming itself a TRIPWIRE -- an UNVERIFIED ceiling, never a hang bound (the job timeout above
+# already owns that) and never a METER (#923 §4's `gate_minutes_per_round`, read from CI check-run
+# times, owns that). It NEVER changes the exit code: the every-turn local path from stop-gate.sh
+# must not become a trainer that teaches a session to re-run past a warning.
+# Antecedent: the gate-scripts job's own selftest step measured 4s on five recent green main runs
+# (Actions API, 2026-09-06, 1s granularity) and 4.7s locally on this container.
+# A small in-process FUNCTION, so ST1 below can call it directly with SYNTHETIC elapsed/ceiling
+# values rather than actually sleeping the suite past the ceiling.
+register_check_selftest_ceiling_warn() { # register_check_selftest_ceiling_warn <elapsed> <ceiling>
+  local elapsed="$1" ceiling="$2"
+  if [ "$elapsed" -gt "$ceiling" ]; then
+    echo "register-check selftest: WARN -- elapsed ${elapsed}s past REGISTER_CHECK_SELFTEST_CEILING_SECONDS=${ceiling}s (TRIPWIRE, UNVERIFIED ceiling: a run past it is a regression signal, not a hang bound -- CI bounds hangs at the job level, timeout-minutes: 10 -- and not a meter, #923 §4 owns that)" >&2
+  fi
+}
+# ST1: the WARN fires when elapsed > ceiling and stays SILENT when it does not -- pinned with
+# synthetic values (5s against a ceiling of 0, then 5s against the real default 120) so the case
+# never depends on the suite's own actual runtime.
+st1_out="$(register_check_selftest_ceiling_warn 5 0 2>&1 >/dev/null)"
+if ! printf '%s' "$st1_out" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1-selftest-ceiling-tripwire-warns FAILED -- no WARN/TRIPWIRE line on stderr with elapsed=5 ceiling=0 (got: $st1_out)" >&2
+  fail=1
+fi
+st1_quiet="$(register_check_selftest_ceiling_warn 5 120 2>&1 >/dev/null)"
+if [ -n "$st1_quiet" ]; then
+  echo "register-check selftest: case ST1-selftest-ceiling-tripwire-warns FAILED -- unexpected WARN with elapsed=5 ceiling=120 (got: $st1_quiet)" >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "register-check selftest: FAILED (see cases above)" >&2
   exit 2
 fi
-echo "register-check selftest: all cases pass."
+SELFTEST_ELAPSED=$(( $(date +%s) - SELFTEST_START_TS ))
+SELFTEST_CEILING="${REGISTER_CHECK_SELFTEST_CEILING_SECONDS:-120}"
+register_check_selftest_ceiling_warn "$SELFTEST_ELAPSED" "$SELFTEST_CEILING"
+echo "register-check selftest: all cases pass (${SELFTEST_ELAPSED}s)."
 exit 0
