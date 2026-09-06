@@ -495,6 +495,21 @@ impl From<EmailAddress> for ds::EmailAddress {
     }
 }
 
+/// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct EmailVerificationToken(pub String);
+async_graphql::scalar!(EmailVerificationToken, "EmailVerificationToken", "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).");
+impl From<ds::EmailVerificationToken> for EmailVerificationToken {
+    fn from(v: ds::EmailVerificationToken) -> Self {
+        Self(v.0)
+    }
+}
+impl From<EmailVerificationToken> for ds::EmailVerificationToken {
+    fn from(v: EmailVerificationToken) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PhoneNumber(pub String);
@@ -2193,21 +2208,6 @@ impl From<ds::PaymentMethodId> for PaymentMethodId {
 }
 impl From<PaymentMethodId> for ds::PaymentMethodId {
     fn from(v: PaymentMethodId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct EmailVerificationToken(pub String);
-async_graphql::scalar!(EmailVerificationToken, "EmailVerificationToken", "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).");
-impl From<ds::EmailVerificationToken> for EmailVerificationToken {
-    fn from(v: ds::EmailVerificationToken) -> Self {
-        Self(v.0)
-    }
-}
-impl From<EmailVerificationToken> for ds::EmailVerificationToken {
-    fn from(v: EmailVerificationToken) -> Self {
         Self(v.0)
     }
 }

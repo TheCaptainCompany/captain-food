@@ -118,12 +118,27 @@ impl Guard for RoleGuard {
             return Ok(());
         }
         let allowed: Vec<&str> = self.allowed.iter().map(|r| r.api_name()).collect();
+        // #639 part C step 6-iii (ADR-20260906-023825): the ADDITIVE discriminator beside the
+        // UNCHANGED `code: FORBIDDEN` -- the shared `shared_types::ADMIN_ACCESS_NOT_GRANTED`
+        // constant, never a hand-copied literal, so the client's bounce decision
+        // (`crates/web/src/bounce.rs`) and this guard can never drift. Every OTHER role mismatch
+        // (a CUSTOMER token on an ADMIN-only op, an unauthenticated PUBLIC caller) sets no
+        // `reason` at all -- that asymmetry is what lets the System client key its bounce on the
+        // SERVER's own signal instead of a bare FORBIDDEN, the `StandingGuard` precedent.
+        let admin_claimed_no_grant = ctx
+            .data_opt::<crate::auth::Principal>()
+            .is_some_and(crate::auth::Principal::claimed_admin_with_no_grant);
         Err(async_graphql::Error::new(format!(
             "forbidden: role {} is not authorized for this operation (allowed: {})",
             request_role(ctx).api_name(),
             allowed.join(", ")
         ))
-        .extend_with(|_, e| e.set("code", "FORBIDDEN")))
+        .extend_with(|_, e| {
+            e.set("code", "FORBIDDEN");
+            if admin_claimed_no_grant {
+                e.set("reason", shared_types::ADMIN_ACCESS_NOT_GRANTED);
+            }
+        }))
     }
 }
 

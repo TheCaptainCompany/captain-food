@@ -20,6 +20,7 @@ surface_runtime = { path = "../surface_runtime" }
 actor_client = { path = "../actor_client" }
 # PROP-20260802-130500 phase 2 (#306): one dependency per actor this crate may address.
 # An actor absent from this list is an actor whose client type does not exist here.
+client-admin-sign-in = { path = "../clients/admin-sign-in" }
 client-cart = { path = "../clients/cart" }
 client-catalog = { path = "../clients/catalog" }
 client-conversation = { path = "../clients/conversation" }

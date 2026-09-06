@@ -59,6 +59,8 @@ pub const OPERATION_SCOPES: &[(&str, &str, &str)] = &[
     ("mutation", "importCatalog", "catalog"),
     ("mutation", "requeueMailboxMessage", "common"),
     ("mutation", "grantPlatformAccess", "common"),
+    ("mutation", "requestAdminSignInLink", "common"),
+    ("mutation", "confirmAdminSignIn", "common"),
     ("mutation", "openConversation", "comms"),
     ("mutation", "postMessage", "comms"),
     ("mutation", "recordMessageTranslation", "comms"),

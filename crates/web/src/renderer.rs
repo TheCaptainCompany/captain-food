@@ -1732,6 +1732,7 @@ mod tests {
             Surface::RestaurantFrontoffice,
             Surface::RestaurantBackoffice,
             Surface::Rider,
+            Surface::System,
         ] {
             for screen in surface.screens() {
                 let html = match HandWrittenScreen::of(screen) {

@@ -40,6 +40,11 @@ pub enum HandWrittenScreen {
     /// ADR-20260905-101349 §2 amendment) — `invitation_accept.rs`. The `SignInReturn` shape,
     /// doubled: TWO commands sequenced client-side (never a process manager).
     InvitationAccept,
+    /// `system.yaml#/screens/sign_in_return` (#639 part C step 6-iii, ADR-20260906-023825) --
+    /// `admin_sign_in_return.rs`. The `SignInReturn` System TWIN: same query-string/acceptance-
+    /// first reasons, a DIFFERENT screen id owner (this variant, not `SignInReturn`) because the
+    /// two live on different surfaces with different routes/actions/copy.
+    AdminSignInReturn,
 }
 
 impl HandWrittenScreen {
@@ -49,6 +54,7 @@ impl HandWrittenScreen {
         HandWrittenScreen::OrderTracking,
         HandWrittenScreen::SignInReturn,
         HandWrittenScreen::InvitationAccept,
+        HandWrittenScreen::AdminSignInReturn,
     ];
 
     /// The generated `Screen::id` this variant owns.
@@ -58,6 +64,7 @@ impl HandWrittenScreen {
             HandWrittenScreen::OrderTracking => "order_tracking",
             HandWrittenScreen::SignInReturn => "sign_in_return",
             HandWrittenScreen::InvitationAccept => "invitation_accept",
+            HandWrittenScreen::AdminSignInReturn => "admin_sign_in_return",
         }
     }
 
@@ -204,6 +211,11 @@ impl HandWrittenScreen {
             HandWrittenScreen::InvitationAccept => {
                 crate::invitation_accept::render_invitation_accept_html(locale)
             }
+            // The token lives in the query string, which SSR never sees: the shell is a STATIC
+            // working message, and the real work happens in the browser (`mount`, below).
+            HandWrittenScreen::AdminSignInReturn => {
+                crate::admin_sign_in_return::render_admin_sign_in_return_html(locale)
+            }
         }
     }
 }
@@ -271,6 +283,9 @@ pub mod mount {
                 }
                 HandWrittenScreen::InvitationAccept => {
                     mount_invitation_accept(transport, origin, session, locale)
+                }
+                HandWrittenScreen::AdminSignInReturn => {
+                    mount_admin_sign_in_return(transport, origin, session, locale)
                 }
             }
         });
@@ -563,6 +578,65 @@ pub mod mount {
         });
     }
 
+    /// The ADMIN magic-link RETURN landing (#639 part C step 6-iii, ADR-20260906-023825): read
+    /// `?token=` off the URL the mail client opened, dispatch `confirmAdminSignIn`
+    /// (acceptance-first), poll its outcome, claim the parked session cookie (the
+    /// `AdminAccessNotGranted` leg parks one too, so a future sign-out control would have a real
+    /// cookie there as well), then leave the page — the `mount_sign_in_return` shape, transposed.
+    fn mount_admin_sign_in_return(transport: HttpTransport, origin: String, session: SessionId, locale: String) {
+        use crate::admin_sign_in_return::{AdminSignInReturnScreen, AdminSignInReturnScreenProps, AdminSignInReturnState};
+
+        let state = RwSignal::new(AdminSignInReturnState::Working);
+        {
+            let locale = locale.clone();
+            leptos::mount::mount_to_body(move || {
+                let locale = locale.clone();
+                view! {
+                    {move || AdminSignInReturnScreen(AdminSignInReturnScreenProps { state: state.get(), locale: locale.clone() })}
+                }
+            });
+        }
+
+        let Some(token) = crate::admin_sign_in_return::token_from_location() else {
+            state.set(AdminSignInReturnState::NoToken);
+            return;
+        };
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let mut input = serde_json::Map::new();
+            input.insert("token".into(), serde_json::json!(token));
+            let outcome = async {
+                let handle = crate::actions::dispatch(
+                    &transport,
+                    crate::generated::data_layer::ActionKey::ConfirmAdminSignIn,
+                    input,
+                )
+                .await?;
+                handle.resolve(&transport).await
+            }
+            .await;
+            match outcome {
+                Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
+                    crate::auth::claim_session(&origin, message_id, session).await;
+                    crate::admin_sign_in_return::navigate_away(&origin, "/");
+                }
+                Ok(crate::actions::ActionOutcome::Rejected { message_id, error_code, .. }) => {
+                    // Best-effort: nothing was parked for every OTHER rejection, so this call is a
+                    // genuine no-op there — never a reason to branch on it.
+                    crate::auth::claim_session(&origin, message_id, session).await;
+                    if error_code == "AdminAccessNotGranted" {
+                        crate::admin_sign_in_return::navigate_away(&origin, "/sign-in/no-access");
+                    } else {
+                        state.set(AdminSignInReturnState::Failed);
+                    }
+                }
+                Ok(crate::actions::ActionOutcome::Failed { .. }) | Err(_) => {
+                    state.set(AdminSignInReturnState::Failed);
+                }
+            }
+        });
+    }
+
     /// The invitation acceptance landing (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
     /// amendment): read `?token=&invitationId=` off the URL the mail client opened, dispatch
     /// `acceptRestaurantInvitation` (leg 1), then — on its success — `grantRestaurantAccessByInvitation`
@@ -674,6 +748,7 @@ mod tests {
             Surface::RestaurantFrontoffice,
             Surface::RestaurantBackoffice,
             Surface::Rider,
+            Surface::System,
         ] {
             for screen in surface.screens() {
                 match HandWrittenScreen::of(screen) {

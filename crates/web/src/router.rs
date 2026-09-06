@@ -28,6 +28,10 @@ pub enum Surface {
     RestaurantFrontoffice,
     RestaurantBackoffice,
     Rider,
+    /// #639 part C step 6-iii (ADR-20260906-023825): the ops surface on `system.captain.food` --
+    /// ADMIN-only, transport role `Role::Admin`. Routed only now; the screen tree
+    /// (`specs/screens/system.yaml`) has existed since #242/4-iii-A, DARK.
+    System,
 }
 
 impl Surface {
@@ -38,6 +42,7 @@ impl Surface {
             Surface::RestaurantFrontoffice => screens::restaurant_frontoffice::SCREENS,
             Surface::RestaurantBackoffice => screens::restaurant_backoffice::SCREENS,
             Surface::Rider => screens::rider::SCREENS,
+            Surface::System => screens::system::SCREENS,
         }
     }
 
@@ -48,6 +53,7 @@ impl Surface {
             Surface::RestaurantFrontoffice => screens::restaurant_frontoffice::SHEETS,
             Surface::RestaurantBackoffice => screens::restaurant_backoffice::SHEETS,
             Surface::Rider => screens::rider::SHEETS,
+            Surface::System => screens::system::SHEETS,
         }
     }
 
@@ -59,6 +65,7 @@ impl Surface {
             Surface::CaptainFrontoffice | Surface::RestaurantFrontoffice => Role::Public,
             Surface::RestaurantBackoffice => Role::Restaurant,
             Surface::Rider => Role::Rider,
+            Surface::System => Role::Admin,
         }
     }
 
@@ -135,6 +142,9 @@ pub fn surface_for_host(host: &str) -> Surface {
     match audience_label(host) {
         Some("restos") => Surface::RestaurantBackoffice,
         Some("riders") => Surface::Rider,
+        // #639 part C step 6-iii (ADR-20260906-023825 SS4): the door is routed here; the door
+        // gate (`RUN_ADMIN_SIGN_IN_DOOR`) is a separate, always-on-independent concern.
+        Some("system") => Surface::System,
         _ => {
             if Surface::slug_of(host).is_some() {
                 Surface::RestaurantFrontoffice
@@ -467,6 +477,11 @@ mod tests {
         assert_eq!(surface_for_host("restos.localhost"), Surface::RestaurantBackoffice);
         assert_eq!(surface_for_host("riders.localhost:8080"), Surface::Rider);
         assert_eq!(surface_for_host("live.localhost"), Surface::CaptainFrontoffice);
+        // #639 part C step 6-iii: the System host routes now (beck's item (2)); the label stays
+        // reserved either way -- `Surface::slug_of` already excluded it before this card.
+        assert_eq!(surface_for_host("system.captain.food"), Surface::System);
+        assert_eq!(surface_for_host("system.localhost"), Surface::System);
+        assert_eq!(Surface::slug_of("system.captain.food"), None, "reserved, never a storefront");
         assert_eq!(Surface::slug_of("restos.localhost"), None, "reserved, never a storefront");
         assert_eq!(Surface::slug_of("hooks.localhost"), None, "reserved, never a storefront");
         assert_eq!(Surface::slug_of("localhost:8080"), None, "a root is not a label");
@@ -482,6 +497,7 @@ mod tests {
         assert_eq!(Surface::RestaurantBackoffice.role().segment(), "restaurant");
         assert_eq!(Surface::Rider.role().segment(), "rider");
         assert_eq!(Surface::RestaurantFrontoffice.role().segment(), "public");
+        assert_eq!(Surface::System.role().segment(), "admin");
     }
 
     /// R1 (#639 2c-ii): ONE screen of the rider surface speaks to `/public/graphql` — the sign-in
@@ -566,6 +582,15 @@ mod tests {
         assert_eq!(unauthenticated_redirect("restos.captain.food", "/deliveries"), Some("/sign-in"));
         assert_eq!(unauthenticated_redirect("restos.captain.food", "/sign-in"), None);
         assert_eq!(unauthenticated_redirect("restos.captain.food", "/sign-in/not-linked"), None);
+        // #639 part C step 6-iii (ADR-20260906-023825): the SAME shape, one level down again --
+        // every requires_auth screen on the System surface now names its own PUBLIC sign-in door,
+        // and the door (plus its no-access sibling) names none. Beck's test (1).
+        assert_eq!(unauthenticated_redirect("system.captain.food", "/system/mailbox"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("system.captain.food", "/system/riders"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("system.captain.food", "/system/riders/rider-1"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("system.captain.food", "/sign-in"), None);
+        assert_eq!(unauthenticated_redirect("system.captain.food", "/sign-in/no-access"), None);
+        assert_eq!(Surface::slug_of("system.captain.food"), None, "reserved, never a storefront");
     }
 
     /// #639 part C step 4-ii (ADR-20260904-124600 §2): the `unauthenticated:` twin — the rider
@@ -581,6 +606,49 @@ mod tests {
         assert_eq!(restricted_route_of("/jobs/o-1"), Some(Some("/restricted")));
         assert_eq!(restricted_route_of("/restricted"), Some(None), "the door itself declares no restricted: of its own");
         assert_eq!(restricted_route_of("/sign-in"), Some(None), "the sign-in door is PUBLIC — nothing to restrict");
+    }
+
+    /// #639 part C step 6-iii (ADR-20260906-023825 SS9): the SAME shape two levels down -- the
+    /// ADMIN sign-in door speaks to `/public/graphql`, its `sign_in_return`/`no_access` siblings
+    /// too, and the System surface's other screens keep `/admin/graphql`.
+    #[test]
+    fn the_admin_sign_in_door_addresses_the_public_graph_and_its_siblings_do_not() {
+        use crate::graphql::HttpTransport;
+        use crate::session::SessionId;
+        let door = match_route(Surface::System, "/sign-in").expect("the door is routed").screen;
+        let no_access = match_route(Surface::System, "/sign-in/no-access").expect("the refusal is routed").screen;
+        let lanes = match_route(Surface::System, "/system/mailbox").expect("the board is routed").screen;
+        assert_eq!(door.graphql_role, Some("PUBLIC"));
+        assert_eq!(no_access.graphql_role, Some("PUBLIC"));
+        assert_eq!(lanes.graphql_role, None, "the default is the surface's own role, untouched");
+        assert!(!door.requires_auth && !no_access.requires_auth && lanes.requires_auth);
+        let origin = "https://system.captain.food";
+        let door_transport = HttpTransport::new(origin, Surface::System.role_for(door), SessionId::mint());
+        let lanes_transport = HttpTransport::new(origin, Surface::System.role_for(lanes), SessionId::mint());
+        assert_eq!(door_transport.endpoint(), "https://system.captain.food/public/graphql");
+        assert_eq!(lanes_transport.endpoint(), "https://system.captain.food/admin/graphql");
+    }
+
+    /// #639 part C step 6-iii (ADR-20260906-023825): the System surface's three sign-in-adjacent
+    /// screens resolve to the SCREEN ID beck's checkpoint names -- asserting structure, never
+    /// rendered markup (the `gated_rider_screens_name_the_restricted_route_and_the_target_does_not`
+    /// precedent's own discipline). The "ADMIN claim + no grant -> no_access" / "ADMIN with grant
+    /// -> mailbox_lanes" legs are proven end to end at the GraphQL/HTTP layer
+    /// (`crates/server/tests/admin_sign_in_door.rs::the_token_the_admin_stamp_writes_opens_the_
+    /// admin_door_once_the_seam_resolves_a_grant`) and the bounce-reason mapping
+    /// (`crate::bounce::tests::admin_access_not_granted_bounces_to_no_access`) -- this test is the
+    /// THIRD leg, the route/screen-id structure those two rely on.
+    #[test]
+    fn the_system_sign_in_screens_resolve_to_their_own_screen_ids() {
+        assert_eq!(match_route(Surface::System, "/sign-in").expect("the door is routed").screen.id, "sign_in");
+        assert_eq!(match_route(Surface::System, "/sign-in/no-access").expect("the refusal is routed").screen.id, "no_access");
+        assert_eq!(match_route(Surface::System, "/system/mailbox").expect("the board is routed").screen.id, "mailbox_lanes");
+        // Anonymous-safe: neither sign-in-adjacent screen requires auth (the sign_in/no_access
+        // pair carries no session at all by construction — an unbound caller reaches them
+        // directly, never via a bounce loop).
+        assert!(!match_route(Surface::System, "/sign-in").unwrap().screen.requires_auth);
+        assert!(!match_route(Surface::System, "/sign-in/no-access").unwrap().screen.requires_auth);
+        assert!(match_route(Surface::System, "/system/mailbox").unwrap().screen.requires_auth);
     }
 
     #[test]
@@ -607,6 +675,7 @@ mod tests {
             Surface::RestaurantFrontoffice,
             Surface::RestaurantBackoffice,
             Surface::Rider,
+            Surface::System,
         ] {
             for screen in surface.screens() {
                 // Substitute a dummy value for each :param, then the route must match itself.

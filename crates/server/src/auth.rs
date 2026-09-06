@@ -462,6 +462,18 @@ impl Principal {
         }
     }
 
+    /// **The one discriminator [`RoleGuard`](crate::graphql::acl::RoleGuard) needs beyond
+    /// `role_allows`** (#639 part C step 6-iii, ADR-20260906-023825): true exactly when this
+    /// caller presented an ADMIN-role token the seam could NOT bind to a live platform grant —
+    /// the shared_types::ADMIN_ACCESS_NOT_GRANTED bounce signal, the `RIDER_RESTRICTED` precedent
+    /// transposed from a standing question to a binding one. A CUSTOMER/RESTAURANT/RIDER token
+    /// hitting an ADMIN-only operation is a DIFFERENT population (a stranger on the wrong door,
+    /// not an admin waiting on a grant) and must never carry this reason — narrower than "acts as
+    /// PUBLIC", which every `Unbound` variant also does.
+    pub fn claimed_admin_with_no_grant(&self) -> bool {
+        matches!(self.identity, Identity::Unbound { role: RequestRole::Admin, .. })
+    }
+
     /// Build a verified principal from a role and its domain binding — the same match
     /// [`AuthContext::authorize`] runs, exposed for tests and for any future non-HTTP driver that
     /// must present a caller to the schema.

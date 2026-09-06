@@ -38,8 +38,7 @@
       "scope": "network",
       "path": "crates/domains/network",
       "deps": [
-        "domain-common",
-        "domain-customer"
+        "domain-common"
       ]
     },
     "domain-ordering": {
@@ -58,6 +57,14 @@
     }
   },
   "bins": {
+    "actor-admin-sign-in": {
+      "actor": "AdminSignIn",
+      "kind": "aggregate",
+      "domain_crates": [
+        "domain-common"
+      ],
+      "path": "crates/bins/actor-admin-sign-in"
+    },
     "actor-cart": {
       "actor": "Cart",
       "kind": "aggregate",

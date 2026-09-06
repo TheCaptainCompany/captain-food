@@ -16,6 +16,15 @@ use serde::{Deserialize, Serialize};
 /// rejection.
 pub const RIDER_RESTRICTED: &str = "RIDER_RESTRICTED";
 
+/// The ADMIN-seam refusal reason (#639 part C step 6-iii, ADR-20260906-023825): the ONE string
+/// constant `server` (`RoleGuard`'s `extensions.reason`, set only when the underlying identity is
+/// `Identity::Unbound { role: RequestRole::Admin, .. }` -- an ADMIN-claimed token with no live
+/// platform grant) and `web` (the client bounce decision, `crates/web/src/bounce.rs`) both depend
+/// on -- the [`RIDER_RESTRICTED`] precedent, transposed. `code: FORBIDDEN` is UNCHANGED -- this is
+/// an ADDITIVE `reason` beside it, present only on this specific refusal, never on an ordinary
+/// role-mismatch `RoleGuard` rejection (a CUSTOMER token hitting `/admin/graphql` gets no reason).
+pub const ADMIN_ACCESS_NOT_GRANTED: &str = "ADMIN_ACCESS_NOT_GRANTED";
+
 /// The graphql-transport-ws close code the restriction fact terminates a rider's socket with
 /// (#639 part C step 5, ADR-20260905-065415 §3): the protocol's OWN `Forbidden` code, which
 /// async-graphql never emits itself, so a client can tell "the platform closed this on purpose"

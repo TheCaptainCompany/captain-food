@@ -41,8 +41,28 @@ note: 'External items are the founder''s (controller entity, the Art. 30 registe
   (`resolve_platform_scope`) makes `Identity::Admin` unspellable without a live `PlatformMembership` grant,
   proven red-first (`an_admin_token_with_no_platform_grant_is_unbound.rs`); (5) the `admin-sign-in` contract and
   `platform_access_grant_enforcing` at both composition roots, plus the new `RUN_*` fleet-parity codegen test
-  (`tools/codegen-rs/src/tests.rs::run_flag_parity`), landed. (6) with 6-iii; (3)-(4), (7)-(8) are flip
-  preconditions, not code in these slices — still open, still the founder''s external items.
+  (`tools/codegen-rs/src/tests.rs::run_flag_parity`), landed.
+  Item (6) LANDS with 6-iii (PR #909, DRAFT, ADR-20260906-023825): the `sign_in`/`sign_in_return`/`no_access`
+  screens on `system.yaml` (their OWN copy, never `restaurant_backoffice.yaml`''s reused), `requires_auth` +
+  `unauthenticated:` on every existing System screen (`mailbox_lanes`/`riders`/`rider_detail`), `Surface::System`/
+  `HostRoute::System` routing the SDUI shell, and the `admin_sign_in_door_enforcing` gauge declared beside
+  `platform_access_grant_enforcing` at BOTH composition roots (`crates/server/src/lib.rs`,
+  `crates/infrastructure/src/mailbox/standalone.rs`). Flip evidence for the door key (`RUN_ADMIN_SIGN_IN_DOOR`):
+  the gauge reads 1 at both roots across the drill window; `admin_sign_in_confirmed_total{result=linked}` >= 1
+  with `admin_claim_stamp_failed_total` at 0; refusals accounted by reason
+  (`admin_sign_in_refused_total{reason}`); no `claims.stamp` without a preceding
+  `admin_identity_resolve_total{result=resolved}` per correlation id -- named here per obs SS4, not yet run (no
+  live environment). (7) `?next=`/silent-refresh (#904) stays open, unowned by this slice.
+  STOP raised on 6-iii (PR #909, farley''s own Q2 CATCH): `make generate` produced a `deploy/generated/**` diff
+  -- the new `AdminSignIn` actor''s OWN manifest/image/kustomization entries (mechanically identical to every
+  prior 6-* slice''s own new actor, e.g. 6-v''s `actor-platform-membership`), AND a genuinely new
+  `/public/graphql` path added to the `system.captain.food` ingress host block (`deploy/generated/manifests/
+  ingress.yaml`) -- because the `sign_in`/`no_access`/`sign_in_return` screens carry `graphql_role: PUBLIC`,
+  exactly the SAME mechanical rule that already put `/public/graphql` on `restos.captain.food` (6-ii) and
+  `riders.captain.food` (2c-i)''s ingress blocks. Farley''s Q2 ("6-iii needs NO manifest/DNS/cert change") did
+  not anticipate this consequence of the door''s own PUBLIC screens. Not resolved by this executor per the
+  card''s unconditional STOP wording; the architect/coordinator decides whether this is the SAME accepted class
+  as 6-ii/2c-i''s identical diff or needs a different shape.
   Ordering, stated plainly: flip `RUN_PLATFORM_ACCESS_GRANT` and run `bootstrap-platform-admin`
   BEFORE any environment relies on ADMIN — the seam ships fail-closed precisely so this ordering
   cannot be skipped by accident, not because any environment today depends on it being followed.'

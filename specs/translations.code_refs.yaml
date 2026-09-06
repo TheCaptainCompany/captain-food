@@ -55,3 +55,14 @@ code_refs:
     used_by: crates/web/src/invitation_accept.rs
   - key: back.invitation.back_to_sign_in
     used_by: crates/web/src/invitation_accept.rs
+  # The ADMIN magic-link RETURN landing (crates/web/src/admin_sign_in_return.rs, #639 part C step
+  # 6-iii, ADR-20260906-023825) -- the `sign_in_return.rs` precedent, transposed. (sys.sign_in_return.title
+  # IS screen-$ref'd from system.yaml, so the screen already marks it used.)
+  - key: sys.sign_in_return.working
+    used_by: crates/web/src/admin_sign_in_return.rs
+  - key: sys.sign_in_return.no_token
+    used_by: crates/web/src/admin_sign_in_return.rs
+  - key: sys.sign_in_return.failed
+    used_by: crates/web/src/admin_sign_in_return.rs
+  - key: sys.sign_in_return.back_to_sign_in
+    used_by: crates/web/src/admin_sign_in_return.rs

@@ -72,6 +72,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       ct_actor_restaurant_invitation = container "actor-restaurant-invitation" "Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION." "Rust — mailbox worker bin" {
         a_RestaurantInvitation = component "RestaurantInvitation" "" "Aggregate"
       }
+      ct_actor_admin_sign_in = container "actor-admin-sign-in" "Drains AdminSignIn lanes (#639 part C step 6-iii, ADR-20260906-023825); pure routing, emits no domain events. Ships dark behind RUN_ADMIN_SIGN_IN_DOOR." "Rust — mailbox worker bin" {
+        a_AdminSignIn = component "AdminSignIn" "" "Aggregate"
+      }
       ct_actor_catalog = container "actor-catalog" "Drains Catalog lanes (incl. HubRise imports); appends its domain events." "Rust — mailbox worker bin" {
         a_Catalog = component "Catalog" "" "Aggregate"
       }
@@ -327,6 +330,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       autolayout lr
     }
     component ct_actor_restaurant_invitation "ActorRestaurantInvitationComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_actor_admin_sign_in "ActorAdminSignInComponents" {
       include *
       autolayout lr
     }

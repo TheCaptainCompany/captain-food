@@ -99,3 +99,32 @@ roster.restrict.effective_now: { messages: { en: "Effective: now", fr: "Effectif
 roster.restrict.notice:      { messages: { en: "The rider is told in the app the next time they open it.", fr: "Le rider est informé dans l'application à sa prochaine ouverture." } }
 roster.restrict.rider_requested_procedure: { messages: { en: "Keep the rider's message (procedure).", fr: "Conservez le message du rider (procédure)." } }
 roster.restrict.confirm:     { messages: { en: "Restrict access now", fr: "Restreindre l'accès maintenant" } }
+
+# ── The ADMIN sign-in door (#639 part C step 6-iii, ADR-20260906-023825) ─────────────────────
+# Neutral throughout (legal): no "not yet linked" implication, no entity/capacity/employment
+# words, no population statement. `sys.no_access.body` names the typed refusal only -- it must
+# never assert what a lookup found beyond that one fact.
+sys.sign_in.header:            { messages: { en: "Captain.Food — internal tools", fr: "Captain.Food — outils internes" } }
+sys.sign_in.title:             { messages: { en: "Sign in", fr: "Connexion" } }
+sys.sign_in.email_label:       { messages: { en: "Email address", fr: "Adresse e-mail" } }
+sys.sign_in.email_placeholder: { messages: { en: "you@captain.food", fr: "vous@captain.food" } }
+sys.sign_in.request_link:      { messages: { en: "Send my sign-in link", fr: "Recevoir mon lien de connexion" } }
+sys.sign_in.sending:           { messages: { en: "Sending…", fr: "Envoi en cours…" } }
+sys.sign_in.open_on_device:    { messages: { en: "We'll send you a link. Open it on this device.", fr: "Nous vous envoyons un lien. Ouvrez-le sur cet appareil." } }
+sys.sign_in.no_password:       { messages: { en: "No password: the link replaces it.", fr: "Aucun mot de passe : le lien remplace le mot de passe." } }
+sys.sign_in.support_lead:      { messages: { en: "A problem? support@captain.food", fr: "Un problème ? support@captain.food" } }
+sys.sign_in.confirmation_body: { messages: { en: "If this address has platform access, a link has just been sent to it.", fr: "Si cette adresse dispose d'un accès plateforme, un lien vient de lui être envoyé." } }
+
+sys.sign_in_return.title:      { messages: { en: "Signing you in…", fr: "Connexion en cours…" } }
+sys.sign_in_return.working:    { messages: { en: "Please wait, we're checking your link…", fr: "Merci de patienter, nous vérifions votre lien…" } }
+sys.sign_in_return.no_token:   { messages: { en: "This link is incomplete. Please request a new one.", fr: "Ce lien est incomplet. Merci d'en demander un nouveau." } }
+sys.sign_in_return.failed:     { messages: { en: "This link is invalid or has expired. Please request a new one.", fr: "Ce lien est invalide ou a expiré. Merci d'en demander un nouveau." } }
+sys.sign_in_return.back_to_sign_in: { messages: { en: "Back to sign-in", fr: "Retour à la connexion" } }
+
+# `no_access`: neutral, no entity/capacity/employment words, no lookup outcome beyond the typed
+# refusal, NO exit control (ux STOP: "Se déconnecter"/navigate-to-sign-in loops on System until
+# #94 lands -- the still-valid cookie fails the same grant test every time).
+sys.no_access.title:           { messages: { en: "Access not available", fr: "Accès non disponible" } }
+sys.no_access.body:            { messages: { en: "This space is reserved for people with platform access.", fr: "Cet espace est réservé aux personnes disposant d'un accès plateforme." } }
+sys.no_access.write_to_us:     { messages: { en: "If you believe this is an error, write to us:", fr: "Si vous pensez qu'il s'agit d'une erreur, écrivez-nous :" } }
+sys.no_access.support_contact: { messages: { en: "support@captain.food", fr: "support@captain.food" } }

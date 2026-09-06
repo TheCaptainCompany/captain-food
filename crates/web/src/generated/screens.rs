@@ -1133,7 +1133,7 @@ pub mod rider {
     ];
 }
 
-/// `specs/screens/system.yaml` — 3 screen(s).
+/// `specs/screens/system.yaml` — 6 screen(s).
 pub mod system {
     use super::*;
 
@@ -1142,12 +1142,12 @@ pub mod system {
             id: "mailbox_lanes",
             route: "/system/mailbox",
             roles: &["ADMIN"],
-            requires_auth: false,
+            requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::MailboxLanes, ResolverKey::MailboxPoisoned],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -1168,12 +1168,12 @@ pub mod system {
             id: "riders",
             route: "/system/riders",
             roles: &["ADMIN"],
-            requires_auth: false,
+            requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::RidersAll],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -1185,12 +1185,12 @@ pub mod system {
             id: "rider_detail",
             route: "/system/riders/:riderId",
             roles: &["ADMIN"],
-            requires_auth: false,
+            requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::RiderById],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -1237,6 +1237,67 @@ pub mod system {
             Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("reinstate_rider_error")), ("for_action", PropValue::Text("reinstate_rider"))], children: &[], branches: &[] }
         ],
         },
+        Screen {
+            id: "sign_in",
+            route: "/sign-in",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("admin_sign_in_topbar"))], children: &[
+                Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/sign-in"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.sign_in.header"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("sys.sign_in.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("admin_sign_in_form"))], children: &[
+                Node { kind: ComponentKind::EmailInput, props: &[("id", PropValue::Text("admin_email")), ("label", PropValue::I18n("sys.sign_in.email_label")), ("placeholder", PropValue::I18n("sys.sign_in.email_placeholder")), ("autofocus", PropValue::Text("true"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("admin_request_link")), ("label", PropValue::I18n("sys.sign_in.request_link")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("request_admin_sign_in_link")), ("action.variables.email", PropValue::Binding("admin_email.value")), ("action.loading_label", PropValue::I18n("sys.sign_in.sending")), ("action.on_success.type", PropValue::Text("open_bottom_sheet")), ("action.on_success.sheet_id", PropValue::Text("admin_sign_in_confirmation_sheet"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("admin_request_error")), ("for_action", PropValue::Text("request_admin_sign_in_link"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.sign_in.open_on_device"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.sign_in.no_password"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.sign_in.support_lead"))], children: &[], branches: &[] }
+            ], branches: &[] }
+        ],
+        },
+        Screen {
+            id: "admin_sign_in_return",
+            route: "/sign-in/return",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: false,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[],
+        },
+        Screen {
+            id: "no_access",
+            route: "/sign-in/no-access",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("sys.no_access.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.no_access.body"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.no_access.write_to_us"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.no_access.support_contact"))], children: &[], branches: &[] }
+        ],
+        },
     ];
 
     pub const SHEETS: &[Sheet] = &[
@@ -1253,6 +1314,11 @@ pub mod system {
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.restrict.notice"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restrict_rider_confirm_btn")), ("label", PropValue::I18n("roster.restrict.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("restrict_rider")), ("action.variables.riderId", PropValue::Binding("rider.riderId")), ("action.variables.ground", PropValue::Binding("ground.value")), ("action.on_success.0.type", PropValue::Text("close_sheet")), ("action.on_success.1.type", PropValue::Text("navigate")), ("action.on_success.1.route", PropValue::Text("$reload"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("restrict_rider_error")), ("for_action", PropValue::Text("restrict_rider"))], children: &[], branches: &[] }
+            ], branches: &[] } },
+        Sheet { id: "admin_sign_in_confirmation_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("admin_sign_in_confirmation_sheet")), ("title", PropValue::I18n("sys.sign_in.title"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("sys.sign_in.confirmation_body"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("admin_sign_in_confirmation_close")), ("label", PropValue::I18n("sys.sign_in.title")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }
             ], branches: &[] } },
     ];
 }

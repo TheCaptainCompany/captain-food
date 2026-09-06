@@ -2095,6 +2095,82 @@
     "en": "Restaurants",
     "fr": "Restaurants"
   },
+  "sys.no_access.body": {
+    "en": "This space is reserved for people with platform access.",
+    "fr": "Cet espace est réservé aux personnes disposant d'un accès plateforme."
+  },
+  "sys.no_access.support_contact": {
+    "en": "support@captain.food",
+    "fr": "support@captain.food"
+  },
+  "sys.no_access.title": {
+    "en": "Access not available",
+    "fr": "Accès non disponible"
+  },
+  "sys.no_access.write_to_us": {
+    "en": "If you believe this is an error, write to us:",
+    "fr": "Si vous pensez qu'il s'agit d'une erreur, écrivez-nous :"
+  },
+  "sys.sign_in.confirmation_body": {
+    "en": "If this address has platform access, a link has just been sent to it.",
+    "fr": "Si cette adresse dispose d'un accès plateforme, un lien vient de lui être envoyé."
+  },
+  "sys.sign_in.email_label": {
+    "en": "Email address",
+    "fr": "Adresse e-mail"
+  },
+  "sys.sign_in.email_placeholder": {
+    "en": "you@captain.food",
+    "fr": "vous@captain.food"
+  },
+  "sys.sign_in.header": {
+    "en": "Captain.Food — internal tools",
+    "fr": "Captain.Food — outils internes"
+  },
+  "sys.sign_in.no_password": {
+    "en": "No password: the link replaces it.",
+    "fr": "Aucun mot de passe : le lien remplace le mot de passe."
+  },
+  "sys.sign_in.open_on_device": {
+    "en": "We'll send you a link. Open it on this device.",
+    "fr": "Nous vous envoyons un lien. Ouvrez-le sur cet appareil."
+  },
+  "sys.sign_in.request_link": {
+    "en": "Send my sign-in link",
+    "fr": "Recevoir mon lien de connexion"
+  },
+  "sys.sign_in.sending": {
+    "en": "Sending…",
+    "fr": "Envoi en cours…"
+  },
+  "sys.sign_in.support_lead": {
+    "en": "A problem? support@captain.food",
+    "fr": "Un problème ? support@captain.food"
+  },
+  "sys.sign_in.title": {
+    "en": "Sign in",
+    "fr": "Connexion"
+  },
+  "sys.sign_in_return.back_to_sign_in": {
+    "en": "Back to sign-in",
+    "fr": "Retour à la connexion"
+  },
+  "sys.sign_in_return.failed": {
+    "en": "This link is invalid or has expired. Please request a new one.",
+    "fr": "Ce lien est invalide ou a expiré. Merci d'en demander un nouveau."
+  },
+  "sys.sign_in_return.no_token": {
+    "en": "This link is incomplete. Please request a new one.",
+    "fr": "Ce lien est incomplet. Merci d'en demander un nouveau."
+  },
+  "sys.sign_in_return.title": {
+    "en": "Signing you in…",
+    "fr": "Connexion en cours…"
+  },
+  "sys.sign_in_return.working": {
+    "en": "Please wait, we're checking your link…",
+    "fr": "Merci de patienter, nous vérifions votre lien…"
+  },
   "tip.custom": {
     "en": "Other amount",
     "fr": "Autre montant"
