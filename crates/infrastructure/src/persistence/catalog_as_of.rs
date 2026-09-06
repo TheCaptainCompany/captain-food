@@ -128,16 +128,20 @@ impl PgAsOfCatalogRepository {
     /// after it returns). Fails CLOSED (round 2, vernon B1/young B1/obs B6): if the highest version
     /// [`fetch_rows`] returned (technical rows included) is not exactly the requested coordinate, the
     /// coordinate is absent or beyond head, and this returns `Err` rather than silently answering
-    /// with whatever the range happened to contain.
+    /// with whatever the range happened to contain — recording the refusal onto the caller's span
+    /// (round 3, obs NB2) before returning, since a bare `Err` propagated up leaves the span with no
+    /// `otel.status_code` and a refusal indistinguishable from a success.
     async fn load_range(
         &self,
         stream: &str,
         version: CatalogVersion,
+        span: &tracing::Span,
     ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize), DomainError> {
         let rows = self.fetch_rows(stream, version).await?;
         let stream_length = rows.len();
         let highest = rows.iter().map(|(v, _, _)| *v).max();
         if highest != Some(version.get()) {
+            telemetry::spans::record_catalog_as_of_fold_error(span, "coordinate_beyond_head");
             return Err(db_err(format!(
                 "coordinate {} is absent or beyond head on stream {stream} (highest available \
                  version: {highest:?})",
@@ -166,7 +170,7 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
         let span = telemetry::spans::catalog_as_of_fold(&catalog_id.0.to_string(), version.get());
         let span_for_record = span.clone();
         async move {
-            let (events, stream_length) = self.load_range(&stream, version).await?;
+            let (events, stream_length) = self.load_range(&stream, version, &span_for_record).await?;
             // `load_range` already fails closed when the range is short of `version`, so every
             // event here has its own version <= `version` by construction; `from_stream`'s own
             // per-event-version filter is still applied (defence in depth, never dead code at this
