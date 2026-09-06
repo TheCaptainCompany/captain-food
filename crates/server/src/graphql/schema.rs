@@ -287,6 +287,11 @@ mod tests {
             "input MetadataInput {",
             "registerRestaurant(input: RegisterRestaurantInput!, metadata: MetadataInput): MutationAcceptance!",
             "verifyPhone(input: VerifyPhoneInput!, metadata: MetadataInput): MutationAcceptance!",
+            // ADR-20260906-192007 D-C: `expectedTotal`'s `deprecated:` key must reach the BUILT
+            // async_graphql schema's own served SDL, never only the hand-emitted
+            // specs/generated/schema.generated.graphql -- the two are different renderers over the
+            // same model, and a client integrates against the SERVED one.
+            "expectedTotal: MoneyInput @deprecated",
             // Subscriptions (subscription_block's runtime mirror).
             "type Subscription {",
             "orderStatusChanged(input: OrderStatusChangedSubscriptionInput!): Order!",
