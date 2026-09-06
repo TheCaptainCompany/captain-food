@@ -20273,3 +20273,33 @@ mod graphql_role_limits_gate {
         }
     }
 }
+
+/// #921 item 1 / ADR-20260808-171056: `domain_events.version` is 1-based, matching what the
+/// writer has always appended (`crates/infrastructure/src/persistence/event_store.rs`:
+/// `expected_version + index as i64 + 1`, so the first event in a stream is version 1, not 0).
+/// The spec note must say 1-based and must never say 0-based again.
+#[test]
+fn eventstore_version_note_matches_the_writer() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let yaml = std::fs::read_to_string(root.join("specs/database/tables/eventstore.yaml"))
+        .expect("read eventstore.yaml");
+    let doc: Value = serde_yaml::from_str(&yaml).expect("parse eventstore.yaml");
+    let note = doc
+        .get("domain_events")
+        .and_then(|t| t.get("columns"))
+        .and_then(|c| c.get("version"))
+        .and_then(|v| v.get("note"))
+        .and_then(|n| n.as_str())
+        .expect("domain_events.version.note present")
+        .to_string();
+    assert!(
+        !note.to_lowercase().contains("0-based"),
+        "eventstore.yaml version note must say 1-based, the writer appends expected_version \
+         plus index plus 1 (first event = 1) -- ADR-20260808-171056; got: {note:?}"
+    );
+    assert!(
+        note.contains("1-based"),
+        "eventstore.yaml version note must say 1-based, the writer appends expected_version \
+         plus index plus 1 (first event = 1) -- ADR-20260808-171056; got: {note:?}"
+    );
+}
