@@ -528,6 +528,18 @@ pub(crate) mod test_support {
         }
     }
 
+    /// So a test can keep its own `Arc<FakeTransport>` handle (to read `call_count()`/`call(i)`)
+    /// after moving a clone of it into a `Box<dyn Transport>` — the SAME need
+    /// [`super::Refresher`]'s `Arc<CountingRefresher>` impl below exists for (#904, needed once
+    /// `RefreshingTransport` wraps a `FakeTransport` in `pending.rs`'s own tests).
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl Transport for std::sync::Arc<FakeTransport> {
+        async fn execute(&self, document: &str, variables: Value) -> Result<Value, TransportError> {
+            FakeTransport::execute(self, document, variables).await
+        }
+    }
+
     /// The [`super::Refresher`] test double (#904): counts calls, answers a scripted outcome —
     /// never touches a network. `AtomicUsize`, not `Cell`, for the same `Sync` reason
     /// [`super::RefreshingTransport`] itself uses `AtomicBool` (see its doc comment).
