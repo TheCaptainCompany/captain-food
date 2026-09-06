@@ -186,7 +186,7 @@ keys:
       `quote` word is slice 3b's). OFF is NOT a fallback of a failed fold: it is TODAY'S read,
       stated explicitly as the closed arm — `CatalogSnapshot::load` + `price_cart` against the live
       catalog PROJECTION, exactly as it has always run, carrying no coordinate. A fold failure with
-      the door OPEN (the coordinate absent, the stream unreadable, or over the request deadline) is
+      the door OPEN (the coordinate absent, or the stream unreadable) is
       `technical_error` through the EXISTING unresolvable-at-read path
       (`errors.yaml#/PriceUnresolvable`'s sibling classification, ADR-20260810-112836 §6) — NEVER a
       HEAD/projection fallback, and never presented as a price change. `decisionRow` binds this key

@@ -12,11 +12,16 @@ question: 'What must exist before `RUN_FOLD_PRICED_CART_READ` is flipped in prod
   `metrics`, `catalog_as_of_stream_length` and `catalog_as_of_payload_bytes` histograms
   (`attributes: []` -- no bounded population exists for catalog/tenant), the dead-man counter
   `catalog_as_of_reads_total{outcome}` (applied|refused) so a HEAD-fallback regression cannot hide
-  as silence, `business.correlation_id` recorded (not left Empty); (3) the walk drill -- farley:
+  as silence, `business.correlation_id` recorded (not left Empty) -- the telemetry hygiene fence,
+  stated not merely named: no customer or contact attribute is recorded beside the coordinate;
+  `business.correlation_id` is a request id, pseudonymous by construction; `attributes: []` on every
+  as-of histogram; (3) the walk drill -- farley:
   point the cart-paint leg of `tools/walk/` at the gated read with the door ON, once, before any
   production flip; (4) slice 3b''s signed quote token exists and is live -- a coordinate nobody is
   held to is inventory (holub): a fold-priced `cart.current` with no downstream commitment mechanism
-  is display-only work, not the money-path fix #816 needs; (5) dba''s preconditions on the
+  is display-only work, not the money-path fix #816 needs -- 3b ships as ONE deliverable with the
+  command-change slice (PROP §11): the customer is charged the price they were shown, or told why it
+  changed, in words; (5) dba''s preconditions on the
   read-path -> write-database crossing (b) introduces (STO-7/STO-8 cited in the ADR, the door is the
   containment): [#921 "Priced quote token slice 2 follow-ups"](https://github.com/TheCaptainCompany/captain-food/issues/921)
   item 2 (content-hash suppression of an unchanged `CatalogImported`) LANDED before the door opens
@@ -24,7 +29,26 @@ question: 'What must exist before `RUN_FOLD_PRICED_CART_READ` is flipped in prod
   L -- unsuppressed resyncs cost the buffer cache real memory at scale); the buffer-cache instrument
   named (`pg_statio_user_tables` hit ratio on `domain_events`); (6) dba''s option (a) (a projected
   `catalog.version` column + a two-folds-agree gate) stays on the record as the alternative,
-  re-weighed at 3b/4 on MEASURED cost if the fold-priced read''s wall crossing proves too dear.'
+  re-weighed at 3b/4 on MEASURED cost if the fold-priced read''s wall crossing proves too dear --
+  discharged when 3b/4''s MEASURED cost of the fold-priced read on the production distribution is
+  recorded on this row and option (a) is either adopted by a new ADR or struck here; (7) the door MAY NOT open on `carts` until the fan-out is bounded or the list is excluded from the
+  open arm -- preferred shape at 3b (graphql): narrow the door to the two single-cart reads
+  `cart.current` and `cart`; the row''s phase-0 budget models ONE leg per read and has no per-request
+  multiplier; (8) the deadline arm -- a bounded L or a statement timeout on the `at_head` read --
+  exists before the flip; today a slow fold is unbounded (no timeout, `LIMIT` or
+  `statement_timeout` bounds it; the pool sets only `acquire_timeout`); (9) the customer-facing
+  no-price cart state (no number on the total row/CTA) is what the customer sees on a fold refusal;
+  it must render before the flip (ux); (10) a lag-induced `PriceMismatch` reaching the consumer
+  through price-change copy is a misleading-information exposure; before the flip, the copy shown on
+  a fold/projection disagreement is the honest no-price state or a technical error, never "the price
+  changed" (legal); (11) `specs/ordering/rules.yaml:60-65` still asserts the display guarantee
+  absolutely while `processmanager.yaml:68` says it narrows; the flip must not precede slice 4''s
+  reconciliation of that rule (legal); (12) the projection stays a VETO on the open arm: `price_cart_at`
+  needs HEAD metadata per line/option, so under projector lag or a rebuild the read REFUSES (never
+  mis-charges); the coordinate does not yet make the read rebuild-neutral; 3b inherits the veto
+  (young); (13) the peak-shape drill: N concurrent priced reads at peak-shaped arrival (Friday
+  19:00-21:30 shape) against the real pool of 5, once, before the flip -- the functional walk drill
+  (item 3) does not exercise concurrency (farley).'
 owner: team
 opened: '2026-09-06'
 capacity: team
@@ -47,7 +71,9 @@ note: 'The key is consumed at the READ door only, never a write: `cart.current`/
   fleet-parity EVIDENCE only; the standalone fleet never serves GraphQL and never opens this door in
   practice. Closing this row: (1)-(2) land WITH the code in this same PR (slice 3a, PR #922); (3)
   is a one-time drill run before any production flip; (4) is slice 3b, the very next card in the
-  same lane (holub''s WIP-one condition, journal 2026-09-06); (5) is #921 item 2, a named
+  same lane (holub''s WIP-one condition, journal 2026-09-06) -- 3b and the command-change slice ship
+  as ONE deliverable: the customer is charged the price they were shown, or told why it changed, in
+  words; (5) is #921 item 2, a named
   precondition of the flip, not of this door existing dark. Consulted at the 2026-09-06 briefing:
   business (the budget as headroom, the cheapest-lever order), young (the rebuild-window rejection
   of option (a)), vernon (one read, no mixed authority, nothing durable in 3a), holub (the

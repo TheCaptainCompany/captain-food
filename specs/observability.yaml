@@ -516,9 +516,14 @@ cart-price:
         - { key: "business.failure_reason", type: string, required: false }
 
   metrics:
-    # Read-side pricing latency: an in-memory fold over already-loaded offers — if this histogram
-    # drifts toward the budget, the per-request memoized catalog read (PROP §8) is the lever, and
-    # this metric is what tells us BEFORE it hurts at peak.
+    # Read-side pricing latency, either of TWO arms behind RUN_FOLD_PRICED_CART_READ: CLOSED (the
+    # default everywhere) prices from the already-loaded `catalog` projection, an in-memory fold over
+    # offers the read already holds; OPEN (PROP-20260831-134539 slice 3a) prices from ONE event-stream
+    # range read of `Catalog-<id>` to head plus the fold over it (`catalog.as_of.fold`, timed
+    # separately by `catalog_as_of_fold_ms` below). If this histogram drifts toward the budget on the
+    # CLOSED arm, the per-request memoized catalog read (PROP §8) is the lever; on the OPEN arm see
+    # `QUOTE-MINT-PRECONDITIONS`'s cheapest-lever order. This metric is what tells us BEFORE it hurts
+    # at peak, on either arm.
     - { name: "cart_price_ms", type: histogram, attributes: [] }
     # DEFECT counter (the checkout_degraded_render_total pattern): a cart whose price cannot be
     # resolved at read renders the honest no-price state — a sale silently lost, never an error

@@ -58,12 +58,16 @@ read correctly, not one that needed inventing.
 priced read the mint attaches to. It is the `data_requirement` of exactly `/cart`
 (`specs/screens/restaurant_frontoffice.yaml:406`) and `/checkout` (`:467`); the menu screen and the
 cart FAB never call it. Minting there is once per checkout-side render, never per menu paint, never
-on the ETA surface, and it pins BOTH screens with ONE coordinate (ux STOP: never a split mint,
-one screen pinned and the other not).
+on the ETA surface: one coordinate per priced read, on both screens — the /cart→/checkout seam (two
+reads, two mints, two moments) is recorded OPEN for 3b/4, never a claim that one mint pins both. The
+door gates all THREE resolvers (`cart.current`, `cart`, `carts`) through the one `priced()` seam;
+`carts` multiplies the mint N× (up to 50 serial unbounded fold reads per render on a pool of 5,
+`crates/infrastructure/src/persistence/cart.rs:43`'s `LIMIT 50`) — the register row's item (7) is the
+flip precondition that fan-out must clear before the door opens on `carts`.
 
 **D2 — ONE authority, no mixed sourcing.** With the door OPEN, the priced read prices FROM THE
 FOLD: one unbounded range read of `Catalog-{id}` to head, through the dedicated port op
-`AsOfPriceAuthority::at_head(catalog_id) -> Result<(AsOfCatalog, CatalogVersion), DomainError>`
+`AsOfPriceAuthority::at_head(catalog_id, correlation_id) -> Result<(AsOfCatalog, CatalogVersion), DomainError>`
 (never `latest_version()`, never `Option<CatalogVersion>`, never a relaxed `load_range` check —
 landed in the first run, deliverable 1). The coordinate carried is the CEILING the fold was bounded
 at (= the highest raw row version the adapter verified, non-`Option`); `AsOfCatalog` has no
@@ -98,9 +102,12 @@ composition roots (`crates/server/src/lib.rs`, `crates/infrastructure/src/mailbo
 the standalone declaration is the PRE-RECORDED carve-out of ADR-20260904-081527 §8's standing
 clause, consumed here for the first time since it was recorded). CLOSED = today's projection-priced
 read, unchanged, explicitly stated as the closed arm rather than a fallback. OPEN + fold `Err`
-(coordinate absent, stream unreadable, or over the request deadline) = `technical_error` through the
+(coordinate absent, or stream unreadable) = `technical_error` through the
 EXISTING unresolvable-at-read path (`ADR-20260810-112836` §6; the same `PriceUnresolvable`-adjacent
 classification `price_cart` already uses) — NEVER a HEAD/projection fallback (every lens's STOP).
+**No timeout, `LIMIT` or `statement_timeout` bounds `at_head` today** (the pool sets only
+`acquire_timeout`) — a slow fold is unbounded; the deadline arm (a bounded L or a statement timeout
+on the read) is a named flip precondition, not a shipped behaviour (register row item added below).
 New register row `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open, team) names what must hold
 before the flip: the phase-0 budget (D6), the observability contract rows (D5), the walk drill
 (farley), 3b's signed quote (D4/holub), and dba's preconditions (D9).
@@ -127,8 +134,9 @@ escalate line; ALL `UNVERIFIED input` — lab, one container, peak-unverified; p
 deliberately suspended, ADR-20260817-105844, so no distribution exists to compare against).
 "Observed production L" is NOT a blocking precondition (holub: unsatisfiable while suspended) — the
 CONTRACT ROW is; the max-L NUMBER is deferred, the BEHAVIOUR above it is decided now: refuse
-(`technical_error`), never HEAD. Cheapest lever order: content-hash import suppression (#921 item 2)
-> narrow fold > refuse; SNAP-1 last.
+(`technical_error`), never HEAD. Cheapest lever order: `payload_bytes` read from Postgres
+(`sum(octet_length(payload::text))` in the same SELECT) or sampled, never re-serialized per row >
+content-hash import suppression (#921 item 2) > narrow fold > refuse; SNAP-1 last.
 
 **D7 — refusal states are the screen's business, not 3a's.** 3a changes NO reply shape: a fold
 failure surfaces through the existing `technical_error` path, exactly like today's
@@ -161,6 +169,11 @@ add-to-cart/checkout; this door adds a SECOND read path (the event-stream range 
 that is the containment — a rolling deploy in which half the fleet folds and half projects is made
 observable, not invisible, by the door's own `declare_flag` fleet-parity evidence at both
 composition roots (ADR-20260905-223957 §5, ADR-20260906-113444).
+
+**The projection stays a VETO on the open arm (young NB9).** `price_cart_at` needs HEAD metadata per
+line/option (product/option names, images, presentation — the fold carries no labels, by slice 2's
+own design), so under projector lag or a rebuild the fold-priced read REFUSES rather than mis-charges
+— the coordinate does not yet make this read rebuild-neutral, and 3b inherits the veto unchanged.
 
 ## Reversal check
 
