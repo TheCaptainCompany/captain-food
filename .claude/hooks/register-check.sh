@@ -304,11 +304,14 @@ fi
 # `ADR-2026` from matching the 54 prefixless files, a token the grammar cannot produce, so it is
 # defence in depth kept for parity with the Rust side rather than a live guard. The stamp era must
 # try BOTH the prefixed and the prefixless filename; that part is load-bearing.
-resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id; sets
-                    # RESOLVED_PATH to it on success (Rule 1, #910 -- the trail loop below only
-                    # needed 0/1, the red-first check also needs WHICH file to grep).
+resolve_record() { # resolve_record <id> -> prints the resolved path on STDOUT and returns 0 iff a
+                    # record file on disk carries that id, or prints nothing and returns 1 (Rule 1,
+                    # #910 -- the trail loop below only needed 0/1, the red-first check also needs
+                    # WHICH file to grep). #928 item 4: no global -- every caller captures its own
+                    # local via command substitution, so a later resolution (e.g. the none-arm's
+                    # own lookup) can never clobber a path an earlier reader in the same trail is
+                    # still holding.
   _id="$1"
-  RESOLVED_PATH=""
   case "$_id" in
     ADR-*)
       _rest="${_id#ADR-}"
@@ -336,7 +339,7 @@ resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries 
   # `PROP-20260809-003000--D1..D7`, which enter through the `PROP-*` arm, glob no proposal FILE
   # (the `--D1` suffix is not part of any filename) and would otherwise be refused; and any future
   # row whose key begins with another kind's prefix.
-  for _p in "$@" "$DOCS_DIR/decisions/$_id.yaml"; do [ -e "$_p" ] && { RESOLVED_PATH="$_p"; return 0; }; done
+  for _p in "$@" "$DOCS_DIR/decisions/$_id.yaml"; do [ -e "$_p" ] && { printf '%s\n' "$_p"; return 0; }; done
   return 1
 }
 
@@ -437,7 +440,7 @@ if [ -n "$payload" ] && [ "$TOOL_NAME" = "Agent" ]; then
     dids="$(printf '%s' "$dline" | grep -oE "$DISPATCH_RECORD_ID" || true)"
     [ -n "$dids" ] && saw_id=yes
     for did in $dids; do
-      if resolve_record "$did"; then trail_ok=yes; break 2; fi
+      if resolve_record "$did" >/dev/null; then trail_ok=yes; break 2; fi
     done
   done <<EOF
 $(printf '%s' "$payload" | grep -oE "${MARKER}[^\"\\\\]*")
@@ -453,10 +456,10 @@ EOF
       [ -n "$dline" ] || continue
       printf '%s' "$dline" | grep -qE "$NO_RECORD" && continue
       for did in $(printf '%s' "$dline" | grep -oE "$DISPATCH_RECORD_ID" || true); do
-        resolve_record "$did" || continue
+        _rp="$(resolve_record "$did")" || continue
         case " $rf_files " in
-          *" $RESOLVED_PATH "*) : ;;
-          *) rf_files="${rf_files:+$rf_files }$RESOLVED_PATH" ;;
+          *" $_rp "*) : ;;
+          *) rf_files="${rf_files:+$rf_files }$_rp" ;;
         esac
       done
     done <<EOF
@@ -498,9 +501,9 @@ EOF
           [Nn]one' — '*' names no test')
             _none_id="${entry#*' — '}"
             _none_id="${_none_id% names no test}"
-            if resolve_record "$_none_id"; then
+            if _none_rp="$(resolve_record "$_none_id")"; then
               case " $rf_files " in
-                *" $RESOLVED_PATH "*) rf_saw_none=yes ;;
+                *" $_none_rp "*) rf_saw_none=yes ;;
               esac
             fi
             continue ;;
@@ -539,7 +542,7 @@ EOF
         [ -z "$rrecord" ] && continue
         printf '%s' "$rline_no" | grep -qE '^[0-9]+$' || continue
         [ "$rline_no" -ge 1 ] || continue
-        resolve_record "$rrecord" || continue
+        _rrp="$(resolve_record "$rrecord")" || continue
         # No separate line-count/range check: `sed -n Np` on a line past EOF prints nothing, and
         # an empty string cannot match the token regex either -- so "the line exists AND carries
         # a token" is exactly what this one grep already proves, with no `wc -l` needed. Fewer
@@ -547,7 +550,7 @@ EOF
         # file whose last line lacks a trailing newline would undercount by one and reject that
         # file's own final line even when `sed` prints it correctly (found while fixing #910's
         # own corpus test, tools/codegen-rs/src/tests.rs).
-        sed -n "${rline_no}p" "$RESOLVED_PATH" | grep -qiE "$REDFIRST_TOKENS" || continue
+        sed -n "${rline_no}p" "$_rrp" | grep -qiE "$REDFIRST_TOKENS" || continue
         rf_entry_ok=yes
       done <<EOF2
 $rf_lines
