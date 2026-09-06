@@ -622,6 +622,22 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
 
     const ITERATIONS: u32 = 10;
 
+    // Benchmark honesty (#921 item 13(b), beck): the SPLIT legs (three separate un-integrated
+    // calls: fetch_rows, decode_rows, from_stream) and the INTEGRATED end-to-end call (`as_of`,
+    // one round trip doing strictly the SAME work plus the coordinate check and the span) are two
+    // different measurement approaches over the same stream at the same coordinate. If the split
+    // legs summed to MORE than e2e, the two approaches would disagree about what the read costs --
+    // a phantom the executor would have to explain away by hand every time this benchmark runs.
+    fn assert_legs_do_not_exceed_e2e(stats: &Stats, l: i32, v: i64) {
+        let legs_sum = stats.sql_median + stats.decode_median + stats.fold_median;
+        assert!(
+            legs_sum <= stats.e2e_median,
+            "sql+decode+fold median ({legs_sum:?}) exceeds the end-to-end median ({:?}) at L={l} \
+             V={v} -- the split-leg measurement and the integrated read disagree about the cost",
+            stats.e2e_median
+        );
+    }
+
     // Arm (a): the mutant detector. Its assertion is events_applied, not a timer.
     let partial = measure(&repo, &stream, catalog_id, V_PARTIAL, ITERATIONS).await;
     assert_eq!(
@@ -659,6 +675,7 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
          at L={L} V={V_PARTIAL}",
         partial.e2e_median
     );
+    assert_legs_do_not_exceed_e2e(&partial, L, V_PARTIAL);
 
     // Arm (b): V = L (head) -- the READ PRODUCTION ACTUALLY PERFORMS (business NB1/dba B1).
     let head = measure(&repo, &stream, catalog_id, L as i64, ITERATIONS).await;
@@ -687,20 +704,130 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
         head.e2e_max,
     );
 
-    // Assert on the MEDIAN at magnitude scale (~10x the ~85-90ms end-to-end median measured at
-    // authoring on this container, round-2 card D2) -- a regression detector, never an SLO, and
-    // never a max-based assert in shared-CI Postgres (farley round-1 NAF: no controlling record on
-    // a wall-clock MAX assert; the events-count assert already catches the mutant this arm exists
-    // for). Business's stop numbers (>150ms end-to-end MAX escalate before slice 3, >50ms ship dark
-    // with a named mitigation -- read from the printed line above, not from this assert) are a
-    // SEPARATE, protocol-level judgement the executor makes once at authoring time: round 2's
-    // measurement (median ~85-90ms, max up to ~140ms across several runs) is in the ship-dark band,
-    // recorded with its mitigation in the PR body and PROP-20260831-134539 §12.
-    const HEAD_CEILING: Duration = Duration::from_millis(900);
+    // Assert on the MEDIAN at magnitude scale -- a regression detector, never an SLO, and never a
+    // max-based assert in shared-CI Postgres (farley round-1 NAF: no controlling record on a
+    // wall-clock MAX assert; the events-count assert already catches the mutant this arm exists
+    // for). CEILING RESTATED AS A MULTIPLE OF D6's TARGET, WITH THE ANTECEDENT (#921 item 13(b),
+    // ADR-20260817-105845 -- no bare number without antecedents): D6's phase-0 as-of-leg headroom
+    // target is <= 150 ms p95 (`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml`, itself UNVERIFIED
+    // input, lab, one container, peak-unverified) -- this ceiling is 6x that target (900 ms), the
+    // SAME order-of-magnitude multiple farley's gate proves (non-regression, never a tight SLO).
+    // Business's stop numbers (>150ms end-to-end MAX escalate before slice 3b, >50ms ship dark with
+    // a named mitigation -- read from the printed line above, not from this assert) are a SEPARATE,
+    // protocol-level judgement the executor makes once at authoring time: round 2's measurement
+    // (median ~85-90ms, max up to ~140ms across several runs) is in the ship-dark band, recorded
+    // with its mitigation in the PR body and PROP-20260831-134539 §12.
+    const D6_TARGET_P95_MS: u64 = 150; // QUOTE-MINT-PRECONDITIONS, UNVERIFIED input
+    const HEAD_CEILING: Duration = Duration::from_millis(D6_TARGET_P95_MS * 6);
     assert!(
         head.e2e_median < HEAD_CEILING,
         "median exceeds the magnitude-regression ceiling: median={:?} ceiling={HEAD_CEILING:?} \
-         at L={L} V=head",
+         (6x D6's {D6_TARGET_P95_MS}ms target) at L={L} V=head",
         head.e2e_median
     );
+    assert_legs_do_not_exceed_e2e(&head, L, L as i64);
+
+    // Arm (c): at_head -- the NATIVE unbounded read this slice adds (D2), the ONE call the mint
+    // actually performs in production (never `as_of`, which stays dark). Measured the SAME way,
+    // over `fetch_all_rows`/`decode_rows`/`from_stream`/`at_head` instead of
+    // `fetch_rows`/`decode_rows`/`from_stream`/`as_of` -- the split legs are the SAME cost as arm
+    // (b) by construction (both read every row of the same L-length stream), so this arm exists to
+    // pin the INTEGRATED `at_head` call specifically, not to re-measure the split legs.
+    async fn measure_at_head(
+        repo: &PgAsOfCatalogRepository,
+        stream: &str,
+        catalog_id: uuid::Uuid,
+        correlation_id: uuid::Uuid,
+        iterations: u32,
+    ) -> Stats {
+        let mut sql_samples = Vec::with_capacity(iterations as usize);
+        let mut decode_samples = Vec::with_capacity(iterations as usize);
+        let mut fold_samples = Vec::with_capacity(iterations as usize);
+        let mut e2e_samples = Vec::with_capacity(iterations as usize);
+        let mut payload_bytes = 0usize;
+        let mut stream_length = 0usize;
+        let mut events_applied = 0usize;
+
+        for i in 0..iterations {
+            let sql_start = Instant::now();
+            let rows = repo.fetch_all_rows(stream).await.expect("fetch_all_rows");
+            sql_samples.push(sql_start.elapsed());
+            stream_length = rows.len();
+            if i == 0 {
+                payload_bytes = rows.iter().map(|(_, _, payload)| serde_json::to_vec(payload).unwrap().len()).sum();
+            }
+            let highest = rows.iter().map(|(v, _, _)| *v).max().expect("non-empty stream");
+            let coordinate = CatalogVersion::try_new(highest).unwrap();
+
+            let decode_start = Instant::now();
+            let events = infrastructure::PgAsOfCatalogRepository::decode_rows(rows).expect("decode_rows");
+            decode_samples.push(decode_start.elapsed());
+            events_applied = events.len();
+
+            let fold_start = Instant::now();
+            let folded = domain::catalog_as_of::AsOfCatalog::from_stream(&events, coordinate);
+            fold_samples.push(fold_start.elapsed());
+            std::hint::black_box(&folded);
+
+            let e2e_start = Instant::now();
+            let native = repo.at_head(CatalogId(catalog_id), correlation_id).await.expect("at_head");
+            e2e_samples.push(e2e_start.elapsed());
+            std::hint::black_box(&native);
+        }
+
+        let median_of = |mut s: Vec<Duration>| -> (Duration, Duration) {
+            s.sort();
+            (s[s.len() / 2], *s.iter().max().unwrap())
+        };
+        let (sql_median, sql_max) = median_of(sql_samples);
+        let (decode_median, decode_max) = median_of(decode_samples);
+        let (fold_median, fold_max) = median_of(fold_samples);
+        let (e2e_median, e2e_max) = median_of(e2e_samples);
+        Stats {
+            sql_median,
+            sql_max,
+            decode_median,
+            decode_max,
+            fold_median,
+            fold_max,
+            e2e_median,
+            e2e_max,
+            payload_bytes,
+            stream_length,
+            events_applied,
+        }
+    }
+
+    let native = measure_at_head(&repo, &stream, catalog_id, uuid::Uuid::new_v4(), ITERATIONS).await;
+    assert_eq!(
+        native.events_applied, native.stream_length,
+        "at head every returned row must be a business event applied (no technical rows seeded here)"
+    );
+    println!(
+        "at_head read, arm (c) NATIVE (the mint's own call, lab-measured, peak-unverified, \
+         import-shaped mix): L={L} iterations={ITERATIONS} stream_length={} events_applied={} \
+         payload_bytes={} sql median={:?} max_of_{ITERATIONS}={:?} decode median={:?} \
+         max_of_{ITERATIONS}={:?} fold median={:?} max_of_{ITERATIONS}={:?} native median={:?} \
+         max_of_{ITERATIONS}={:?}",
+        native.stream_length,
+        native.events_applied,
+        native.payload_bytes,
+        native.sql_median,
+        native.sql_max,
+        native.decode_median,
+        native.decode_max,
+        native.fold_median,
+        native.fold_max,
+        native.e2e_median,
+        native.e2e_max,
+    );
+    // The SAME 6x-D6-target ceiling as arm (b): `at_head` reads every row of the same L-length
+    // stream `as_of(V=L)` does, so the two calls cost the same order of magnitude by construction.
+    assert!(
+        native.e2e_median < HEAD_CEILING,
+        "native median exceeds the magnitude-regression ceiling: median={:?} ceiling={HEAD_CEILING:?} \
+         (6x D6's {D6_TARGET_P95_MS}ms target) at L={L}",
+        native.e2e_median
+    );
+    assert_legs_do_not_exceed_e2e(&native, L, L as i64);
 }
