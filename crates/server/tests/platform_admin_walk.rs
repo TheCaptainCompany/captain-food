@@ -123,9 +123,15 @@ async fn wait_for_events(pool: &PgPool, stream: &str, at_least: i64) -> i64 {
     panic!("stream {stream} did not reach {at_least} event(s) in time");
 }
 
-/// The one-shot bootstrap replays cleanly from `domain_events` alone (ADR-20260905-223957 §3): a
-/// seeded PROJECTION row could never pass this, because the projection is TRUNCATEd and the
-/// checkpoint reset to 0 between the dispatch and the re-check -- only the immutable fact survives.
+/// Round 2, R2-4 (dba): the NO-SEEDED-ROW proof, NOT the table's operational rebuild recipe --
+/// `platform_member`'s rule 1 FORBIDS TRUNCATE as the operational rebuild (the denial window it
+/// opens); this test's job is narrower and different: proving the one-shot bootstrap replays
+/// cleanly from `domain_events` alone, with NO seeded projection row able to fake a pass, because
+/// the projection is TRUNCATEd and the checkpoint reset to 0 between the dispatch and the
+/// re-check -- only the immutable fact survives. The DECLARED operational recipe (checkpoint
+/// reset, never TRUNCATE, no denial window) has its OWN test right below,
+/// `platform_admin_resolves_at_every_point_of_a_checkpoint_reset_replay` -- the
+/// `restaurant_membership.rs:~216` precedent transposed.
 #[tokio::test]
 async fn the_bootstrap_replays_from_domain_events_alone() {
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
@@ -172,6 +178,78 @@ async fn the_bootstrap_replays_from_domain_events_alone() {
         row.map(|(s,)| s),
         Some(auth_subject.to_string()),
         "the admin must resolve again after a from-zero replay -- the fact alone is the source of truth"
+    );
+}
+
+/// Round 2, R2-4 (dba): the DECLARED operational rebuild recipe for `platform_member`, as an
+/// executable test -- checkpoint reset, NEVER TRUNCATE (the `restaurant_membership.rs:~216`
+/// `member_resolves_at_every_point_of_a_checkpoint_reset_replay` precedent transposed). The row is
+/// never deleted by a reset alone, so it resolves at every point of the drain -- including the
+/// instant immediately after the reset, BEFORE any replay has run at all -- and the replay then
+/// rewrites it in place with no denial window. `the_bootstrap_replays_from_domain_events_alone`
+/// above is the DIFFERENT, narrower no-seeded-row proof (TRUNCATE + reset); this test is the one
+/// that proves the table's own rule 1 (rebuild = checkpoint reset, never TRUNCATE).
+#[tokio::test]
+async fn platform_admin_resolves_at_every_point_of_a_checkpoint_reset_replay() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("platform_admin_checkpoint_reset") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let auth_subject = "auth-first-admin-checkpoint-reset";
+    let code = server::bootstrap_platform_admin::dispatch(&url, auth_subject).await;
+    assert_eq!(code, 0, "the bootstrap dispatch must succeed");
+
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers(&pool, status_bus);
+
+    let platform_membership_id = server::bootstrap_platform_admin::platform_membership_id_for(auth_subject);
+    let stream = format!("PlatformMembership-{}", platform_membership_id.0);
+    wait_for_events(&pool, &stream, 1).await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (first drain)");
+
+    async fn platform_member_auth_subject(pool: &PgPool, id: uuid::Uuid) -> Option<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT auth_subject FROM platform_member WHERE platform_membership_id = $1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .expect("query platform_member")
+        .map(|(s,)| s)
+    }
+
+    assert_eq!(
+        platform_member_auth_subject(&pool, platform_membership_id.0).await.as_deref(),
+        Some(auth_subject),
+        "the admin resolves after the first drain"
+    );
+
+    // Checkpoint reset, NEVER TRUNCATE: rewind the PlatformMember checkpoint to 0.
+    let reset = sqlx::query("UPDATE projection_checkpoint SET position = 0 WHERE projector = 'PlatformMember'")
+        .execute(&pool)
+        .await
+        .expect("rewind the PlatformMember checkpoint");
+    assert_eq!(
+        reset.rows_affected(),
+        1,
+        "the projector name must match the registered 'PlatformMember' group -- a rename here \
+         would pass vacuously with 0 rows touched (the round-2 R2-4 beck finding, transposed)"
+    );
+
+    // The claim, checked at its strongest point: RIGHT AFTER the reset, BEFORE the replay runs.
+    assert_eq!(
+        platform_member_auth_subject(&pool, platform_membership_id.0).await.as_deref(),
+        Some(auth_subject),
+        "a checkpoint reset alone must never deny -- the row was never touched, no denial window"
+    );
+
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (replay)");
+    assert_eq!(
+        platform_member_auth_subject(&pool, platform_membership_id.0).await.as_deref(),
+        Some(auth_subject),
+        "the replay reproduces the same row -- rewritten in place, never seeded"
     );
 }
 
