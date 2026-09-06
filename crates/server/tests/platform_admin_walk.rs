@@ -74,6 +74,7 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         // THE DOOR UNDER TEST, ON: this walk proves the grant path, not the door-closed refusal
         // (that is `TestGrantPlatformAccessDoorClosed` in the behaviour suite).
         run_platform_access_grant: true,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone())),
         enforce_service_hours_guard: false,
         enforce_acceptance_timeout: false,

@@ -143,6 +143,7 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         run_member_sign_in_door: false,
         run_restaurant_invitation: false,
         run_platform_access_grant: false,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),

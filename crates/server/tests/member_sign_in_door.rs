@@ -186,6 +186,9 @@ impl IdentityService for ScriptedIdentity {
         self.member_stamps.lock().expect("scripted identity").push(input.auth_ref.0);
         Ok(())
     }
+    async fn stamp_admin_claim(&self, input: application::generated::services::IdentityStampAdminClaimInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        panic!("the member door reached the ADMIN stamper for {} -- the stampers are selected at compile time and must never cross", input.auth_ref.0);
+    }
 }
 
 /// The `Member` read model's bridge, scripted: the known logins, and a COUNT of consultations --
@@ -329,6 +332,7 @@ async fn door(identity: ScriptedIdentity, members: ScriptedMembers, seam: Member
         run_member_sign_in_door: door_open,
         run_restaurant_invitation: false,
         run_platform_access_grant: false,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(UntouchablePlatformMembers),
     };
     Door { mailbox, identity, members, sessions, deps, app }

@@ -223,6 +223,13 @@ impl IdentityService for ScriptedIdentity {
     ) -> Result<(), DomainError> {
         panic!("the rider door never stamps MEMBER")
     }
+    async fn stamp_admin_claim(
+        &self,
+        _input: application::generated::services::IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        panic!("the rider door never stamps ADMIN")
+    }
 }
 
 /// The `Rider` read model's bridge, scripted: the known logins, and a COUNT of consultations — the
@@ -374,6 +381,7 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         run_member_sign_in_door: false,
         run_restaurant_invitation: false,
         run_platform_access_grant: false,
+        run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(unused.clone())),
     };
     Door { mailbox, identity, riders, sessions, deps, app }

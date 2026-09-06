@@ -99,6 +99,14 @@ impl IdentityService for AlwaysVerifiedAuth {
     ) -> Result<(), DomainError> {
         Ok(())
     }
+
+    async fn stamp_admin_claim(
+        &self,
+        _input: application::generated::services::IdentityStampAdminClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
 }
 
 fn verify_phone_cmd(customer_id: uuid::Uuid) -> VerifyPhone {

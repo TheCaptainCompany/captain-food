@@ -119,6 +119,9 @@ impl IdentityService for ScriptedIdentity {
     async fn stamp_member_claim(&self, _i: IdentityStampMemberClaimInput, _m: &ServiceCallMeta) -> Result<(), DomainError> {
         Ok(())
     }
+    async fn stamp_admin_claim(&self, _i: application::generated::services::IdentityStampAdminClaimInput, _m: &ServiceCallMeta) -> Result<(), DomainError> {
+        Ok(())
+    }
 }
 
 fn token(s: &str) -> EmailVerificationToken {
