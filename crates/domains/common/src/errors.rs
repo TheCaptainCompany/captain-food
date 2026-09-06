@@ -205,3 +205,11 @@ pub const PLATFORM_ACCESS_ALREADY_GRANTED: ErrorDef = ErrorDef {
     message_en: "This login already holds platform access under a different membership.",
     message_fr: "Cette identité de connexion dispose déjà d'un accès plateforme sous une autre adhésion.",
 };
+
+/// Round 2, R2-5 (young + vernon, ADR-20260905-223957 §1/§2): `platformMembershipId` is CALLER-MINTED (ADR-0034) but not FREELY so -- it must equal `UUIDv5(PLATFORM_MEMBERSHIP_ NAMESPACE, authSubject)`, the SAME formula the one-shot bootstrap already uses (`platform_membership_id_for` in `crates/application/src/commands.rs`). Collapsing the id into stream identity turns "one platform membership per subject" from a projection-read-plus-UNIQUE arbiter (which fires at projection time under `DbFaultPolicy::Skip` and can wedge the read model on a genuine race) into a set invariant the fold's own exists-once check enforces for free: two grants for one subject ALWAYS target the SAME stream. The bridge/`PlatformAccessAlreadyGranted` read stays as a belt, not the arbiter (see the comment on `grant_platform_access`).
+/// Context: `authSubject`, `platformMembershipId`.
+pub const PLATFORM_MEMBERSHIP_ID_MISMATCH: ErrorDef = ErrorDef {
+    code: "PlatformMembershipIdMismatch",
+    message_en: "This platform membership id does not match the required derivation for this login.",
+    message_fr: "Cet identifiant d'adhésion plateforme ne correspond pas à la dérivation requise pour cette identité de connexion.",
+};

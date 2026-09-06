@@ -180,3 +180,4 @@ PlatformMembership:
       throws:
         - { $ref: 'errors.yaml#/PlatformAccessGrantDoorClosed' }
         - { $ref: 'errors.yaml#/PlatformAccessAlreadyGranted' }
+        - { $ref: 'errors.yaml#/PlatformMembershipIdMismatch' }

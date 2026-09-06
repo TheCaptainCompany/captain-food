@@ -10,10 +10,12 @@
 //! Invocation: `server bootstrap-platform-admin` (any DATABASE_URL-carrying environment). Reads
 //! `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` (a declared SECRET, `specs/common/configuration.yaml`,
 //! `required: []` -- never required at ordinary boot; the founder provisions it only when this is
-//! actually run, ADMIN-DOOR-PRECONDITIONS item 1). Mints a DETERMINISTIC `platformMembershipId` =
-//! `UUIDv5(namespace, authSubject)`, so running it twice targets the SAME stream and the fold's
-//! own idempotent `NoChange` is what makes a second run inert -- never a script-level "already
-//! ran" check, which would be a second, competing source of truth. Dispatches
+//! actually run, ADMIN-DOOR-PRECONDITIONS item 1). Mints the DETERMINISTIC `platformMembershipId`
+//! via [`application::commands::platform_membership_id_for`] (round 2, R2-5: the ONE place that
+//! formula lives, so this bootstrap and the handler's own `PlatformMembershipIdMismatch` check can
+//! never drift apart), so running it twice targets the SAME stream and the fold's own idempotent
+//! `NoChange` is what makes a second run inert -- never a script-level "already ran" check, which
+//! would be a second, competing source of truth. Dispatches
 //! `GrantPlatformAccess` (`basis: CAPTAIN_ONBOARDING`) through the SAME `PlatformMembershipClient`
 //! the GraphQL door uses, with an actor envelope naming the bootstrap itself as the acting
 //! principal (`user_type: "ADMIN"`, a fixed deterministic `user_id` -- never the subject being
@@ -34,9 +36,13 @@ use actor_client::EnqueueOutcome;
 use domain::generated::commands::GrantPlatformAccess;
 use domain::generated::scalars::{AuthSubject, PlatformAccessBasis, PlatformMembershipId};
 
-/// Fixed UUIDv5 namespace for every id this subcommand derives -- NEVER change it: the derived
-/// `platformMembershipId`s are the idempotency keys of the whole bootstrap (the `sirene.rs`
-/// deterministic-id precedent).
+/// Fixed UUIDv5 namespace for the ENVELOPE-level ids this subcommand mints itself
+/// (`message_id`, `bootstrap_system_user_id`) -- NEVER change it. The `platformMembershipId`
+/// ITSELF is no longer derived here (round 2, R2-5): it is
+/// [`application::commands::platform_membership_id_for`], the ONE place that formula lives, so the
+/// handler's own `PlatformMembershipIdMismatch` check and this bootstrap can never silently drift
+/// apart. This namespace constant happens to share its literal with that function's namespace
+/// (both are stable, both predate the split) but is no longer the source of truth for the grant id.
 fn bootstrap_namespace() -> uuid::Uuid {
     uuid::Uuid::new_v5(
         &uuid::Uuid::NAMESPACE_URL,
@@ -44,13 +50,12 @@ fn bootstrap_namespace() -> uuid::Uuid {
     )
 }
 
-/// The DETERMINISTIC `platformMembershipId` for one `authSubject` -- the same subject always
-/// derives the same id, so a re-run targets the SAME `PlatformMembership-{id}` stream and the
-/// fold's own `PlatformAccessGrantIsIdempotent` rule is what makes a second run inert. `pub` so a
-/// DB-gated integration test can compute the SAME value a `then:`/assertion must match (the
-/// `restaurant_membership_id_for_invitation` precedent).
+/// The REQUIRED `platformMembershipId` for one `authSubject` -- re-exported from
+/// [`application::commands::platform_membership_id_for`], the ONE place the formula lives (round
+/// 2, R2-5: "Namespace constant: ONE place, named"). `pub` so a DB-gated integration test can
+/// compute the SAME value a `then:`/assertion must match.
 pub fn platform_membership_id_for(auth_subject: &str) -> PlatformMembershipId {
-    PlatformMembershipId(uuid::Uuid::new_v5(&bootstrap_namespace(), auth_subject.as_bytes()))
+    application::commands::platform_membership_id_for(auth_subject)
 }
 
 /// The fixed system principal this subcommand acts as -- deterministic, so every bootstrap run
@@ -180,5 +185,52 @@ pub async fn dispatch(database_url: &str, auth_subject: &str) -> i32 {
             tracing::error!(error = %e, auth_subject, "bootstrap-platform-admin: dispatch failed");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round 2, R2-5: "Namespace constant: ONE place, named" -- this bootstrap's re-exported
+    /// [`platform_membership_id_for`] must be BYTE-IDENTICAL to
+    /// [`application::commands::platform_membership_id_for`], the ONE place the formula actually
+    /// lives. RED-FIRST: before this round, the bootstrap held its OWN copy of the derivation
+    /// (`bootstrap_namespace()` feeding a locally-defined `platform_membership_id_for`) -- if
+    /// anyone reintroduces a second copy here with even a byte of drift (a different namespace
+    /// literal, a different input encoding), the handler's `PlatformMembershipIdMismatch` check
+    /// would refuse EVERY bootstrap-dispatched grant, since the two derivations would disagree.
+    /// This test is the mechanical proof that cannot happen while there is exactly one function.
+    #[test]
+    fn platform_membership_id_for_matches_the_one_true_derivation() {
+        for subject in ["auth-admin-1", "already-granted-admin", "a3f1c8de-0b2e-4f77-9a11-0c4d2e8b7f10"] {
+            assert_eq!(
+                platform_membership_id_for(subject),
+                application::commands::platform_membership_id_for(subject),
+                "the bootstrap's platform_membership_id_for must be the SAME derivation as the \
+                 handler's, for subject '{subject}' -- ONE place, named"
+            );
+        }
+    }
+
+    /// The derivation is a pure function of `authSubject` ONLY: two DIFFERENT subjects must never
+    /// collide (or the handler's `PlatformMembershipIdMismatch` check and the bridge's
+    /// `auth_subject UNIQUE` backstop would both be defending against a false positive).
+    #[test]
+    fn different_subjects_derive_different_ids() {
+        assert_ne!(
+            platform_membership_id_for("auth-admin-1"),
+            platform_membership_id_for("auth-admin-2"),
+        );
+    }
+
+    /// Determinism is the whole point: running the bootstrap twice against the SAME subject must
+    /// target the SAME stream, or "running it twice appends one fact" could never hold.
+    #[test]
+    fn the_same_subject_always_derives_the_same_id() {
+        assert_eq!(
+            platform_membership_id_for("auth-admin-1"),
+            platform_membership_id_for("auth-admin-1"),
+        );
     }
 }

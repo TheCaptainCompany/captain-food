@@ -3317,6 +3317,31 @@ fn platform_membership_stream(id: &PlatformMembershipId) -> String {
     format!("PlatformMembership-{}", id.0)
 }
 
+/// The fixed UUIDv5 namespace every `platformMembershipId` derives from (round 2, R2-5,
+/// ADR-20260905-223957 §1/§2) -- NEVER change it: an existing grant's stream identity depends on
+/// this exact value. ONE place, named: this is the ONLY definition (the one-shot bootstrap in
+/// `crates/server/src/bootstrap_platform_admin.rs` imports [`platform_membership_id_for`] below
+/// rather than deriving its own copy). It is a fixed UUID literal, not a config value or a
+/// registered record -- `UNVERIFIED input`-free by construction, the same shape as
+/// `restaurant_invitation_membership_namespace` above.
+fn platform_membership_namespace() -> uuid::Uuid {
+    uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        b"https://captain.food/integrations/bootstrap-platform-admin",
+    )
+}
+
+/// The REQUIRED `platformMembershipId` for one `authSubject` -- `UUIDv5(namespace, authSubject)`.
+/// `platformMembershipId` on `GrantPlatformAccess` is CALLER-MINTED (ADR-0034) but not FREELY so:
+/// the handler refuses any other value with `PlatformMembershipIdMismatch` (round 2, R2-5),
+/// collapsing "one platform membership per subject" into stream identity. `pub` so the one-shot
+/// bootstrap, the behaviour-test fixture pool and the DB-gated integration suite can all compute
+/// the SAME value a `then:`/assertion must match (the `restaurant_membership_id_for_invitation`
+/// precedent).
+pub fn platform_membership_id_for(auth_subject: &str) -> PlatformMembershipId {
+    PlatformMembershipId(uuid::Uuid::new_v5(&platform_membership_namespace(), auth_subject.as_bytes()))
+}
+
 /// Handle `commands.yaml#/GrantPlatformAccess` → emit `events.yaml#/PlatformAccessGranted`
 /// (ADR-20260905-223957 §1/§2/§3). `roles: [ADMIN]` in steady state; the FIRST admin never reaches
 /// this handler through the GraphQL door -- the one-shot bootstrap dispatches the SAME command
@@ -3326,23 +3351,25 @@ fn platform_membership_stream(id: &PlatformMembershipId) -> String {
 /// 1. The door FIRST, before the store is even read (`run_platform_access_grant`) -- every
 ///    platform grant, hand-issued or bootstrap-dispatched, is the irreversible moment that starts
 ///    a real Tours human's legal clock.
-/// 2. Idempotency on `platformMembershipId`: an EXISTING membership makes a repeat call a no-op
-///    (`rules.yaml#/PlatformAccessGrantIsIdempotent`) -- `platformMembershipId` is REQUIRED and
-///    caller-minted (or bootstrap-derived), never minted by this handler.
-/// 3. The bridge arbiter: ADMIN is NOT a `PrincipalKind` (PRINCIPALS-MEMBER), so this reuses no
-///    write-side reservation table -- the `PlatformMember` bridge's `auth_subject UNIQUE` is the
-///    arbiter, consulted here BEFORE appending (the register check's "two arbiters" question,
-///    ADR-20260905-223957 §1): this is a projection READ, not the reservation's synchronous
-///    write-then-check, so it narrows the race window to the round trip between this read and the
-///    append rather than closing it atomically. Honest limit, recorded rather than hidden: two
-///    concurrent grants for the SAME authSubject under two DIFFERENT platformMembershipIds could
-///    both pass this check before either commits. The population this command serves is Captain's
-///    own admins (1-3, hand-provisioned, ADR-20260905-223957 context) -- a genuinely concurrent
-///    double-submission for one subject is not a shape production traffic produces, and the
-///    bridge's own `auth_subject UNIQUE` constraint (`database/tables/projection_tables.yaml#/
-///    PlatformMember`) is the FINAL arbiter at projection time: a genuine double-grant surfaces as
-///    a projector conflict to investigate, never a silently accepted second subject-to-membership
-///    binding in the read model ADMIN resolution actually uses.
+/// 2. **The id-derivation check (round 2, R2-5, young + vernon's free final-vision fix)**:
+///    `platformMembershipId` must equal [`platform_membership_id_for`]`(authSubject)` -- refused
+///    with the typed `PlatformMembershipIdMismatch` otherwise, BEFORE any store read. This is what
+///    turns "one platform membership per subject" from a projection-read-plus-UNIQUE race into a
+///    set invariant the fold's own exists-once check enforces for free: two grants for the SAME
+///    subject can only ever target the SAME stream, because both must derive the SAME id.
+/// 3. Idempotency on `platformMembershipId`: an EXISTING membership makes a repeat call a no-op
+///    (`rules.yaml#/PlatformAccessGrantIsIdempotent`) -- this is now the PRIMARY arbiter for
+///    "already granted", not a projection read racing a write.
+/// 4. The bridge belt, not the arbiter: ADMIN is NOT a `PrincipalKind` (PRINCIPALS-MEMBER), so
+///    this reuses no write-side reservation table -- the `PlatformMember` bridge's
+///    `auth_subject UNIQUE` is consulted here BEFORE appending as a SECOND, redundant check
+///    (the register check's original "two arbiters" question, ADR-20260905-223957 §1, now
+///    answered by step 2 above rather than by this read alone). Because step 2 already makes the
+///    id a pure function of `authSubject`, this bridge read can only ever disagree with step 2 on
+///    a genuine UUIDv5 collision (vanishingly unlikely) -- it stays as defense-in-depth, never the
+///    primary defense against a race. The bridge's own `auth_subject UNIQUE` constraint
+///    (`database/tables/projection_tables.yaml#/PlatformMember`) remains the FINAL backstop at
+///    projection time.
 pub async fn grant_platform_access(
     store: &dyn EventStore,
     platform_members: &dyn PlatformMemberRepository,
@@ -3361,6 +3388,19 @@ pub async fn grant_platform_access(
         ));
     }
     let platform_membership_id = cmd.platform_membership_id;
+    // Round 2, R2-5: `platformMembershipId` must equal the deterministic derivation from
+    // `authSubject` -- the SAME formula the one-shot bootstrap uses. This collapses the set
+    // invariant into stream identity BEFORE any store read, so a mismatched id can never even
+    // reach the idempotency/bridge checks below.
+    if platform_membership_id != platform_membership_id_for(&cmd.auth_subject.0) {
+        return Err(reject(
+            "PlatformMembershipIdMismatch",
+            json!({
+                "authSubject": cmd.auth_subject,
+                "platformMembershipId": platform_membership_id,
+            }),
+        ));
+    }
     let (state, version) =
         Repository::new(store).load::<PlatformMembershipState>(platform_membership_id).await?;
     if state.is_some() {

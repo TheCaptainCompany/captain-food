@@ -71,6 +71,13 @@ pub fn uid(s: &str) -> uuid::Uuid {
         )
         .0;
     }
+    // Round 2, R2-5 (#639 part C step 6-v): `platformMembershipId` must equal
+    // `platform_membership_id_for(authSubject)` -- the SAME formula the handler now enforces --
+    // so the fixture pool computes the SAME derivation for ANY `platform-membership-for-{subject}`,
+    // generically, the `membership-from-invitation-` precedent above.
+    if let Some(subject) = s.strip_prefix("platform-membership-for-") {
+        return crate::commands::platform_membership_id_for(subject).0;
+    }
     match s {
         "deliv-1" => {
             crate::process_managers::delivery_dispatch::delivery_job_id_for(&OrderId(uid("order-1"))).0
@@ -1055,10 +1062,12 @@ impl SpecMembers {
 /// The `PlatformMember` bridge as a fake (#639 part C step 6-v, ADR-20260905-223957 §1):
 /// `auth_subject -> platformMembershipId`, bound by seeded `PlatformAccessGranted` facts. The
 /// `SpecAuthSubjectReservations` sentinel-seeding precedent: `"already-granted-admin"` is held by
-/// a FOREIGN `platformMembershipId` (never `uid("platform-membership-2")`, the id the colliding
-/// test dispatches), which is what makes
-/// `TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected` a real assertion -- without the
-/// seeded holder, `grant_platform_access`'s bridge lookup alone would find nothing and accept.
+/// a FOREIGN `platformMembershipId` (`uid("platform-membership-existing")`, never
+/// `platform_membership_id_for("already-granted-admin")`, the CORRECTLY-DERIVED id the colliding
+/// test dispatches post round-2 R2-5), which is what makes
+/// `TestGrantPlatformAccessAuthSubjectAlreadyGrantedIsRejected` a real assertion reaching the
+/// bridge check at all (the id-derivation check now runs FIRST) -- without the seeded holder,
+/// `grant_platform_access`'s bridge lookup alone would find nothing and accept.
 pub struct SpecPlatformMembers {
     rows: Mutex<Vec<(String, PlatformMembershipId)>>,
 }

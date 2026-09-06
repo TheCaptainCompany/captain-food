@@ -808,7 +808,7 @@ fixtures:
   # #639 part C step 6-v (ADR-20260905-223957 §1): the platform grant fixture.
   platformAccessGranted:
     type: { $ref: 'events.yaml#/PlatformAccessGranted' }
-    data: { platformMembershipId: "platform-membership-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+    data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
 
   # #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the invitation fixtures. The FakeIdentity
   # double's `verify_email_token` always proves "johnny@example.com" for any token except
@@ -4379,7 +4379,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
-      data: { platformMembershipId: "platform-membership-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
       gates:
         - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
     then:
@@ -4396,7 +4396,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
-      data: { platformMembershipId: "platform-membership-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
     thrown:
       - { $ref: 'errors.yaml#/PlatformAccessGrantDoorClosed' }
 
@@ -4408,7 +4408,7 @@ tests:
       - { $ref: '#/fixtures/platformAccessGranted' }
     when:
       type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
-      data: { platformMembershipId: "platform-membership-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      data: { platformMembershipId: "platform-membership-for-auth-admin-1", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
       gates:
         - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
     then: []
@@ -4426,11 +4426,28 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
-      data: { platformMembershipId: "platform-membership-2", authSubject: "already-granted-admin", basis: "CAPTAIN_ONBOARDING" }
+      data: { platformMembershipId: "platform-membership-for-already-granted-admin", authSubject: "already-granted-admin", basis: "CAPTAIN_ONBOARDING" }
       gates:
         - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
     thrown:
       - { $ref: 'errors.yaml#/PlatformAccessAlreadyGranted' }
+
+  # Round 2, R2-5 (young + vernon): a caller-supplied platformMembershipId that does NOT equal
+  # UUIDv5(PLATFORM_MEMBERSHIP_NAMESPACE, authSubject) is refused BEFORE any store read -- a
+  # deliberately mismatched pair, distinct from both the idempotent-replay and already-granted
+  # cases above (neither of which is even reached: this check runs FIRST).
+  TestGrantPlatformAccessPlatformMembershipIdMismatchIsRejected:
+    name: "A platformMembershipId that does not derive from authSubject is refused before any store read"
+    rules: [{ $ref: 'rules.yaml#/PlatformMembershipIdMustBeDerivedFromAuthSubject' }]
+    actor: { $ref: 'actors.yaml#/PlatformMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      data: { platformMembershipId: "platform-membership-for-someone-else-entirely", authSubject: "auth-admin-1", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/PlatformMembershipIdMismatch' }
 
   # --- GrantRestaurantAccessByInvitation (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
   # amendment): the two-lane accept's SECOND, PUBLIC-only command, its own door -- cross-stream:

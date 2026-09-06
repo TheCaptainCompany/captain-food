@@ -1,11 +1,14 @@
-//! The card's "walk" (farley, beck): a DB-gated end-to-end pass over the REAL router / mailbox
-//! worker / projector stack for the platform grant and the ADMIN seam binding (#639 part C step
-//! 6-v, ADR-20260905-223957). Proves the one-shot bootstrap's idempotency (`the_bootstrap_
+//! The card's "walk" (farley, beck): a DB-gated end-to-end pass over the REAL mailbox worker /
+//! projector stack for the platform grant and the ADMIN seam binding (#639 part C step 6-v,
+//! ADR-20260905-223957). Proves the one-shot bootstrap's idempotency (`the_bootstrap_
 //! replays_from_domain_events_alone`, `running_it_twice_appends_one_fact`) and the full chain: a
-//! real GraphQL mutation dispatches through the real mailbox, a real `MailboxWorker` appends
+//! real `GrantPlatformAccess` dispatch through the real mailbox, a real `MailboxWorker` appends
 //! `PlatformAccessGranted`, a real `ProjectionWorker::run_once()` fold flips the ADMIN seam
-//! (`resolve_platform_scope`) from unbound to resolved -- an ADMIN token whose subject was granted
-//! reads `riders` on `/admin/graphql`; the SAME token BEFORE the grant is FORBIDDEN.
+//! (`resolve_platform_scope` -> `PgPlatformIdentity` -> `platform_member`) from `NoMapping` to
+//! resolved. Round 2, R2-7(a) (beck): this file exercises the seam's PORT directly
+//! (`server::ResolvePlatformIdentity::resolve`), never an actual `/admin/graphql riders` HTTP
+//! request -- no test here issues one; the HTTP/GraphQL-layer scripted equivalent lives in
+//! `an_admin_token_with_no_platform_grant_is_unbound.rs`.
 //!
 //! Needs a real Postgres (`DATABASE_URL`); SKIPS (prints and returns) without one, same as every
 //! other DB-gated suite here (`DB_TESTS_REQUIRED=1` makes that a hard failure, beck CATCH).
@@ -302,15 +305,14 @@ async fn running_it_twice_appends_one_fact() {
     );
 }
 
-/// The full chain, through the real router: an ADMIN token whose subject was granted reads
-/// `riders` on `/admin/graphql`; the SAME token BEFORE the grant is FORBIDDEN. Real JWT
-/// verification is a different seam (exercised by `an_admin_token_with_no_platform_grant_is_
-/// unbound.rs`'s scripted seam); this walk proves the Postgres-backed seam
-/// (`resolve_platform_scope` -> `PgPlatformIdentity` -> `platform_member`) end to end, so the
-/// `ReadScope` is injected the same established idiom `rider_standing_walk.rs` uses for the
-/// business-layer legs, while the seam RESOLUTION itself is exercised via the real
-/// `PgPlatformIdentity` port directly (the mailbox/projector chain proves the WRITE half; this
-/// proves the READ half consumes what it wrote).
+/// The full write-then-read chain: a grant dispatched through the real mailbox is folded by a
+/// real projector, and the seam's PORT (`server::ResolvePlatformIdentity::resolve`, backed by the
+/// real `PgPlatformIdentity` -> `platform_member`) answers `NoMapping` BEFORE the grant lands and
+/// resolves AFTER. Round 2, R2-7(a) (beck): this test issues no HTTP request at all -- it never
+/// calls `/admin/graphql` or reads `riders` (that GraphQL/HTTP-layer scripted equivalent is
+/// `an_admin_token_with_no_platform_grant_is_unbound.rs`, exercising a different, non-Postgres
+/// seam). The mailbox/projector chain here proves the WRITE half; the direct port call proves the
+/// READ half consumes what it wrote.
 #[tokio::test]
 async fn the_admin_seam_resolves_only_after_the_grant_lands() {
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
@@ -336,7 +338,11 @@ async fn the_admin_seam_resolves_only_after_the_grant_lands() {
     // Dispatch the grant through the REAL router -- `grantPlatformAccess`, ADMIN-only, so this
     // dispatch is enqueued as if an EXISTING admin (the fixed `acting()` witness) issued it.
     let mailbox: Arc<dyn actor_client::mailbox::Mailbox> = Arc::new(PgMailbox::new(pool.clone()));
-    let platform_membership_id = uuid::Uuid::new_v4();
+    // Round 2, R2-5: platformMembershipId must equal platform_membership_id_for(authSubject) --
+    // a random uuid::Uuid::new_v4() would now be refused with PlatformMembershipIdMismatch before
+    // the store is even touched, and the seam would never see a grant land at all.
+    let platform_membership_id =
+        server::bootstrap_platform_admin::platform_membership_id_for(auth_subject).0;
     let client = client_platform_membership::PlatformMembershipClient::new(mailbox.clone(), platform_membership_id);
     let cmd = domain::generated::commands::GrantPlatformAccess {
         platform_membership_id: domain::generated::scalars::PlatformMembershipId(platform_membership_id),
