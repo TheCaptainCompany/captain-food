@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3131,
+  "recordedAt": "2026-09-06T12:31:08.106Z",
+  "branch": "main",
+  "note": "PROP-20260831-134539 slice 2: AsOfCatalog domain fold + AsOfPriceAuthority port + PgAsOfCatalogRepository adapter + equivalence test, PR #920"
+}

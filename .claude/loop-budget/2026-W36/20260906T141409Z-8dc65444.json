@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 2400,
+  "recordedAt": "2026-09-06T14:14:09.257Z",
+  "branch": "816-s2-as-of-catalog",
+  "note": "PROP-20260831-134539 slice 2 round 3 (D1 span-covers-fold, D2 fail-closed status/reason); start was called late (protocol miss) -- this segment corrects the true run duration instead of the near-zero one the late start produced"
+}

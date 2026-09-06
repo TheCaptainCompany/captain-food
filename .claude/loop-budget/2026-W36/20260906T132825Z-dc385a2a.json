@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 2537,
+  "recordedAt": "2026-09-06T13:28:25.863Z",
+  "branch": "816-s2-as-of-catalog",
+  "note": "PROP-20260831-134539 slice 2 round 2: CatalogVersion coordinate fix, fail-closed adapter, V=L benchmark arm, span via spans.rs, prose/pins, PROP+legal updates"
+}

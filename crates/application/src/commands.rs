@@ -3602,7 +3602,7 @@ pub async fn record_inbound_restaurant_invitation_expiry(
 
 /// The stream a Catalog aggregate lives on.
 fn catalog_stream(id: &CatalogId) -> String {
-    format!("Catalog-{}", id.0)
+    domain::catalog::stream(*id)
 }
 
 /// Rehydrate the Catalog aggregate (fold + current version).

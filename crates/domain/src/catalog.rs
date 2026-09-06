@@ -11,8 +11,30 @@ use std::collections::HashSet;
 use crate::generated::entities::{CatalogCategory, Offer, OptionList, Product};
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
-    ExternalReference, OfferId, OptionListId, ProductCategoryId, ProductId, RestaurantId, Slug,
+    CatalogId, ExternalReference, OfferId, OptionListId, ProductCategoryId, ProductId,
+    RestaurantId, Slug,
 };
+
+/// The stream-category prefix; the stream is `"Catalog-<catalogId>"` — same shape as the `Aggregate`
+/// trait impl (`aggregate.rs`, `impl_aggregate!(CatalogState, CatalogId, "Catalog", …)`) and the
+/// Payment precedent (`payment.rs:23-28`): declared here, once, so callers that only need the stream
+/// name (the as-of read adapter, slice 2 of PROP-20260831-134539) need not depend on the `Aggregate`
+/// trait or its generic `Repository`. [`catalog_stream_name_has_one_owner`] pins the two in sync.
+pub const CATEGORY: &str = "Catalog";
+
+/// The literal `"<CATEGORY>-"` join, pre-formatted (PROP-20260831-134539 slice 2 round 2, evans
+/// NB5/vernon NB3): closes the last respelling of the join found on this stream — the projection
+/// worker's `Self::Catalog` arm used to build it inline with its own `format!("{}-", CATEGORY)`
+/// (`crates/infrastructure/src/projection/worker.rs:287`). [`catalog_stream_name_has_one_owner`]
+/// pins this against `CATEGORY` so the two constants cannot drift apart, and
+/// `catalog_registry_prefix_matches_the_domain_constant` (`projection/worker.rs`) pins the Catalog
+/// `ProjectorGroup`'s `stream_prefixes` entry against it — one spelling, three sites, one owner.
+pub const CATALOG_STREAM_PREFIX: &str = "Catalog-";
+
+/// This aggregate's event-stream name for `id`.
+pub fn stream(id: CatalogId) -> String {
+    format!("{CATEGORY}-{}", id.0)
+}
 
 /// What the Catalog command handlers need to know to accept or reject a command. `None` (from
 /// [`fold`]) means the catalog does not exist → `CatalogNotFound` (or the entity-level not-found the
@@ -211,4 +233,38 @@ fn upsert_product(s: &mut CatalogState, product: &Product) {
 fn upsert_option_list(s: &mut CatalogState, option_list: &OptionList) {
     s.option_lists.retain(|l| l.id != option_list.id);
     s.option_lists.push(option_list.clone());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aggregate::Aggregate;
+
+    /// Slice 2 of PROP-20260831-134539: the as-of read adapter builds the Catalog stream name
+    /// through the free-function [`stream`] rather than a fourth `format!("Catalog-{}")` literal
+    /// (vernon CATCH). This pins it against the `Aggregate` trait impl the write path already uses
+    /// (`aggregate.rs`), so the two can never drift to different prefixes. Round 2 (evans NB5/vernon
+    /// NB3) adds two more independent checks so a rename of [`CATEGORY`] alone -- with
+    /// [`CATALOG_STREAM_PREFIX`] left as a stale literal -- goes red: the STORED prefix is asserted
+    /// literally, and the two constants are pinned to each other.
+    #[test]
+    fn catalog_stream_name_has_one_owner() {
+        let id = CatalogId(uuid::Uuid::nil());
+        let via_trait = CatalogState::stream(id);
+        let via_free_fn = stream(id);
+        assert_eq!(
+            via_trait, via_free_fn,
+            "fold stream differs from catalog::stream: {via_trait} vs {via_free_fn}"
+        );
+        assert_eq!(
+            via_free_fn,
+            format!("Catalog-{}", id.0),
+            "stream() drifted from the STORED stream prefix -- a CATEGORY rename must go red here"
+        );
+        assert_eq!(
+            CATALOG_STREAM_PREFIX,
+            format!("{CATEGORY}-"),
+            "CATALOG_STREAM_PREFIX drifted from CATEGORY"
+        );
+    }
 }

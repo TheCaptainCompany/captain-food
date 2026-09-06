@@ -684,6 +684,66 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
     }
 }
 
+/// `catalog.as_of.fold` (INTERNAL) — the as-of price-fold READ, end to end: SQL + decode + the
+/// fail-closed coordinate check + fold (PROP-20260831-134539 slice 2 of "the priced quote token",
+/// DARK — no production caller yet, no `specs/observability.yaml` contract row: it lands with slice
+/// 4 once a caller supplies a real correlation id, per the round-2 card's deliberate deviation from
+/// the round-1 shape). **True end to end as of round 3**: the constructor lives at the call site
+/// that owns the WHOLE body — `AsOfPriceAuthority::as_of` — and `.instrument`s SQL + decode + the
+/// fold together; round 1's span closed before the fold ran at all, round 2's still closed before
+/// it (the fold ran one level up, outside the `.instrument`ed block).
+///
+/// `business.version` is the requested coordinate, known at construction. `business.stream_length`
+/// (rows returned, technical rows included) and `business.events_applied` (business events the fold
+/// actually applied) are late-bound — known only once the read completes — and DECLARED here so
+/// [`record_catalog_as_of_fold`] is not a silent no-op (the same trap `command.validate`'s
+/// `service_window_verdict` and `cart.price`'s `otel.status_code` exist to avoid: `tracing` cannot
+/// add a field that was not declared when the span was created).
+///
+/// `otel.status_code` and `business.failure_reason` are ALSO late-bound and declared for the same
+/// reason (round 3, obs NB2 — a round-2 regression: the fail-closed `Err` branch recorded nothing,
+/// so a refusal and a success were indistinguishable on this span). Precedent: `claims.stamp`
+/// (`:667`) declares `otel.status_code` the same way for a late-known outcome; `FAILURE_REASON`
+/// (`contract.rs:117`) is the coarse `DomainError` class, never the query text or driver message.
+///
+/// `business.correlation_id` is declared `Empty` and deliberately left UNSET this slice — there is no
+/// caller to supply a real one yet, so recording a placeholder would be worse than an honest absence.
+///
+/// `business.head_version` is DELIBERATELY ABSENT: recording it would need a second HEAD read this
+/// capability does not perform, and inventing one only to populate a span would add exactly the
+/// extra round trip `graphql-architect`'s presentation-pass CATCH warned against.
+pub fn catalog_as_of_fold(aggregate_id: &str, version: i64) -> Span {
+    tracing::info_span!(
+        "catalog.as_of.fold",
+        otel.kind = "internal",
+        business.aggregate_id = aggregate_id,
+        business.version = version,
+        business.correlation_id = Empty,
+        business.stream_length = Empty,
+        business.events_applied = Empty,
+        business.failure_reason = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the as-of read's two late-bound counts on `catalog.as_of.fold` — `stream_length` (rows
+/// returned, technical rows included) and `events_applied` (business events the fold actually
+/// applied; invariant: `events_applied <= stream_length` and the highest row version returned equals
+/// the requested `business.version`, or the adapter would already have failed closed).
+pub fn record_catalog_as_of_fold(span: &Span, stream_length: usize, events_applied: usize) {
+    span.record(attr::STREAM_LENGTH, stream_length as i64);
+    span.record(attr::EVENTS_APPLIED, events_applied as i64);
+}
+
+/// Record the fail-closed refusal (round 3, obs NB2): the requested coordinate is absent or beyond
+/// head, so the adapter never reaches the fold. Sets OTel ERROR status alongside the coarse
+/// `reason` class, the same shape [`record_customer_identity_resolve_result`]'s `lookup_failed` arm
+/// uses — without it, this refusal and an ordinary success are unclassifiable from the span alone.
+pub fn record_catalog_as_of_fold_error(span: &Span, reason: &str) {
+    span.record(attr::FAILURE_REASON, reason);
+    span.record("otel.status_code", "ERROR");
+}
+
 /// `rider.standing.denied` (INTERNAL) — the `StandingGuard`'s own carve-out-tested RIDER denial
 /// (`rider-restriction` contract, #639 part C step 4-i round 2 item 6(a)). Round 1 declared this
 /// span in `observability.yaml` but the runtime only ever emitted a bare `tracing::info!` EVENT —
@@ -828,6 +888,52 @@ mod tests {
              technical_error rule (any_span_errors) could NEVER fire and every unresolvable price \
              would classify as a success"
         );
+
+    }
+
+    /// `catalog.as_of.fold` declares every field EITHER outcome records — the success path
+    /// (`stream_length`/`events_applied`) AND the fail-closed refusal path (`otel.status_code`/
+    /// `business.failure_reason`, round 3, obs NB2) — kept as its own test (not folded back into
+    /// [`late_bound_fields_body`]) because the card that added the refusal fields names this test
+    /// literally, as the red-first target for the "declaration missing" mutant class.
+    #[test]
+    fn catalog_as_of_fold_declares_every_recorded_field() {
+        with_subscriber(catalog_as_of_fold_declares_every_recorded_field_body);
+    }
+
+    fn catalog_as_of_fold_declares_every_recorded_field_body() {
+        let as_of = catalog_as_of_fold("catalog-1", 42);
+        record_catalog_as_of_fold(&as_of, 43, 42);
+        let af = as_of.metadata().unwrap().fields();
+        assert!(af.field(attr::AGGREGATE_ID).is_some());
+        assert!(af.field(attr::VERSION).is_some(), "business.version is set at construction");
+        assert!(
+            af.field(attr::CORRELATION_ID).is_some(),
+            "business.correlation_id is late-bound but declared -- dark this slice, but a caller \
+             that later records it must not find a silent no-op"
+        );
+        assert!(
+            af.field(attr::STREAM_LENGTH).is_some(),
+            "business.stream_length is late-bound but declared"
+        );
+        assert!(
+            af.field(attr::EVENTS_APPLIED).is_some(),
+            "business.events_applied is late-bound but declared"
+        );
+
+        let refused = catalog_as_of_fold("catalog-1", 42);
+        record_catalog_as_of_fold_error(&refused, "coordinate_beyond_head");
+        let rf = refused.metadata().unwrap().fields();
+        assert!(
+            rf.field(attr::FAILURE_REASON).is_some(),
+            "business.failure_reason is late-bound but declared -- without it the fail-closed \
+             refusal path has no field to record its reason onto"
+        );
+        assert!(
+            rf.field("otel.status_code").is_some(),
+            "otel.status_code is late-bound but declared -- without it a fail-closed refusal is \
+             indistinguishable on this span from an ordinary success (round-2 regression, obs NB2)"
+        );
     }
 
     /// The OTel span KIND is part of each contract (`kind: SERVER` etc). It travels as the `otel.kind`
@@ -854,6 +960,7 @@ mod tests {
             auth_scope_membership("ORDER", "CUSTOMER"),
             claims_stamp(),
             reminder_promote("OrderAcceptanceTimedOut", true),
+            catalog_as_of_fold("catalog-1", 1),
         ];
         for s in spans {
             let meta = s.metadata().expect("span has metadata");

@@ -115,6 +115,16 @@ pub mod attr {
     /// `business.result = lookup_failed` — the coarse `DomainError` class, never the query text or
     /// driver message (unbounded cardinality on a labeled series).
     pub const FAILURE_REASON: &str = "business.failure_reason";
+
+    /// `catalog.as_of.fold` keys (PROP-20260831-134539 slice 2, DARK — no
+    /// `specs/observability.yaml` contract row yet; lands with slice 4 once a caller supplies a real
+    /// correlation id). The as-of coordinate the read was bounded to (`CatalogVersion::get()`).
+    pub const VERSION: &str = "business.version";
+    /// Rows the SQL leg returned, technical rows included (before `$`-prefixed rows are dropped by
+    /// decode) — the read's own cost signal, distinct from `events_applied`.
+    pub const STREAM_LENGTH: &str = "business.stream_length";
+    /// Business events the fold actually applied (`<= stream_length`, `<= version`).
+    pub const EVENTS_APPLIED: &str = "business.events_applied";
 }
 
 /// Metric names, split exactly as the contracts split them: `metrics` are technical, `business_metrics`

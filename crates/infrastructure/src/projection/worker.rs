@@ -284,7 +284,13 @@ impl ReadModelProjector {
                 }
             }
             Self::Catalog => {
-                let id = CatalogId(aggregate_uuid_of(env, "Catalog-", "catalogId")?);
+                // PROP-20260831-134539 slice 2 round 2 (evans NB5/vernon NB3): the last respelling of
+                // the "-" join closed -- `CATALOG_STREAM_PREFIX` is the one constant, pinned against
+                // `CATEGORY` in `catalog::tests::catalog_stream_name_has_one_owner` and against this
+                // group's own `stream_prefixes` entry in
+                // `catalog_registry_prefix_matches_the_domain_constant` below.
+                let id =
+                    CatalogId(aggregate_uuid_of(env, domain::catalog::CATALOG_STREAM_PREFIX, "catalogId")?);
                 let state = catalog_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_catalog(&CatalogProjector, state, env) {
                     catalog_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
@@ -1312,6 +1318,24 @@ mod tests {
         assert_eq!(group.projectors.len(), 1);
         assert!(matches!(group.projectors[0], ReadModelProjector::ScopeMembership));
         assert_eq!(group.scope, "ordering");
+    }
+
+    /// PROP-20260831-134539 slice 2 round 2 (evans NB5/vernon NB3): the Catalog `ProjectorGroup`'s
+    /// stream prefix is pinned to `domain::catalog::CATALOG_STREAM_PREFIX`, the SAME constant
+    /// `Self::Catalog`'s aggregate-id resolution now uses -- one spelling of `"Catalog-"`, not a
+    /// fourth respelling of the join. The all-sixteen version (every group pinned this way, farley
+    /// NB6) is a follow-up issue; the static table's literal for every OTHER group stays as-is.
+    #[test]
+    fn catalog_registry_prefix_matches_the_domain_constant() {
+        let group = REGISTRY
+            .iter()
+            .find(|g| g.checkpoint == "Catalog")
+            .expect("the Catalog projector group is registered");
+        assert_eq!(
+            group.stream_prefixes,
+            &[domain::catalog::CATALOG_STREAM_PREFIX],
+            "Catalog registry prefix drifted from domain::catalog::CATALOG_STREAM_PREFIX"
+        );
     }
 
     /// Every non-kernel scope with registry groups is reachable through the scope filter, and
