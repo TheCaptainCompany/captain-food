@@ -3,8 +3,9 @@
 //! application → domain edge at compile time.
 
 use async_trait::async_trait;
+use domain::catalog_as_of::AsOfCatalog;
 use domain::generated::events::DomainEvent;
-use domain::generated::scalars::{GbpLinkStatus, WebUrl};
+use domain::generated::scalars::{CatalogId, GbpLinkStatus, WebUrl};
 use domain::shared::{errors::DomainError, identifiers::RestaurantId};
 
 /// Acting user + correlation for the event envelope (ADR-0041). The actor who performed a change is
@@ -227,6 +228,26 @@ pub trait EventStore: Send + Sync {
     /// stream). Command handlers rehydrate the aggregate state from this (write-side fold), then append
     /// at the returned version so a concurrent writer conflicts instead of double-applying.
     async fn load(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError>;
+}
+
+/// The as-of price-fold read authority (PROP-20260831-134539 §2.1 step 3, slice 2 of "the priced
+/// quote token"; binds to `specs/ordering/rules.yaml#/ServerPriceAuthority`): reconstruct a catalog's
+/// prices at a FIXED past coordinate, never the live head. `version` is REQUIRED — never `Option` —
+/// because "as-of nothing in particular" is not a read this port offers; there is deliberately no
+/// `latest_version()` on this trait (vernon CATCH: that would let a handler quietly ask for HEAD
+/// through the back door). The returned [`AsOfCatalog`] is a RESOLVED VALUE: it holds no repo handle,
+/// so a caller cannot use it to keep reading past the coordinate it was built at.
+///
+/// DARK in this slice: no production caller. The Postgres adapter
+/// (`crates/infrastructure/src/persistence/...`) reads through a RANGE read on the event store
+/// (`WHERE stream_name = $1 AND version <= $2`), decoding the event PAYLOAD only — never retaining
+/// the envelope `user_id` (ADR-0041) — and reuses `domain::catalog::stream`/`CATEGORY` for the stream
+/// name (never a fourth `format!("Catalog-{}")` literal).
+#[async_trait]
+pub trait AsOfPriceAuthority: Send + Sync {
+    /// The catalog's prices at `version` (inclusive), reconstructed from the `Catalog-<catalogId>`
+    /// stream up to and including that coordinate.
+    async fn as_of(&self, catalog_id: CatalogId, version: i64) -> Result<AsOfCatalog, DomainError>;
 }
 
 /// Google Business Profile ownership-proof verification (ADR-0019: "delegate ownership proof to
