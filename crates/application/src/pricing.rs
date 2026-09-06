@@ -406,4 +406,127 @@ mod tests {
             "fail-closed: PriceUnresolvable, got {err:?}"
         );
     }
+
+    /// THE ONE-PRICER PROPERTY (ADR-20260810-112836 §1/§3/§5/§6), protected by an EQUIVALENCE test
+    /// instead of a caller (PROP-20260831-134539 slice 2, DARK — mob consent, no SPLIT survivor): for
+    /// a fixture catalog folded to HEAD, [`domain::catalog_as_of::AsOfCatalog::price_of`] at
+    /// `V = HEAD` must answer the SAME unit price and option price [`price_cart`] computes through
+    /// the real projector + [`CatalogSnapshot`]/[`OfferView`] path, for the same line and options.
+    /// Two independent folds over the SAME events (the real `CatalogProjector` and
+    /// `AsOfCatalog::from_stream`) must never diverge into two prices.
+    #[tokio::test]
+    async fn as_of_price_at_head_equals_the_head_snapshot_price() {
+        use domain::catalog_as_of::AsOfCatalog;
+        use domain::generated::events::{CatalogCreated, DomainEvent, OptionListAdded, ProductAdded};
+
+        use crate::projections::{project_catalog, Envelope};
+        use crate::projectors::catalog::CatalogProjector;
+
+        let catalog_id = CatalogId(uid(1));
+        let restaurant = RestaurantId(uid(2));
+        let product_id = ProductId(uid(10));
+        let offer_id = OfferId(uid(20));
+        let option_list_id = OptionListId(uid(30));
+        let option_id = OptionId(uid(40));
+
+        let events: Vec<DomainEvent> = vec![
+            DomainEvent::CatalogCreated(CatalogCreated {
+                catalog_id,
+                r#ref: None,
+                restaurant_id: restaurant,
+                name: CatalogName("Main".into()),
+            }),
+            DomainEvent::OptionListAdded(OptionListAdded {
+                catalog_id,
+                restaurant_id: restaurant,
+                option_list: OptionList {
+                    id: option_list_id,
+                    r#ref: None,
+                    name: OptionListName("Size".into()),
+                    min_selections: 0,
+                    max_selections: Some(1),
+                    multiple_selection: false,
+                    options: vec![ProductItemOption {
+                        id: option_id,
+                        r#ref: None,
+                        option_list_id,
+                        name: OptionName("Large".into()),
+                        price: eur(200),
+                        r#default: false,
+                        availability: CatalogItemAvailability::AVAILABLE,
+                        stock: None,
+                    }],
+                },
+            }),
+            DomainEvent::ProductAdded(ProductAdded {
+                catalog_id,
+                restaurant_id: restaurant,
+                product: Product {
+                    id: product_id,
+                    r#ref: None,
+                    catalog_id,
+                    restaurant_id: restaurant,
+                    category_ref: None,
+                    name: ProductName("Margherita".into()),
+                    description: None,
+                    tags: Vec::new(),
+                    image_ids: Vec::new(),
+                    tax_rate: TaxRate {
+                        delivery: TaxRatePercent(10.0),
+                        collection: None,
+                        eat_in: None,
+                    },
+                    offers: vec![Offer {
+                        id: offer_id,
+                        r#ref: None,
+                        product_id,
+                        name: OfferName("Default".into()),
+                        price: eur(1500),
+                        availability: CatalogItemAvailability::AVAILABLE,
+                        stock: None,
+                        option_list_ids: vec![option_list_id],
+                    }],
+                },
+            }),
+        ];
+
+        // HEAD via the REAL projector fold (the same one the projection worker runs).
+        let mut row: Option<CatalogRow> = None;
+        for (i, event) in events.iter().enumerate() {
+            let env = Envelope {
+                stream_name: domain::catalog::stream(catalog_id),
+                position: i as i64 + 1,
+                occurred_at: chrono::Utc::now(),
+                event: event.clone(),
+            };
+            row = project_catalog(&CatalogProjector, row, &env);
+        }
+        let row = row.expect("catalog row exists at HEAD");
+
+        let store = CountingCatalog { row, reads: AtomicUsize::new(0) };
+        let snapshot = CatalogSnapshot::load(&store, restaurant).await.expect("loads");
+        let priced = price_cart(
+            &snapshot,
+            CartId(uid(99)),
+            restaurant,
+            &[cart_line(1, 20, 1, &[40])],
+        )
+        .await
+        .expect("HEAD prices the line");
+
+        // The as-of fold, independently, at V = HEAD.
+        let as_of = AsOfCatalog::from_stream(&events, events.len() as i64 - 1);
+        let as_of_price =
+            as_of.price_of(offer_id, &[option_id]).expect("as-of prices the same offer");
+
+        assert_eq!(
+            priced.items[0].unit_price, as_of_price.unit_price,
+            "totals differ on an options-bearing cart (unit price)"
+        );
+        assert_eq!(
+            priced.items[0].selected_options[0].price,
+            as_of_price.option_prices[0].1,
+            "totals differ on an options-bearing cart (option price)"
+        );
+    }
 }
