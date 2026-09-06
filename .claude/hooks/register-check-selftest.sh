@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Guard tests for .claude/hooks/register-check.sh, plus the wiring- and drift-checks that keep the
-# register-check discipline alive (run from stop-gate.sh on every turn -- pure shell, ~200ms).
+# register-check discipline alive (run from stop-gate.sh on every turn -- pure shell; ~4s and GROWS
+# WITH THE CASE COUNT, not the ~200ms once true here -- see .github/workflows/ci.yml's
+# `gate-scripts` job for the measured antecedent, #914).
 #
 # WHY THIS EXISTS. "A gate never seen to fire is an unverified claim" (#292, beck): each case below
 # shows the hook red or green against the REAL script before any session trusts it. The hook is

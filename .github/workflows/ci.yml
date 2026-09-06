@@ -167,18 +167,23 @@ jobs:
     # be accepted by branch protection, so this job must always produce a real conclusion.
     runs-on: ubuntu-latest
     # Bounds a HANG only (a red has its own path above). Both suites are dependency-free shell +
-    # python3, ~15s observed together, and this value is the same order-of-magnitude ceiling
-    # `changes` and `codegen` carry: far above anything legitimate, far below the 360-minute
-    # default that turns a hung probe into a six-hour repository-wide merge block.
+    # python3; the whole JOB (including checkout) ran 17-22s on the five most recent green `ci`
+    # runs on main (Actions API, 2026-09-06, 1s granularity, heads a9605fe4 dc42199e 699bb8b0
+    # 61bfc2f4 353751a0), and this value is the same order-of-magnitude ceiling `changes` and
+    # `codegen` carry: far above anything legitimate, far below the 360-minute default that turns a
+    # hung probe into a six-hour repository-wide merge block.
     timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
       # The ask-gate's own guard, on EVERY change — docs-only included. This job is the one
       # always-run job with a checkout (no `if:`), so a broken register-check hook cannot ship
-      # silently on the paths that skip the Rust suites; pure shell, ~200ms. Pinned by the
-      # `the_hook_selftest_runs_in_the_always_run_gate_job` codegen test (2026-08-21 hardening,
-      # re-pointed here when GATE-STEP-LOCUS moved the gate steps out of `changes`).
+      # silently on the paths that skip the Rust suites; pure shell. The selftest step itself ran
+      # 4s on each of the five most recent green `ci` runs on main (Actions API, 2026-09-06, 1s
+      # granularity, same heads as above) -- a runner figure that GROWS WITH THE CASE COUNT, not a
+      # fixed cost (locally: 4.6s wall at 9ad0299 on an Intel Xeon @ 2.10GHz, 4 vCPU, #914). Pinned
+      # by the `the_hook_selftest_runs_in_the_always_run_gate_job` codegen test (2026-08-21
+      # hardening, re-pointed here when GATE-STEP-LOCUS moved the gate steps out of `changes`).
       - name: Register-check hook selftest (the ask-gate must never be disarmed silently)
         run: bash .claude/hooks/register-check-selftest.sh
       # The decision-lookup wrapper carries a supply-chain gate (pinned + scriptless install,
