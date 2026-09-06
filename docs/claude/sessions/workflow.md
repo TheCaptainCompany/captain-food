@@ -826,9 +826,14 @@ Red-first: none — <record> names no test
 ```
 
 **The entry's shape, each clause load-bearing**: `<test path>` exists on disk or is the literal
-token `NEW` (the test does not exist yet — this card is what creates it); `<record>:<line>`
-resolves to a real file and a real line NUMBER in it, and that line itself carries one of the
-tokens above (never a paraphrase — the citation must be checkable without reading the whole file).
+token `NEW` (the test does not exist yet — this card is what creates it); `<record>` is a RECORD
+ID — `ADR-…`, `PROP-…`, `BRIEF-…`, `journal-…` or a register key — **never a file path** (the hook
+resolves the id to its file; a path is refused as an unresolvable record, and so is any extra
+` — ` clause between the test and the record — the entry has exactly four clauses); `<line>` is a
+real line NUMBER in that file, and that line itself carries one of the tokens above (never a
+paraphrase — the citation must be checkable without reading the whole file). Cost that earned the
+sentence: two dispatches refused on 2026-09-06 (PR #922 round 2) with a file path in the record
+clause and a `— NEW —` clause inserted between test and record.
 `mutant:` names the planted change that should turn the test red; `expected red:` names the
 message fragment that proves it did.
 
