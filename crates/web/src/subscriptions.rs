@@ -304,23 +304,24 @@ pub enum CloseDisposition {
     /// decides where to route it, per [`handle_close`].
     Restricted,
     /// A `4403` with some OTHER reason: `graphql-transport-ws`'s own terminal `Forbidden`, which
-    /// the reference client never retries. No reconnect, no bounce — the HTTP leg (`bounce.rs`)
-    /// stays the authoritative bounce path and the client degrades to its existing declared poll
-    /// fallback. Scoped to `4403` only in this chunk; the full 4400-4499 terminal band is a
-    /// follow-up (ADR-20260808-235113 carve-out — client-side observability first).
-    Stop,
+    /// the reference client never retries. No reconnect, no bounce — the HTTP leg refuses on the
+    /// next action; the board freezes until navigation (evans: named `Terminal`, not `Stop` — this
+    /// same file already uses `Stop` for "stop one subscription", a different thing). Scoped to
+    /// `4403` only in this chunk; the full 4400-4499 terminal band is a follow-up (ADR-20260808-235113
+    /// carve-out — client-side observability first).
+    Terminal,
 }
 
 /// Read a WebSocket close code + reason into a [`CloseDisposition`] — pure, no socket, no screen.
 /// `Restricted` iff BOTH the code and the reason match the platform's own restriction close: the
 /// signal is the PAIR, never `code` alone (a bounce on an unrecognised signal would invent a
-/// refusal the server never sent). Any OTHER `4403` is `Stop`, never `Reconnect`.
+/// refusal the server never sent). Any OTHER `4403` is `Terminal`, never `Reconnect`.
 pub fn close_disposition(code: u16, reason: &str) -> CloseDisposition {
     if code == shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE {
         if reason == shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_REASON {
             CloseDisposition::Restricted
         } else {
-            CloseDisposition::Stop
+            CloseDisposition::Terminal
         }
     } else {
         CloseDisposition::Reconnect
@@ -331,11 +332,13 @@ pub fn close_disposition(code: u16, reason: &str) -> CloseDisposition {
 /// `reconnect` / `navigate` / neither, through [`close_disposition`] — the socket module never
 /// sees a `Screen`. `restricted` supplies the per-screen restricted route (`bounce::
 /// restricted_target`, or a fixed `None` for a caller with no screen in hand); a declared route
-/// navigates there and reconnects NEVER; no declared route holds at backoff (the DECLARED degraded
-/// mode: the `/restricted` screen itself holds a socket the server re-closes on every
-/// re-derivation, and reinstatement relies on that reconnect — a dead socket there strands a
-/// reinstated rider). Never grows logic beyond this match: the wasm `onclose` adapter and every
-/// other caller stay three lines.
+/// navigates there and reconnects NEVER. No declared route is UNCHANGED: today's reconnect, the
+/// safe posture if a close arrives at all (the server seeds an already-`RESTRICTED` cell at
+/// `connection_init` and closes again only on a NEW fact or a `Lagged` re-derivation, never as a
+/// matter of course on every reconnect; reinstatement is reload-driven, ADR-20260904-124600 §4 —
+/// the reconnect is necessary for a still-restricted rider to keep learning of new facts, never
+/// sufficient on its own). Never grows logic beyond this match: the wasm `onclose` adapter and
+/// every other caller stay three lines.
 pub fn handle_close(
     code: u16,
     reason: &str,
@@ -346,7 +349,7 @@ pub fn handle_close(
 ) {
     match close_disposition(code, reason) {
         CloseDisposition::Reconnect => reconnect(attempt + 1),
-        CloseDisposition::Stop => {}
+        CloseDisposition::Terminal => {}
         CloseDisposition::Restricted => match restricted() {
             Some(route) => navigate(route),
             None => reconnect(attempt + 1),
@@ -732,24 +735,24 @@ mod tests {
         );
     }
 
-    /// 4403 with a DIFFERENT reason is terminal `Stop`, never `Reconnect` and never `Restricted`
+    /// 4403 with a DIFFERENT reason is `Terminal`, never `Reconnect` and never `Restricted`
     /// (M2: drop the reason conjunct) — the reference `graphql-transport-ws` client does not retry
     /// its own `Forbidden` close.
     #[test]
-    fn close_disposition_stops_on_4403_with_another_reason() {
+    fn close_disposition_is_terminal_on_4403_with_another_reason() {
         assert_eq!(
             close_disposition(shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE, "SOME_OTHER_REASON"),
-            CloseDisposition::Stop
+            CloseDisposition::Terminal
         );
     }
 
-    /// A browser delivers an absent close reason as the empty string — still `Stop`, never a
+    /// A browser delivers an absent close reason as the empty string — still `Terminal`, never a
     /// silently reconnecting hot loop (M2b: drop the reason conjunct).
     #[test]
-    fn close_disposition_stops_on_4403_with_empty_reason() {
+    fn close_disposition_is_terminal_on_4403_with_empty_reason() {
         assert_eq!(
             close_disposition(shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE, ""),
-            CloseDisposition::Stop
+            CloseDisposition::Terminal
         );
     }
 
@@ -795,8 +798,9 @@ mod tests {
     }
 
     /// A restriction close on a screen that declares NO restricted route holds at backoff — the
-    /// DECLARED degraded mode, never a silent dead socket (M5: on `Restricted` with no route call
-    /// neither function).
+    /// UNCHANGED reconnect path, never a silent dead socket (M5: on `Restricted` with no route call
+    /// neither function). "Capped" here is the SAME promise `backoff_doubles_and_caps`'s
+    /// `backoff::delay(10) == 30s` already pins — two tests, one promise (reviewer).
     #[test]
     fn handle_close_holds_at_backoff_when_no_route_is_declared() {
         let reconnect_calls = std::cell::RefCell::new(Vec::new());
@@ -813,9 +817,29 @@ mod tests {
         assert!(navigate_calls.borrow().is_empty());
     }
 
-    /// A 4403 with an unrecognised reason never reconnects (M6: treat `Stop` as `Reconnect`).
+    /// An ORDINARY `Reconnect` still reconnects, at `attempt + 1` — not skipped (a mutant matching
+    /// `Reconnect => {}`) and not off-by-one (a mutant matching `Reconnect => reconnect(attempt)`,
+    /// dropping the `+ 1`), both of which stayed green across the whole suite before this test
+    /// existed (beck, REQUIRED before ready).
     #[test]
-    fn handle_close_stops_on_an_unknown_4403() {
+    fn handle_close_reconnects_on_an_ordinary_drop() {
+        let reconnect_calls = std::cell::RefCell::new(Vec::new());
+        let navigate_calls: std::cell::RefCell<Vec<&'static str>> = std::cell::RefCell::new(Vec::new());
+        handle_close(
+            1006,
+            "",
+            2,
+            |attempt| reconnect_calls.borrow_mut().push(attempt),
+            || panic!("Reconnect must never consult the restricted route"),
+            |route| navigate_calls.borrow_mut().push(route),
+        );
+        assert_eq!(*reconnect_calls.borrow(), vec![3]);
+        assert!(navigate_calls.borrow().is_empty());
+    }
+
+    /// A 4403 with an unrecognised reason never reconnects (M6: treat `Terminal` as `Reconnect`).
+    #[test]
+    fn handle_close_is_terminal_on_an_unknown_4403() {
         let reconnect_calls = std::cell::RefCell::new(Vec::new());
         let navigate_calls: std::cell::RefCell<Vec<&'static str>> = std::cell::RefCell::new(Vec::new());
         handle_close(
@@ -823,7 +847,7 @@ mod tests {
             "UNKNOWN_REASON",
             0,
             |attempt| reconnect_calls.borrow_mut().push(attempt),
-            || panic!("Stop must never consult the restricted route"),
+            || panic!("Terminal must never consult the restricted route"),
             |route| navigate_calls.borrow_mut().push(route),
         );
         assert_eq!(*reconnect_calls.borrow(), Vec::<u32>::new());
