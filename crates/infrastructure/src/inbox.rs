@@ -152,7 +152,8 @@ pub struct CommandDeps {
     /// The `PlatformMember` bridge's write-side arbiter (#639 part C step 6-v, ADR-20260905-223957
     /// §1) -- the `members` port's precedent, transposed: `grant_platform_access`'s handler
     /// consults it BEFORE appending, since ADMIN is NOT a `PrincipalKind` (PRINCIPALS-MEMBER) and
-    /// reuses no reservation table. Reused (never a second port) by `confirm_admin_sign_in`
+    /// reuses no reservation table.
+    /// Reused (never a second port) by `confirm_admin_sign_in`
     /// (#639 part C step 6-iii, ADR-20260906-023825): the SAME read the write-side arbiter needs.
     pub platform_members: Arc<dyn application::queries::PlatformMemberRepository>,
     /// #639 part C step 6-iii (ADR-20260906-023825): `configuration.yaml#/RUN_ADMIN_SIGN_IN_DOOR`
@@ -694,8 +695,19 @@ async fn admin_sign_in(
             telemetry::meters::admin_sign_in::door_enforcing(deps.run_admin_sign_in_door);
             let span = telemetry::spans::admin_signin_link_request(&actor.correlation_id.to_string());
             let outcome = run(async { application::commands::request_admin_sign_in_link(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor, deps.run_admin_sign_in_door).await }).instrument(span).await;
-            if let InboxOutcome::Handled(Err(e)) = &outcome {
-                telemetry::meters::admin_sign_in::refused(admin_sign_in_reason(e));
+            // Round 2 R2-3 (obs B1 + reviewer B1): `admin_sign_in_link_requested_total` had ZERO
+            // production call sites -- named here from the FULL command outcome (covers the
+            // door-closed refusal, which never reaches the send wall, as well as a wall-level
+            // quota refusal) so it is the SOLE source of this counter for the admin door (the
+            // shared wall's `Admin` arm deliberately does not also call `link_requested`, to avoid
+            // double-counting the same accepted/refused fact -- see `email_authorization.rs`).
+            match &outcome {
+                InboxOutcome::Handled(Ok(())) => telemetry::meters::admin_sign_in::link_requested("accepted"),
+                InboxOutcome::Handled(Err(e)) => {
+                    telemetry::meters::admin_sign_in::link_requested("refused");
+                    telemetry::meters::admin_sign_in::refused(admin_sign_in_reason(e));
+                }
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => {}
             }
             outcome
         }
@@ -706,7 +718,10 @@ async fn admin_sign_in(
             let span_clone = span.clone();
             let outcome = run(async { application::commands::confirm_admin_sign_in(deps.store.as_ref(), deps.auth.as_ref(), deps.platform_members.as_ref(), deps.sessions.as_ref(), deps.support_contact.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), actor, deps.run_admin_sign_in_door).await }).instrument(span).await;
             let result = match &outcome {
-                InboxOutcome::Handled(Ok(())) => "linked",
+                // Round 2 R2-4 (evans): "linked" binds two pre-existing things (login + a Member
+                // row); on the platform side nothing links -- the grant PRE-EXISTS (GrantPlatformAccess,
+                // 6-v) and the door only IDENTIFIES against it. "granted" names what actually happened.
+                InboxOutcome::Handled(Ok(())) => "granted",
                 InboxOutcome::Handled(Err(e)) => admin_sign_in_confirm_result(e),
                 // `run(async { confirm_admin_sign_in(..) })` only ever produces `Handled`; the
                 // other three `InboxOutcome` variants are unreachable here, but named rather than
@@ -715,7 +730,7 @@ async fn admin_sign_in(
             };
             telemetry::spans::record_admin_signin_confirm_result(&span_clone, result);
             telemetry::meters::admin_sign_in::confirmed(result);
-            if result != "linked" && result != "not_granted" {
+            if result != "granted" && result != "not_granted" {
                 telemetry::meters::admin_sign_in::refused(result);
             }
             outcome
