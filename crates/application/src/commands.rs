@@ -5159,6 +5159,7 @@ mod credit_checkout_tests {
             note: None,
             payment_method_id: "pm_123".into(),
             expected_total: None,
+            quote: None,
         };
         // The emitter's fixed default instant (tests.yaml header) — this restaurant declares no
         // hours, so the verdict is HOURS_UNDECLARED at any instant and the checkout is accepted.
