@@ -536,6 +536,9 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // #639 part C step 6-v (ADR-20260905-223957 SS5, the SAME fleet-parity lesson): the
             // platform grant door's own release gate.
             ("RUN_PLATFORM_ACCESS_GRANT", deps.run_platform_access_grant),
+            // #639 part C step 6-iii (ADR-20260906-023825, the SAME fleet-parity lesson): the
+            // ADMIN sign-in door's own release gate.
+            ("RUN_ADMIN_SIGN_IN_DOOR", deps.run_admin_sign_in_door),
             // A genuine PRE-EXISTING gap this round's `run_flag_parity` codegen test found: this
             // fleet never serves the WebSocket the gate closes, but the fleet-parity EVIDENCE is
             // still owed (declared at the monolith root, missing here before this fix). No
