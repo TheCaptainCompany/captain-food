@@ -272,3 +272,19 @@ ground or dates, has the statement been provided under Art. 11(3) at that moment
 ground and effectiveAt render? And is a client-side navigation a durable medium at all, or does the
 durable-medium duty fall entirely on #874's SMS?* — not answered here, and no lens output above is
 legal advice or clearance for it either.
+
+**Addendum (2026-09-07):** the counsel packet gains three questions, posed by
+[#834 "Four hard-coded English strings on the checkout pay step, and two declared keys with no
+runtime consumer"](https://github.com/TheCaptainCompany/captain-food/issues/834)
+([PR #939](https://github.com/TheCaptainCompany/captain-food/pull/939), which resolves the checkout
+`<h1>` and browser tab title from the translation catalog) — *does loi 94-665 (Toubon) art. 2 (French
+in the presentation of services to consumers) reach a screen heading and a browser tab title on a
+French-facing ordering UI, and what does the DGCCRF treat as the "offering" surface for that
+purpose?* — *with the cart summary's `"{n} items - {total}"` line still rendering in English after
+this PR merges (deferred behind PR #933 and the specs lock), is a partially-French checkout screen an
+AGGRAVATING fact under that article, or is per-element remediation an accepted incremental posture?*
+— *is a cooperative of our size inside the European Accessibility Act (2019/882) art. 4(5)
+microenterprise exemption?* — plus one non-claim line: fixing the title and heading under `lang=fr`
+also serves WCAG 3.1.1 (page language) and 2.4.2 (page titled), worth noting as an incidental
+alignment, not asserted as a compliance claim — not answered here, and no lens output above is legal
+advice or clearance for any of it either.
