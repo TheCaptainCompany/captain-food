@@ -46,9 +46,12 @@ use crate::queries::CatalogReadRepository;
 pub const DEV_ONLY_HMAC_KEY: &[u8] =
     b"captain-food-dev-only-quote-signing-hmac-key-DO-NOT-USE-IN-PRODUCTION";
 
-/// The overlap window a retired key stays acceptable for verification (configuration.yaml
-/// `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET`'s own gates: 60 minutes = the 30-minute
-/// `QUOTE-STALENESS` backstop + an UNVERIFIED skew term).
+/// The `QUOTE-STALENESS` bound (30 minutes): a quote older than this is rejected as expired at
+/// verify time. Fix round after presentation pass 1 (P1, farley NB11 / reviewer NB21): this is
+/// NOT the key-rotation overlap window — no overlap is enforced in code today. The 60-minute
+/// overlap (this bound + an UNVERIFIED skew term) is an OPERATIONAL precondition of a real
+/// rotation event, recorded as item (14) of
+/// `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml`, never a second constant here.
 const MAX_QUOTE_AGE_SECONDS: i64 = 30 * 60;
 
 /// A signing/verifying key: an opaque secret plus the `keyId` a token names so a verifier holding
@@ -68,9 +71,11 @@ impl SigningKey {
         Self { id: id.into(), secret }
     }
 
-    /// The resolved configuration value (may be empty — an unset staging/production secret is
-    /// caught by `required: [staging, production]` at boot before this is ever called with an
-    /// empty string in a LIVE profile; development/test fall back to the DEV-ONLY key, matching
+    /// The resolved configuration value (may be empty — the manifest key is `required: []` today,
+    /// P1/farley NB11 / reviewer NB21, so an empty secret in a LIVE profile is NOT caught here at
+    /// all: the door's own boot refusal ([`QuoteGuard::resolve_at_boot`], door OPEN + a live
+    /// profile) is what gates an unprovisioned/dev-value key before this is ever exercised for
+    /// real — development/test fall back to the DEV-ONLY key regardless, matching
     /// `EmailSendPolicy::from_config`'s own precedent).
     pub fn from_resolved_secret(id: &str, secret: &str) -> Self {
         let trimmed = secret.trim();
