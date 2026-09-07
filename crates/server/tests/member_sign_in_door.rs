@@ -338,7 +338,8 @@ async fn door(identity: ScriptedIdentity, members: ScriptedMembers, seam: Member
         run_platform_access_grant: false,
         run_admin_sign_in_door: false,
         platform_members: Arc::new(UntouchablePlatformMembers),
-    };
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+};
     Door { mailbox, identity, members, sessions, deps, app }
 }
 

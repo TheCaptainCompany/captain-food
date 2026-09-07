@@ -75,7 +75,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
 | `actor-admin-sign-in` | platform | lane `AdminSignIn` | common | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
-| `actor-cart` | order | lane `Cart` | common + ordering | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
+| `actor-cart` | order | lane `Cart` | common + ordering | **all 8** | **fat +6** | `bin_runtime` | 15 | -- |
 | `actor-catalog` | catalog | lane `Catalog` | catalog + common | **all 8** | **fat +6** | `bin_runtime` | 14 | -- |
 | `actor-conversation` | order | lane `Conversation` | common + comms | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
 | `actor-customer` | customer | lane `Customer` | common + customer | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
@@ -83,11 +83,11 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `actor-delivery-job` | delivery | lane `DeliveryJob` | common + delivery | **all 8** | **fat +6** | `bin_runtime` | 17 | -- |
 | `actor-delivery-partner-registration` | delivery | lane `DeliveryPartnerRegistration` | delivery | **all 8** | **fat +7** | `bin_runtime` | 17 | -- |
 | `actor-mailbox-supervision` | platform | lane `MailboxSupervision` | common | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
-| `actor-order` | order | lane `Order` | common + ordering | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
-| `actor-payment` | order | lane `Payment` | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime` | 15 | -- |
+| `actor-order` | order | lane `Order` | common + ordering | **all 8** | **fat +6** | `bin_runtime` | 15 | -- |
+| `actor-payment` | order | lane `Payment` | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime` | 17 | -- |
 | `actor-platform-membership` | platform | lane `PlatformMembership` | common | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `actor-prospect` | restaurant | lane `Prospect` | network | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
-| `actor-reclamation` | order | lane `Reclamation` | ordering | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
+| `actor-reclamation` | order | lane `Reclamation` | ordering | **all 8** | **fat +7** | `bin_runtime` | 15 | -- |
 | `actor-restaurant` | restaurant | lane `Restaurant` | common + network | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
 | `actor-restaurant-account` | restaurant | lane `RestaurantAccount` | common + network | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
 | `actor-restaurant-invitation` | restaurant | lane `RestaurantInvitation` | common + network | **all 8** | **fat +6** | `bin_runtime` | 13 | -- |
@@ -98,12 +98,12 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
-| `pm-cart-binding` | customer | saga `CartBindingProcess` | common + customer + ordering | **all 8** | **fat +5** | `bin_runtime` | 13 | -- |
-| `pm-delivery-dispatch` | delivery | saga `DeliveryDispatchProcess`; ports delivery | common + delivery + ordering | **all 8** | **fat +5** | `application`, `avelo37-adapter`, `bin_runtime`, `coopcycle-adapter`, `infrastructure`, `uber-direct-adapter` | 17 | -- |
-| `pm-payment-settlement` | order | saga `PaymentSettlementProcess`; ports payment | ordering + payments | **all 8** | **fat +6** | `bin_runtime`, `stripe-adapter` | 15 | -- |
-| `pm-place-order` | order | saga `PlaceOrderProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 15 | -- |
-| `pm-reclamation` | order | saga `ReclamationProcess`; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 15 | -- |
-| `pm-refund` | order | saga `RefundProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 15 | -- |
+| `pm-cart-binding` | customer | saga `CartBindingProcess` | common + customer + ordering | **all 8** | **fat +5** | `bin_runtime` | 15 | -- |
+| `pm-delivery-dispatch` | delivery | saga `DeliveryDispatchProcess`; ports delivery | common + delivery + ordering | **all 8** | **fat +5** | `application`, `avelo37-adapter`, `bin_runtime`, `coopcycle-adapter`, `infrastructure`, `uber-direct-adapter` | 19 | -- |
+| `pm-payment-settlement` | order | saga `PaymentSettlementProcess`; ports payment | ordering + payments | **all 8** | **fat +6** | `bin_runtime`, `stripe-adapter` | 17 | -- |
+| `pm-place-order` | order | saga `PlaceOrderProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 17 | -- |
+| `pm-reclamation` | order | saga `ReclamationProcess`; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 17 | -- |
+| `pm-refund` | order | saga `RefundProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 17 | -- |
 
 ### `projector` -- 7 app(s)
 
@@ -114,7 +114,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `projector-customer` | customer | scope `customer`: 1 View_* + 1 projection table(s) | customer | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
 | `projector-delivery` | delivery | scope `delivery`: 2 View_* + 3 projection table(s) | delivery | **all 8** | **fat +7** | `bin_runtime` | 17 | -- |
 | `projector-network` | restaurant | scope `network`: 0 View_* + 6 projection table(s) | network | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
-| `projector-ordering` | order | scope `ordering`: 2 View_* + 3 projection table(s) | ordering | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |
+| `projector-ordering` | order | scope `ordering`: 2 View_* + 3 projection table(s) | ordering | **all 8** | **fat +7** | `bin_runtime` | 15 | -- |
 | `projector-payments` | order | scope `payments`: 1 View_* + 1 projection table(s) | payments | **all 8** | **fat +7** | `bin_runtime` | 15 | -- |
 
 ### `worker` -- 3 app(s)
@@ -145,7 +145,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `graphql-customer` | customer | scope `customer`: 2 quer(ies), 17 mutation(s), 0 subscription(s) | customer | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
 | `graphql-delivery` | delivery | scope `delivery`: 7 quer(ies), 17 mutation(s), 0 subscription(s) | delivery | **all 8** | **fat +7** | `bin_runtime`, `server` | 17 | -- |
 | `graphql-network` | restaurant | scope `network`: 7 quer(ies), 28 mutation(s), 0 subscription(s) | network | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
-| `graphql-ordering` | order | scope `ordering`: 9 quer(ies), 21 mutation(s), 1 subscription(s) | ordering | **all 8** | **fat +7** | `bin_runtime`, `server` | 13 | -- |
+| `graphql-ordering` | order | scope `ordering`: 9 quer(ies), 21 mutation(s), 1 subscription(s) | ordering | **all 8** | **fat +7** | `bin_runtime`, `server` | 15 | -- |
 | `graphql-payments` | order | scope `payments`: 6 quer(ies), 2 mutation(s), 1 subscription(s) | payments | **all 8** | **fat +7** | `bin_runtime`, `server` | 15 | -- |
 
 ### `gateway` -- 7 app(s)
@@ -179,7 +179,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
-| `bam` | platform | always-on projector; folds every scope's events | **all 8** | **all 8** | yes | `bin_runtime` | 20 | -- |
+| `bam` | platform | always-on projector; folds every scope's events | **all 8** | **all 8** | yes | `bin_runtime` | 22 | -- |
 
 ## 5. Secret grants
 
@@ -187,11 +187,14 @@ The distinct pod grants, largest first: what a compromise of any app in that gro
 
 | keys | apps | held by | the keys |
 |---:|---:|---|---|
-| 20 | 1 | `bam` | `HUBRISE_WEBHOOK_SECRET`, `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
-| 17 | 7 | `actor-delivery-job`, `actor-delivery-partner-registration`, `actor-rider`, `pm-delivery-dispatch`, `projector-delivery`, `adapter-uber-direct`, `graphql-delivery` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET` |
-| 15 | 9 | `actor-customer-credit`, `actor-payment`, `pm-payment-settlement`, `pm-place-order`, `pm-reclamation`, `pm-refund`, `projector-payments`, `adapter-stripe`, `graphql-payments` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| 22 | 1 | `bam` | `HUBRISE_WEBHOOK_SECRET`, `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET`, `QUOTE_SIGNING_KEY_HMAC_SECRET`, `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| 19 | 1 | `pm-delivery-dispatch` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET`, `QUOTE_SIGNING_KEY_HMAC_SECRET`, `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET` |
+| 17 | 5 | `actor-payment`, `pm-payment-settlement`, `pm-place-order`, `pm-reclamation`, `pm-refund` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `QUOTE_SIGNING_KEY_HMAC_SECRET`, `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| 17 | 6 | `actor-delivery-job`, `actor-delivery-partner-registration`, `actor-rider`, `projector-delivery`, `adapter-uber-direct`, `graphql-delivery` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET` |
+| 15 | 4 | `actor-customer-credit`, `projector-payments`, `adapter-stripe`, `graphql-payments` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| 15 | 6 | `actor-cart`, `actor-order`, `actor-reclamation`, `pm-cart-binding`, `projector-ordering`, `graphql-ordering` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET`, `QUOTE_SIGNING_KEY_HMAC_SECRET`, `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET` |
 | 14 | 4 | `actor-catalog`, `projector-catalog`, `adapter-hubrise`, `graphql-catalog` | `HUBRISE_WEBHOOK_SECRET`, `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET` |
-| 13 | 25 | `actor-admin-sign-in`, `actor-cart`, `actor-conversation`, `actor-customer`, `actor-mailbox-supervision`, `actor-order`, `actor-platform-membership`, `actor-prospect`, `actor-reclamation`, `actor-restaurant`, `actor-restaurant-account`, `actor-restaurant-invitation`, `actor-restaurant-membership`, `pm-cart-binding`, `projector-comms`, `projector-customer`, `projector-network`, `projector-ordering`, `adapter-avelo37`, `adapter-coopcycle`, `graphql-common`, `graphql-comms`, `graphql-customer`, `graphql-network`, `graphql-ordering` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET` |
+| 13 | 19 | `actor-admin-sign-in`, `actor-conversation`, `actor-customer`, `actor-mailbox-supervision`, `actor-platform-membership`, `actor-prospect`, `actor-restaurant`, `actor-restaurant-account`, `actor-restaurant-invitation`, `actor-restaurant-membership`, `projector-comms`, `projector-customer`, `projector-network`, `adapter-avelo37`, `adapter-coopcycle`, `graphql-common`, `graphql-comms`, `graphql-customer`, `graphql-network` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET` |
 | 12 | 12 | `gateway-admin`, `gateway-customer`, `gateway-external`, `gateway-public`, `gateway-restaurant`, `gateway-restaurant-account`, `gateway-rider`, `fo-marketplace`, `fo-storefront`, `bo-admin`, `bo-restaurant`, `bo-rider` | `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `EMAIL_QUOTA_KEY_HMAC_SECRET` |
 | 2 | 3 | `worker-erasure`, `worker-retention`, `worker-sirene-sync` | `DATABASE_URL`, `HONEYCOMB_API_KEY` |
 

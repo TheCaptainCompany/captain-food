@@ -552,6 +552,14 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // reads the environment directly), so this pins the same default (`false`) an unset
             // environment resolves to.
             ("RUN_FOLD_PRICED_CART_READ", false),
+            // PROP-20260831-134539 slice 3b + the command change (ADR-20260904-081527 SS8 standing
+            // clause, #933 phase B'.10): the write door's own fleet-parity evidence -- the SAME
+            // `RUN_FOLD_PRICED_CART_READ` shape (no `CommandDeps` field; `standalone_deps` reads
+            // the environment directly), so this pins the same default (`false`) an unset
+            // environment resolves to. This is the THIRD hand-kept entry of this shape
+            // (`RUN_RIDER_RESTRICTION_SOCKET_CLOSE`, `RUN_FOLD_PRICED_CART_READ`, this one) -- the
+            // derivation into a generated list is #930 item 2's own change, still owed.
+            ("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", false),
         ],
     );
 

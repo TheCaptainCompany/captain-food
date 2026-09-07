@@ -123,6 +123,10 @@ opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
 # EntryFixture mirror exhaustively, and the write-path tests seed mailbox rows through it — a
 # release build of the server never sees these doors.
 actor_client = { path = "../actor_client", features = ["test-fixtures"] }
+# ADR-20260906-192007 D-F/D-G: `application::quote::QuoteGuard::closed_for_tests` -- every
+# hand-built `CommandDeps` in this crate's integration tests needs the ONE new field, the SAME
+# `test-fixtures` gate as `actor_client` above.
+application = { path = "../application", features = ["test-fixtures"] }
 # The #745/#748-checkpoint visibility proof (tests/skip_trace_visibility.rs): the skip-by-design
 # event is asserted VISIBLE under the deployed default filter (LOG_LEVEL=info) — the blocking
 # checkpoint finding was a `debug!` behind that filter, i.e. a promise the trace never kept.

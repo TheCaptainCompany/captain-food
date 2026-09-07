@@ -90,7 +90,20 @@ PlaceOrderProcess:
               The same re-derivation for the line's selected options: they must still belong to
               the offer's option lists, within their selection bounds, in the catalog as it stands
               now — an option list edited since the line was added is the same staleness class.
-        - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
+        # ADR-20260904-081527 §8 seventh carve-out (D-F/D-G, ADR-20260906-192007): the signed-quote
+        # verify guard, replacing the retired expectedTotal equality check (`errors.yaml#/PriceMismatch`,
+        # deleted). CLOSED (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` off, the default
+        # everywhere): never throws. OPEN: an absent `quote`, a forged signature, an unknown/retired
+        # keyId, a foreign cart/restaurant/catalog identity, or a coordinate beyond the live stream
+        # head all throw the ONE structural `QuoteVerificationFailed` (LOUD -- the
+        # ADR-20260810-112836 §6 technical path, no consumer price copy); the cart edited after
+        # mint, or the quote past its 30-minute staleness backstop, throw the business
+        # `errors.yaml#/QuoteNoLongerHonoured` (declared, DSL-unwired -- see its own errors.yaml
+        # description for why, and STOP: do not add a second `throws:` $ref here for it without
+        # first resolving that gap, or `test-uncovered-error` blocks `make validate`).
+        - guard:
+            throws: { $ref: 'errors.yaml#/QuoteVerificationFailed' }
+            note: "The write door's interlocked verify guard (D-B/D-F): OPEN only once RUN_FOLD_PRICED_CART_READ is ALSO open. Verifies the token's signature under the live key set, its cartId/restaurantId/catalog identity and lines-content against the command's live state, and its 30-minute staleness backstop; on success the charge is the FRESH price_cart_at recompute at the token's own coordinate, never the client-echoed totalCents."
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/CustomerCreditBalance' }
             source: EVENT_STREAM

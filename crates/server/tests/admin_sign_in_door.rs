@@ -349,7 +349,8 @@ async fn door(identity: ScriptedIdentity, platform_members: ScriptedPlatformMemb
         run_platform_access_grant: false,
         platform_members: platform_members_port,
         run_admin_sign_in_door: door_open,
-    };
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+};
     Door { mailbox, identity, platform_members, sessions, seam, deps, app }
 }
 

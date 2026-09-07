@@ -109,6 +109,7 @@ scalar ProspectionScore
 scalar MembershipId
 scalar RestaurantInvitationId
 scalar CartLineId
+scalar CartQuote
 scalar StarRating
 scalar RatingComment
 scalar DeliveryDissatisfactionReason
@@ -1032,6 +1033,7 @@ type Cart {
   totalAmount: Money!
   breakdown: PaymentBreakdown
   uberComparison: UberComparison
+  quote: CartQuote
   updatedAt: DateTime!
   restaurant: Restaurant!
 }
@@ -1722,7 +1724,8 @@ input PlaceOrderInput {
   deliveryAddress: AddressInput
   note: OrderNote
   paymentMethodId: String!
-  expectedTotal: MoneyInput
+  expectedTotal: MoneyInput @deprecated(reason: "Retired by the quote (PROP-20260831-134539 slice 3b); ignored by the server. No shipped client sends it.")
+  quote: CartQuote
 }
 
 input AcceptOrderInput {

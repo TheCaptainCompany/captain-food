@@ -113,6 +113,103 @@ Journal entries for ISO week 2026-W37, newest first, in the order they were writ
 > [#943](https://github.com/TheCaptainCompany/captain-food/issues/943),
 > [#944](https://github.com/TheCaptainCompany/captain-food/issues/944).
 
+> **2026-09-07 — [#816 "The priced quote token"](https://github.com/TheCaptainCompany/captain-food/issues/816),
+> phase E (records), draft [PR #933](https://github.com/TheCaptainCompany/captain-food/pull/933),
+> per-PR row for the whole PR (ADR-20260906-152024 §4).** #933 · tier lower (executors Sonnet,
+> lenses Opus) · class `HOLD: human` (money movement, a non-additive GraphQL input on a shipped
+> money mutation, a legal surface) · lane: this container
+> (`session_01BXTg9ZhjzYHyRkVq3g9uxJ`) · wall_clock_dispatch_to_merge: card `card-816-s3b4.md`
+> written 19:35Z 2026-09-06 → phase E hand-back 02:20Z 2026-09-07 — not yet merged (`UNVERIFIED
+> input`, read off the scratchpad card/checkpoint file timestamps, never a platform clock) ·
+> `gate_minutes_per_round` (CI check-run `startedAt`→`completedAt`, the `ci` workflow, read via the
+> GitHub API on each named head): round 1 `2f1a9eff` (phase A) 20:04→20:14Z ≈ 10, conclusion
+> success · round 2 `a11527ad` (phase B, checkpoint 1's head) 20:47→20:55Z ≈ 7, conclusion FAILURE
+> (`codegen`, `db-test`) · round 3 `c0d0adf7` (phase B' hand-back head) 22:27→22:34Z ≈ 7, conclusion
+> FAILURE (`codegen`, `db-test` — phase B' hand-back reported CI as still running, not yet green) ·
+> round 4 `369a6236` (phase C hand-back head, checkpoint 2's head) 00:22→00:29Z ≈ 7, conclusion
+> success · round 5 `ab1a0f77` (phase C2 hand-back head) 02:07→02:14Z ≈ 7, conclusion success ·
+> checkpoints: 2 (fourteen lenses briefed at each) · STOPs: checkpoint 1 — legal, reviewer/farley
+> (a blocking finding); checkpoint 2 — beck, legal, evans, reviewer (a blocking finding) — all fixed
+> in-phase, none carried past the checkpoint that raised them · card defects banked: 30, counted
+> from `checkpoint-816-s3b4.md`'s `Card defect` entries — 28 matching lines, minus 4 `Card defect:
+> none` verdicts and 1 pure reconfirmation (the reviewer's checkpoint-1 "Card defects 1 and 2
+> CONFIRMED", corroborating the executor's own pre-checkpoint findings rather than adding new ones),
+> plus the three enumerated-in-prose lines (the executor's own 2 pre-checkpoint findings, phase B'
+> hand-back's 3, phase C hand-back's 5) counted per NAMED item rather than per line — attribution
+> `card` throughout (`card-816-s3b4-c2.md` itself adds 0 further `Card defect` lines) · roster
+> misses: none · one coordinator mis-address incident: three phase-C2 dispatch messages were sent
+> to the reviewer lens's (already-finished) agent id instead of the C2 executor's — the reviewer
+> confirmed it touched nothing (recorded in `docs/claude/sessions/environment.md`, PR #933
+> checkpoint 2 mis-address).
+>
+> Base check before any code: `git rev-parse HEAD` = `eb7e976b` (the phase C2 ledger commit),
+> matching the card. `origin/main` had moved (Lane B merged [#939](https://github.com/TheCaptainCompany/captain-food/pull/939)
+> and [#942](https://github.com/TheCaptainCompany/captain-food/pull/942) plus two ledger commits)
+> since the branch was cut; `git merge-tree` reported exactly one conflict —
+> `docs/status/journal-2026-W37.md`, both lanes writing the top of the same file — resolved by
+> keeping BOTH sides in sequence (this lane's phase C2 entry, then Lane B's #916 entry, newest
+> first, no duplicate headings), merge commit `93a9b013`, pushed before any phase E record landed.
+> `make validate` (0 errors) and the three-file fence grep (0) re-ran clean against the new
+> `origin/main` before continuing.
+
+> **2026-09-07 — [#816 "The priced quote token"](https://github.com/TheCaptainCompany/captain-food/issues/816),
+> phase C2: checkpoint 2's fourteen-lens fixes (section (0) A–O) + the D-J client minimum
+> (section (1)), draft [PR #933](https://github.com/TheCaptainCompany/captain-food/pull/933).**
+> Sixteen commits on top of phase C's landed write-side verify guard. Section (0), one commit per
+> lettered item: **A** a test-double bug (`TestCatalogs::add` appended instead of replacing,
+> making every "HEAD moves" quote test vacuous); **B/B2** the retired-key overlap arm (rotated
+> secret → `Tampered`, a dropped id → `UnknownKey`, distinct from a shared-secret coincidence);
+> **C/C2** THE WALK hardened (assert HEAD actually moved, drop a dead spy, prove the fold is never
+> consulted with the door CLOSED via a panicking fold authority) and every quote-refusal unit test
+> now runs over a `CountingGateway` (zero PaymentIntents, provably, not merely "the fake never
+> counted"); **D** `errors.yaml#/QuoteRequired` purged (never existed) and the legal display
+> guarantee's "in either door state" overclaim struck — CLOSED is now a stated EXPOSURE, not a
+> guarantee; **E** a stale "no verify logic reads this yet" comment corrected (phase C already
+> wired it); **G** `verify_quote` now returns the fold's WHOLE `PricedCart` (items+breakdown+total,
+> one coordinate) so `OrderPlaced`'s frozen lines always sum to what was actually charged; **H**
+> `CartQuote`'s write-side doc corrected from DARK to WIRED; **I** `crates/web`'s `PriceMismatch`
+> residue retargeted to `QuoteVerificationFailed`; **J** `QUOTE_SIGNING_KEY_HMAC_SECRET` reverted to
+> `required: []` (a brief promotion added zero safety with the door still closed and wedged all 14
+> deploy manifests — the promotion moves to the flip card); **K** the
+> `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` fleet-parity gauge fed by the interlock's own WITNESS at both
+> composition roots, never the raw config bool (closing a DB-less-monolith reporting hole); **M**
+> the fold's recompute now compared to the token's `total_cents` (refuses `TotalMismatch` on
+> disagreement), binding checked BEFORE staleness (an expired foreign-cart token now reports the
+> loud `ForeignCart` cause), transient `as_of` failures mapped to `FoldUnavailable` honestly, a new
+> `QuoteRefusal::Absent`, and a proof that a garbage quote is ignored with the door CLOSED; **N**
+> the monolith's two independently-built bulkhead pools (4 connections instead of the intended
+> shared 2) unified into one, the DB-gated benchmark's "sql" leg retimed to the query `at_head`
+> actually issues, and DB-failure labels split into `acquire_timeout`/`statement_timeout`/the two
+> structural causes instead of one wrong or silent bucket; **O** the `quote.verify` span exemption
+> rationale corrected (a Cargo/SDK-free layering fact, never a door-licensing one) and the
+> `{ any_of: [quote.verify, command.validate] }` alternation's tautology recorded as a flip
+> precondition (`QUOTE-MINT-PRECONDITIONS` item 18).
+>
+> Section (1), the D-J client minimum, one commit per bullet: checkout's `place_order` action now
+> sends `quote: '{{ cart.quote }}'` — the SAME `cart.current` read that painted the recap, never
+> one stashed from `/cart` — and drops `expectedTotal` from the wire entirely (`#429`'s browser
+> submit leg stays unwired — antecedent, not pulled in); `order_tracking` gains
+> `operationStatus.byMessage` and the ACTUAL wiring its own `TrackingState.refused`/render logic
+> had described but nothing ever called (`check_place_order_rejection`: one read, no polling,
+> settles/clears the pending record on the observed terminal verdict); and a new DB-gated walk
+> scenario proves a cart edited after the paint renders `QuoteNoLongerHonoured`'s FRENCH message
+> through `operationStatus` end to end, never a bare code (holub's STOP condition, discharged).
+>
+> **Red-first, quoted and reverted, for every item that changed behaviour**: A/G's mutants each
+> reproduced the exact defect they fix; C2's mutant (move `verify_quote` below `payments.request`)
+> reds all seven zero-intent tests at once; M's `TotalMismatch` mutant (skip the compare) and the
+> checkout/tracking/walk mutants (send a stashed quote; never settle the pending record; always the
+> raw error code) each panicked on their own named assertion, confirmed, then reverted.
+>
+> **Card defect noted, not a refusal**: the dispatch's own line-number citations
+> (`restaurant_frontoffice.yaml:72`, `standalone.rs:~357`) were stale by the time this run reached
+> them — the cited PROSE was found and fixed at its actual, shifted location each time; the finding
+> was ABOUT the comment, so a shifted line number never blocked it.
+>
+> Merged `origin/main` mid-run (a merge commit, `3e086fd4`) for Lane B's #834/PR #939, which also
+> touched `crates/web/src/checkout.rs` — auto-merged cleanly, `cargo test -p web --features ssr`
+> reconfirmed green (236/236) before continuing.
+
 > **2026-09-07 — [#916 "#904 follow-ups (silent refresh + ?next=): latch the one-shot on failure
 > not use, `:param` routes in safe_next, wasm client timeouts, the same-tab captured `next`,
 > `auth_refresh_total{outcome}` server-side"](https://github.com/TheCaptainCompany/captain-food/issues/916)

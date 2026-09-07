@@ -107,6 +107,9 @@ pub(super) async fn prepare(
                     // RSO-1 Phase 4: the enforcement gate, resolved at the composition root onto
                     // CommandDeps — a parameter for the same reason as the clock.
                     deps.enforce_service_hours_guard,
+                    // ADR-20260904-081527 §8 seventh carve-out condition (b), one argument
+                    // threaded: the write-side signed-quote verify guard (D-F/D-G).
+                    deps.quote_guard.as_ref(),
                 )
                 .await
                 .map(|_| ()),

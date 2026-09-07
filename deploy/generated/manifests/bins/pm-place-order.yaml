@@ -108,6 +108,18 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: EMAIL_QUOTA_KEY_HMAC_SECRET
+            - name: QUOTE_SIGNING_KEY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: QUOTE_SIGNING_KEY_HMAC_SECRET
+                  optional: true
+            - name: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET
+                  optional: true
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:

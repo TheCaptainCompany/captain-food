@@ -230,6 +230,31 @@ pub(crate) fn order_id_of(matched: &crate::router::RouteMatch) -> uuid::Uuid {
         .unwrap_or_else(uuid::Uuid::nil)
 }
 
+/// #816 fix round (ux BLOCKING, presentation pass 1): the tracking mount's OWN settle-on-REJECTED
+/// leg — deliberately declared HERE, outside `mod mount`'s `wasm32`+`hydrate` gate, so a native
+/// `cargo test -p web` (`ssr` default) run drives the EXACT call the browser makes, not a
+/// parallel re-implementation of it. Before this fix the mount leg hand-rolled its own
+/// `DispatchHandle` and called the raw `resolve()`, which never touches
+/// `pending::settle_with` — the pending record was never cleared and `restaurant_frontoffice.yaml`'s
+/// claim that this path is live was false in production (dead code, three tests, zero callers).
+/// Resolves THIS client's own `PlaceOrder` intent through
+/// [`crate::tracking::TrackingState::check_place_order_rejection`] — the one path that clears the
+/// pending record on an observed terminal REJECTED — and hands back the cause-neutral message when
+/// (and only when) a rejection was actually observed. `None` covers no-held-intent, still-PENDING
+/// and transport failure alike, exactly as that method already does; the caller (the mount leg)
+/// still owns the "never overwrite a Present order / an already-observed refusal" guard, checked
+/// against the LIVE signal read fresh after this async call returns — that guard depends on
+/// mutable state this free function deliberately does not hold.
+async fn resolve_place_order_rejection(
+    order_id: uuid::Uuid,
+    transport: &dyn crate::graphql::Transport,
+    store: &dyn crate::pending::PendingStore,
+) -> Option<String> {
+    let mut probe = crate::tracking::TrackingState::new(order_id);
+    probe.check_place_order_rejection(transport, store).await;
+    probe.refused
+}
+
 /// The BROWSER half: what `renderer::hydrate()` does when the matched screen is hand-written.
 ///
 /// Until #420 it did nothing at all — `hydrate()` returned before the crate's only
@@ -435,6 +460,14 @@ pub mod mount {
             &crate::pending::BrowserPendingStore,
             order_id,
         );
+        // #816 follow-up (ux, "a live customer-facing lie today"): the message_id of the SAME
+        // pending intent, so the resolve leg below can learn the PlaceOrder mutation's OWN
+        // terminal outcome directly — a REJECTED checkout may never produce an Order at all, so
+        // `order.byId` alone has no way to ever correct the acceptance reassurance.
+        let place_order_message_id = crate::pending::place_order_message_id(
+            &crate::pending::BrowserPendingStore,
+            order_id,
+        );
         let state = RwSignal::new(
             TrackingState::from_context(order_id, &ctx).with_birth_pending(birth_pending),
         );
@@ -487,6 +520,38 @@ pub mod mount {
                     )
                 {
                     state.set(pulled);
+                }
+            });
+        }
+
+        // #816 follow-up (ux, "a live customer-facing lie today") / #816 fix round B1 (pass 1,
+        // "the settle-on-REJECTED wiring is dead code in production"): resolve the PlaceOrder
+        // intent's OWN terminal outcome, independently of the birth re-check above (the
+        // `mount_sign_in_return` precedent — dispatch/resolve/branch-on-outcome), through
+        // `super::resolve_place_order_rejection` — the ONE call that also settles (clears) the
+        // pending record, shared with its own native test so a future regression back to a
+        // hand-rolled `DispatchHandle::resolve()` here is caught outside a browser. A REJECTED
+        // verdict must win over the acceptance reassurance even though `order.byId` may
+        // legitimately never answer at all; Succeeded needs no action here (the birth re-check /
+        // subscription above already converge on the order once it exists), and a
+        // transport/poll-exhaustion error degrades gracefully — the reassurance simply stays on
+        // screen, exactly as it does today.
+        if place_order_message_id.is_some() {
+            let transport = Rc::clone(&transport);
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(refused) = super::resolve_place_order_rejection(
+                    order_id,
+                    transport.as_ref(),
+                    &crate::pending::BrowserPendingStore,
+                )
+                .await
+                {
+                    let current = state.get_untracked();
+                    if !matches!(current.order, crate::tracking::OrderRead::Present(_))
+                        && current.refused.is_none()
+                    {
+                        state.set(current.with_refused(refused));
+                    }
                 }
             });
         }
@@ -782,5 +847,44 @@ mod tests {
             }
         }
         assert_eq!(seen, HandWrittenScreen::ALL, "every variant is reached by a real route");
+    }
+
+    /// B1 (ux BLOCKING, fix round after presentation pass 1): drives the PRODUCTION mount leg's
+    /// own settle-on-REJECTED call (`resolve_place_order_rejection`, declared outside `mod
+    /// mount`'s `wasm32`+`hydrate` gate for exactly this reason) — not a parallel
+    /// re-implementation of it. Shares its SUT with
+    /// `tracking::tests::check_place_order_rejection_marks_refused_and_settles_the_pending_record`
+    /// (both drive `TrackingState::check_place_order_rejection`), so a regression that reverts the
+    /// mount leg back to a hand-rolled `DispatchHandle::resolve()` — the pre-fix defect, which
+    /// never called `pending::settle_with` — turns this test red while that one stays green:
+    /// the pending record would still hold the record after the REJECTED outcome.
+    #[tokio::test]
+    async fn the_mount_leg_settles_the_pending_record_and_marks_refused_on_rejected() {
+        use crate::generated::data_layer::ActionKey;
+        use crate::graphql::test_support::FakeTransport;
+        use crate::pending::{MemoryPendingStore, PendingStore, PendingWrite};
+
+        let order_id = uuid::Uuid::now_v7();
+        let message_id = uuid::Uuid::now_v7();
+        let store = MemoryPendingStore::default();
+        let mut input = serde_json::Map::new();
+        input.insert("orderId".into(), serde_json::json!(order_id));
+        store.save(&[PendingWrite { message_id, action: ActionKey::PlaceOrder, input }]);
+
+        let fake = FakeTransport::scripted(vec![Ok(serde_json::json!({ "operationStatus": {
+            "messageId": message_id, "correlationId": message_id, "causeId": null,
+            "sessionId": null, "traceId": null,
+            "status": "REJECTED", "errorCode": "QuoteVerificationFailed",
+            "message": "We couldn't confirm your total",
+            "occurredAt": "2026-09-07T12:00:00Z",
+        }}))]);
+
+        let refused = resolve_place_order_rejection(order_id, &fake, &store).await;
+
+        assert_eq!(refused.as_deref(), Some("We couldn't confirm your total"));
+        assert!(
+            store.load().is_empty(),
+            "the production mount leg's own settle call must clear the pending record on REJECTED"
+        );
     }
 }

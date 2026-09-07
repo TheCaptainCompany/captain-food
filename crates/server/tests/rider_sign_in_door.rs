@@ -391,7 +391,8 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         run_platform_access_grant: false,
         run_admin_sign_in_door: false,
         platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(unused.clone())),
-    };
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+};
     Door { mailbox, identity, riders, sessions, deps, app }
 }
 
