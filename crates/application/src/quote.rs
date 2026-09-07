@@ -208,6 +208,11 @@ impl QuoteMinter {
 /// `business.failure_reason` value, never surfaced to the customer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuoteRefusal {
+    /// No `quote` was submitted at all while the write door is open (D-A). Its own variant
+    /// (checkpoint 2, graphql item 5) rather than a bare `DomainError::rejected` construction
+    /// bypassing this enum entirely — so an absent quote has a `business.failure_reason` too,
+    /// the same as every other structural cause.
+    Absent,
     /// The token does not decode, or its signature does not verify under any live key.
     Tampered,
     /// The token names a `keyId` no live key (current or, within the overlap window, previous)
@@ -219,18 +224,32 @@ pub enum QuoteRefusal {
     CatalogMismatch,
     /// The token's coordinate is absent or beyond the live stream head.
     CoordinateBeyondHead,
-    /// The fold at the token's coordinate could not be read (transient/technical).
+    /// The fold at the token's coordinate could not be read (transient/technical) — also covers
+    /// a genuine "beyond head" answer FROM THE FOLD ITSELF (as opposed to
+    /// [`QuoteRefusal::CoordinateBeyondHead`]'s LOCAL, I/O-free malformed-number check): the fold
+    /// port's `DomainError` carries no structured way to tell "the DB hiccuped" apart from "this
+    /// coordinate genuinely does not exist yet", so the honest bucket for anything the fold read
+    /// itself failed on is this one, never a false claim about the coordinate's shape (checkpoint
+    /// 2 item M nit).
     FoldUnavailable,
     /// The cart's priceable content changed since the quote was minted.
     CartChanged,
     /// The quote is older than [`MAX_QUOTE_AGE_SECONDS`].
     Expired,
+    /// The fold's own recompute at the token's coordinate disagrees with the token's
+    /// OBSERVABILITY-ONLY `total_cents` (checkpoint 2 item M, young/business/reviewer): both mint
+    /// and verify price the SAME coordinate deterministically, so this can only mean the pricing
+    /// itself is non-deterministic across the two call sites — never a forgery (`total_cents` is
+    /// covered by the HMAC signature, so tampering with it alone fails `Tampered` first). Refused
+    /// STRUCTURALLY rather than silently charging a number nothing corroborates.
+    TotalMismatch,
 }
 
 impl QuoteRefusal {
     /// The span's `business.failure_reason` value — never customer-facing.
     pub fn reason(&self) -> &'static str {
         match self {
+            QuoteRefusal::Absent => "absent",
             QuoteRefusal::Tampered => "tampered",
             QuoteRefusal::UnknownKey => "unknown_key",
             QuoteRefusal::ForeignCart => "foreign_cart",
@@ -239,6 +258,7 @@ impl QuoteRefusal {
             QuoteRefusal::FoldUnavailable => "fold_unavailable",
             QuoteRefusal::CartChanged => "cart_changed",
             QuoteRefusal::Expired => "expired",
+            QuoteRefusal::TotalMismatch => "total_mismatch",
         }
     }
 
@@ -270,18 +290,17 @@ impl QuoteVerifier {
         Self { keys }
     }
 
-    /// Decode, verify the signature under the ONE live key the token names by `keyId`, and check
-    /// the 30-minute staleness backstop. Returns the decoded payload on success — the caller
-    /// (`verify_quote`) still owns every LIVE-STATE comparison (cartId/restaurantId/catalogId/
-    /// lines digest/coordinate), because this method holds no cart or catalog state at all.
-    /// `pub`: none of `QuotePayload`'s fields are secret (the signature itself never leaves this
-    /// module), so a caller inspecting the decoded, ALREADY-VERIFIED fields (tests; a future
-    /// observability span) needs no feature-gated test-only seam.
-    pub fn decode_and_check_signature(
-        &self,
-        token: &CartQuote,
-        now: DateTime<Utc>,
-    ) -> Result<QuotePayload, QuoteRefusal> {
+    /// Decode and verify the signature under the ONE live key the token names by `keyId`.
+    /// Returns the decoded payload on success — the caller (`verify_quote`) still owns every
+    /// LIVE-STATE comparison (cartId/restaurantId/catalogId/lines digest/coordinate) AND
+    /// staleness ([`Self::check_staleness`], a SEPARATE call since checkpoint 2 item M: binding
+    /// must be checked BEFORE staleness, so an expired FOREIGN-cart token reports the loud
+    /// `ForeignCart` cause rather than the quiet `Expired` one — this method holds no cart/
+    /// catalog state at all, so it cannot make that ordering decision itself). `pub`: none of
+    /// `QuotePayload`'s fields are secret (the signature itself never leaves this module), so a
+    /// caller inspecting the decoded, ALREADY-VERIFIED fields (tests; a future observability
+    /// span) needs no feature-gated test-only seam.
+    pub fn decode_and_check_signature(&self, token: &CartQuote) -> Result<QuotePayload, QuoteRefusal> {
         let envelope = decode_token(token).ok_or(QuoteRefusal::Tampered)?;
         let Some(key) = self.keys.iter().find(|k| k.id == envelope.payload.key_id) else {
             return Err(QuoteRefusal::UnknownKey);
@@ -294,11 +313,20 @@ impl QuoteVerifier {
         if expected.len() != given.len() || expected.ct_eq(&given).unwrap_u8() != 1 {
             return Err(QuoteRefusal::Tampered);
         }
-        let age = now.timestamp() - envelope.payload.minted_at;
+        Ok(envelope.payload)
+    }
+
+    /// The 30-minute `QUOTE-STALENESS` backstop, checked SEPARATELY from the signature (checkpoint
+    /// 2 item M): `verify_quote` calls this AFTER the binding checks (cartId/restaurantId/
+    /// catalogId/lines digest), never before, so a token that is BOTH foreign and expired reports
+    /// the louder structural cause. A signature-verified, already-decoded payload is a
+    /// precondition — this never re-checks the HMAC.
+    pub fn check_staleness(&self, payload: &QuotePayload, now: DateTime<Utc>) -> Result<(), QuoteRefusal> {
+        let age = now.timestamp() - payload.minted_at;
         if !(0..=MAX_QUOTE_AGE_SECONDS).contains(&age) {
             return Err(QuoteRefusal::Expired);
         }
-        Ok(envelope.payload)
+        Ok(())
     }
 }
 
@@ -428,13 +456,25 @@ impl QuoteGuard {
 /// The write-side verify guard (D-F), called from `application::commands::place_order`'s
 /// pre-payment block. CLOSED (`guard.is_open()` false): returns `Ok(None)` immediately — the
 /// caller keeps charging `price_cart`'s HEAD-projection total, exactly today's behaviour, and
-/// `quote`/`catalogs`/`lines` are not even inspected. OPEN: an absent `quote` refuses with
-/// `QuoteVerificationFailed`; every other check maps through [`QuoteRefusal::into_domain_error`]. On success,
-/// returns `Some(the fold's whole `PricedCart`)` — items, breakdown AND total, ALL from the FRESH
-/// [`price_cart_at`] recompute at the token's own coordinate, one value at one coordinate (evans,
-/// checkpoint 2 item G): a caller that froze `items`/`breakdown` from the HEAD projection while
-/// charging THIS total would freeze an `OrderPlaced` whose lines never sum to what was charged.
-/// Never the token's own `totalCents`, which is carried for observability only (module doc).
+/// `quote`/`catalogs`/`lines` are not even inspected (a GARBAGE `quote` is ignored too, never
+/// even decoded — checkpoint 2 graphql item 9). OPEN: an absent `quote` refuses with
+/// [`QuoteRefusal::Absent`]; every other check maps through [`QuoteRefusal::into_domain_error`].
+///
+/// Checkpoint 2 item M (young/business/reviewer) reordered the checks: BINDING
+/// (cartId/restaurantId/catalogId/lines digest) now runs BEFORE staleness, so a token that is
+/// BOTH foreign and expired reports the louder `ForeignCart` cause, never the quiet `Expired`
+/// one — `QuoteVerifier::decode_and_check_signature` no longer checks staleness itself (moved to
+/// [`QuoteVerifier::check_staleness`], called here at the new position).
+///
+/// On success, returns `Some(the fold's whole `PricedCart`)` — items, breakdown AND total, ALL
+/// from the FRESH [`price_cart_at`] recompute at the token's own coordinate, one value at one
+/// coordinate (evans, checkpoint 2 item G): a caller that froze `items`/`breakdown` from the HEAD
+/// projection while charging THIS total would freeze an `OrderPlaced` whose lines never sum to
+/// what was charged. The recompute is also compared to the token's OWN `total_cents` (item M): a
+/// disagreement can only mean pricing is non-deterministic across mint and verify (never a
+/// forgery — `total_cents` is HMAC-covered, so tampering with it alone fails `Tampered` first),
+/// and refuses STRUCTURALLY (`TotalMismatch`) rather than silently charging an uncorroborated
+/// number. `total_cents`/`currency` are otherwise carried for OBSERVABILITY only (module doc).
 pub async fn verify_quote(
     guard: &QuoteGuard,
     quote: Option<&CartQuote>,
@@ -448,13 +488,15 @@ pub async fn verify_quote(
         return Ok(None);
     }
     let Some(token) = quote else {
-        return Err(DomainError::rejected("QuoteVerificationFailed", json!({ "cartId": cart_id })));
+        return Err(QuoteRefusal::Absent.into_domain_error(cart_id));
     };
     let payload = guard
         .verifier
-        .decode_and_check_signature(token, now)
+        .decode_and_check_signature(token)
         .map_err(|r| r.into_domain_error(cart_id))?;
 
+    // BINDING checks first (item M): an expired FOREIGN-cart token must report the loud
+    // ForeignCart cause, never the quiet Expired one -- staleness is checked below, AFTER these.
     if payload.cart_id != cart_id.0 || payload.restaurant_id != restaurant_id.0 {
         return Err(QuoteRefusal::ForeignCart.into_domain_error(cart_id));
     }
@@ -468,16 +510,27 @@ pub async fn verify_quote(
     if payload.lines_digest != lines_digest(lines) {
         return Err(QuoteRefusal::CartChanged.into_domain_error(cart_id));
     }
+    guard.verifier.check_staleness(&payload, now).map_err(|r| r.into_domain_error(cart_id))?;
+
     let Some(version) = CatalogVersion::try_new(payload.catalog_version) else {
         return Err(QuoteRefusal::CoordinateBeyondHead.into_domain_error(cart_id));
     };
+    // Any failure reading the fold (a genuine "beyond head" answer from Postgres included) maps
+    // to FoldUnavailable, never CoordinateBeyondHead (item M nit): the port's DomainError carries
+    // no structured way to tell a transient technical failure apart from a truly nonexistent
+    // coordinate, so the honest bucket is "could not be read", never a false claim about the
+    // coordinate's own shape. CoordinateBeyondHead stays reserved for the ONE check above that
+    // needs no I/O at all (a locally malformed version number).
     let as_of = guard.fold_authority.as_of(catalog_id, version).await.map_err(|_| {
-        QuoteRefusal::CoordinateBeyondHead.into_domain_error(cart_id)
+        QuoteRefusal::FoldUnavailable.into_domain_error(cart_id)
     })?;
     let priced = price_cart_at(catalogs, &as_of, cart_id, restaurant_id, lines).await.map_err(|_| {
         QuoteRefusal::FoldUnavailable.into_domain_error(cart_id)
     })?;
-    let _ = (payload.total_cents, payload.currency); // observability only -- see module doc.
+    let _ = payload.currency; // observability only -- see module doc.
+    if priced.total_amount.amount_cents.0 != payload.total_cents {
+        return Err(QuoteRefusal::TotalMismatch.into_domain_error(cart_id));
+    }
     Ok(Some(priced))
 }
 
@@ -533,7 +586,7 @@ mod tests {
             QuoteVerifier::new(SigningKey::from_resolved_secret("key-1", "s3cret-key-1"), None);
         let lines = vec![line()];
         let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
-        let payload = verifier.decode_and_check_signature(&token, at(1010)).expect("verifies");
+        let payload = verifier.decode_and_check_signature(&token).expect("verifies");
         assert_eq!(payload.cart_id, cart().0);
         assert_eq!(payload.restaurant_id, restaurant().0);
         assert_eq!(payload.catalog_id, catalog().0);
@@ -560,7 +613,7 @@ mod tests {
         let tampered =
             CartQuote(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw));
         assert_eq!(
-            verifier.decode_and_check_signature(&tampered, at(1010)),
+            verifier.decode_and_check_signature(&tampered),
             Err(QuoteRefusal::Tampered)
         );
     }
@@ -576,7 +629,7 @@ mod tests {
         let lines = vec![line()];
         let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
         assert_eq!(
-            verifier.decode_and_check_signature(&token, at(1010)),
+            verifier.decode_and_check_signature(&token),
             Err(QuoteRefusal::UnknownKey)
         );
     }
@@ -593,7 +646,7 @@ mod tests {
         );
         let lines = vec![line()];
         let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
-        assert!(verifier.decode_and_check_signature(&token, at(1010)).is_ok());
+        assert!(verifier.decode_and_check_signature(&token).is_ok());
     }
 
     /// checkpoint 2, beck (B): a token minted under keyId `"current"` with the PRE-rotation secret,
@@ -612,7 +665,7 @@ mod tests {
         let lines = vec![line()];
         let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
         assert_eq!(
-            verifier.decode_and_check_signature(&token, at(1010)),
+            verifier.decode_and_check_signature(&token),
             Err(QuoteRefusal::Tampered)
         );
     }
@@ -629,13 +682,15 @@ mod tests {
         let lines = vec![line()];
         let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
         assert_eq!(
-            verifier.decode_and_check_signature(&token, at(1010)),
+            verifier.decode_and_check_signature(&token),
             Err(QuoteRefusal::UnknownKey)
         );
     }
 
     /// A quote older than the 30-minute backstop refuses `Expired` -- the business cause, never
-    /// the structural one.
+    /// the structural one. Staleness moved to `check_staleness` (checkpoint 2 item M): the
+    /// signature itself still verifies at ANY age (decode_and_check_signature no longer checks
+    /// it), only the SEPARATE staleness call reports Expired.
     #[test]
     fn a_quote_older_than_thirty_minutes_is_expired() {
         let minter = QuoteMinter::new(SigningKey::from_resolved_secret("key-1", "s3cret-key-1"));
@@ -644,7 +699,8 @@ mod tests {
         let lines = vec![line()];
         let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
         let too_late = at(1000 + MAX_QUOTE_AGE_SECONDS + 1);
-        assert_eq!(verifier.decode_and_check_signature(&token, too_late), Err(QuoteRefusal::Expired));
+        let payload = verifier.decode_and_check_signature(&token).expect("signature verifies regardless of age");
+        assert_eq!(verifier.check_staleness(&payload, too_late), Err(QuoteRefusal::Expired));
         assert!(QuoteRefusal::Expired.is_business());
     }
 

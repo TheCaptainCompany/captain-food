@@ -1345,7 +1345,7 @@ async fn priced_mints_a_verifiable_quote_on_the_open_arm() {
         None,
     );
     let verified = verifier
-        .decode_and_check_signature(&domain::generated::scalars::CartQuote(quote), chrono::Utc::now())
+        .decode_and_check_signature(&domain::generated::scalars::CartQuote(quote))
         .expect("the minted quote verifies cleanly under the SAME key");
     assert_eq!(verified.cart_id, uid(1), "quote binds the cart it was minted for");
     assert_eq!(verified.catalog_version, fake.last_returned_coordinate(), "quote binds the coordinate the fold actually returned");

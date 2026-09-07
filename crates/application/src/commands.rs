@@ -5957,4 +5957,60 @@ mod quote_guard_tests {
         });
         assert_eq!(intent_amount, Some(1500), "the customer is charged the price they were shown (1500), never HEAD's new 1900");
     }
+
+    /// checkpoint 2 item M (young/business/reviewer): the fold's OWN recompute at the token's
+    /// coordinate disagrees with the token's `total_cents` -- refused STRUCTURALLY
+    /// (`QuoteVerificationFailed`, never a silent charge of an uncorroborated number). Since
+    /// `total_cents` is HMAC-covered, this can only be reached by minting a token whose declared
+    /// total never matched the fold in the first place (never a tamper -- tampering fails
+    /// `Tampered` first). Zero-intent pin: the mismatch refuses before any PaymentIntent.
+    #[tokio::test]
+    async fn a_quote_whose_declared_total_disagrees_with_the_folds_recompute_refuses_structurally() {
+        let (bed, catalogs, fold) = world(1500).await;
+        // The fold prices offer() at 1500 (coordinate 2); mint a token that DECLARES 9999 instead
+        // -- a payload the signature covers faithfully, but whose total_cents never matched what
+        // price_cart_at would recompute at this coordinate.
+        let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(9999), chrono::Utc::now());
+        let gateway = CountingGateway::default();
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("a quote whose declared total disagrees with the fold's own recompute must refuse");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "a total-mismatch refusal must authorize zero PaymentIntents");
+    }
+
+    /// checkpoint 2 item M nit: BINDING is checked BEFORE staleness, so a token that is BOTH
+    /// expired AND names a foreign cart reports the LOUD `ForeignCart` structural cause, never
+    /// the quiet `Expired` business one -- an attacker cannot hide a foreign-cart attempt behind
+    /// an old timestamp and get the gentler refusal.
+    #[tokio::test]
+    async fn an_expired_foreign_cart_token_reports_the_loud_foreign_cart_cause_not_expired() {
+        let (bed, catalogs, fold) = world(1500).await;
+        let foreign_cart = CartId(uuid::Uuid::from_u128(0xBAD));
+        let old_mint = chrono::Utc::now() - chrono::Duration::minutes(31);
+        let token = minter().mint(foreign_cart, resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), old_mint);
+        let gateway = CountingGateway::default();
+        let guard = open_guard(fold);
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect_err("an expired, foreign-cart quote must refuse");
+        assert_eq!(err.code(), Some("QuoteVerificationFailed"), "the LOUD structural cause (ForeignCart), never QuoteNoLongerHonoured (which Expired would map to)");
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0);
+    }
+
+    /// checkpoint 2 graphql item 9: a GARBAGE `quote` string (never decodable as a signed
+    /// envelope at all) is ignored with the write door CLOSED -- `verify_quote` returns `Ok(None)`
+    /// before even attempting to decode it. Built over `quote_guard_closed()`'s panicking fold
+    /// authority (the CLOSED-door shape every other crate's test harness uses): reaching SUCCESS
+    /// here is itself proof the garbage string was never touched.
+    #[tokio::test]
+    async fn a_garbage_quote_is_ignored_with_the_door_closed() {
+        let (bed, catalogs, _fold) = world(1500).await;
+        let garbage = domain::generated::scalars::CartQuote("not-a-valid-signed-quote-token".into());
+        let guard = crate::behaviour_support::quote_guard_closed();
+        place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(garbage)), None, &actor(), chrono::Utc::now(), false, &guard)
+            .await
+            .expect("a garbage quote must be ignored entirely while the door is CLOSED");
+    }
 }
