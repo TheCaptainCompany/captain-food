@@ -436,7 +436,7 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     let notice_copy = summary_error_copy.clone();
     view! {
         <main id="app" data-hydrate="checkout">
-            <header data-c="back_button_header"><h1>"Checkout"</h1></header>
+            <header data-c="back_button_header"><h1>{t("checkout.title")}</h1></header>
             {state.is_delivery.then(|| view! {
                 <section data-c="checkout_section" data-s="delivery_details">
                     <div data-c="address_selector" id="delivery_address"></div>
@@ -588,7 +588,14 @@ pub fn render_checkout_html(mut state: CheckoutViewState, lang: &str) -> String 
     state.locale = lang.to_string();
     let with_stripe_js = state.publishable_key.is_some();
     let body = CheckoutScreen(CheckoutScreenProps { state }).to_html();
-    let doc = crate::renderer::page_html("Checkout - Captain.Food", lang, &body);
+    // The suffix stays the literal " - Captain.Food" -- the brand is a proper noun,
+    // locale-invariant, and five other `page_html` callers already spell it identically
+    // (renderer.rs, tracking.rs, sign_in_return.rs, admin_sign_in_return.rs,
+    // invitation_accept.rs). Resolved from the NORMALIZED `lang` above, not the caller's raw
+    // argument, so the tab title agrees with the `<html lang>` attribute and the h1 for a
+    // region-tagged locale (`fr-FR`).
+    let title = format!("{} - Captain.Food", crate::i18n::resolve("checkout.title", lang));
+    let doc = crate::renderer::page_html(&title, lang, &body);
     if with_stripe_js {
         doc.replace("</head>", &format!("{}</head>", crate::stripe::STRIPE_JS_TAG))
     } else {
