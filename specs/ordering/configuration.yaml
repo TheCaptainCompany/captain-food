@@ -218,13 +218,12 @@ keys:
   # (same placement rule, ADR-20260807-183024 D1): the HANDLING actor is the checkout write seam
   # (`application::commands::place_order`), an ordering-owned concern. `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`
   # itself is declared here in the SAME change that registers it at both composition roots
-  # (`declare_flag`, the fleet-parity gate's own requirement, ADR-20260905-223957 §5) -- but the
-  # WRITE DOOR'S ENFORCEMENT (the verify guard reading it) is NOT wired yet: only once the quote is
-  # verified server-side does `application::commands::place_order`'s pre-payment guard block land
-  # together with this key's real read (D-F/D-G). Until then this key exists, is declared unconditionally at
-  # both roots, and is READ BY NOTHING -- the same "declared ahead of its reader" posture the
-  # mailbox worker section of this file already documents as a normal DSL pattern (a declaration
-  # may precede its read; a read must be declared).
+  # (`declare_flag`, the fleet-parity gate's own requirement, ADR-20260905-223957 §5). P2 (fix
+  # round after presentation pass 1, reviewer NB18): the WRITE DOOR'S ENFORCEMENT (the verify guard
+  # reading it) IS wired -- `application::commands::place_order`'s pre-payment guard block reads
+  # it, verifying server-side against `as_of(catalogId, V)` on the OPEN arm (D-F/D-G), exactly as
+  # `:236`'s `gates:` description below states (WIRED). CLOSED remains the default and the only
+  # state this deliverable SHIPS FLIPPED-ON.
   RUN_QUOTE_REQUIRED_ON_PLACE_ORDER:
     type: bool
     scalar:
