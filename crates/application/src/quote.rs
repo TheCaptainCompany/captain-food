@@ -208,9 +208,11 @@ impl QuoteMinter {
 /// Why a submitted quote could not be verified — the caller (`verify_quote`) maps every variant
 /// onto EXACTLY one of the two catalogued codes (D-D): [`QuoteRefusal::CartChanged`] and
 /// [`QuoteRefusal::Expired`] are the ONE business error (`QuoteNoLongerHonoured`, quiet); every
-/// other variant is the structural/technical path (`QuoteVerificationFailed`, LOUD — the caller
-/// marks the `quote.verify` span ERROR). `reason()` is the span's own
-/// `business.failure_reason` value, never surfaced to the customer.
+/// other variant is the structural/technical path (`QuoteVerificationFailed`, WILL be LOUD once
+/// the `quote.verify` span is wired at an instrumented boundary and its caller marks it ERROR —
+/// P5, fix round after presentation pass 1, observability NB15 / reviewer NB19; flip precondition,
+/// `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` items 19/21). `reason()` is that span's own
+/// `business.failure_reason` value-to-be, never surfaced to the customer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuoteRefusal {
     /// No `quote` was submitted at all while the write door is open (D-A). Its own variant
@@ -268,8 +270,11 @@ impl QuoteRefusal {
     }
 
     /// `true` for the ONE business error's two causes (D-D ii); `false` for every structural cause
-    /// (D-D i/iii), which the caller classifies LOUD (`quote_verify_total{outcome}`'s technical
-    /// bucket, the `quote.verify` span marked ERROR).
+    /// (D-D i/iii), which WILL be classified LOUD once the flip preconditions land
+    /// (`quote_verify_total{outcome}`'s technical bucket, the `quote.verify` span marked ERROR —
+    /// P5, fix round after presentation pass 1, observability NB15 / reviewer NB19;
+    /// `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` items 19/21 — neither the counter nor the
+    /// span construction exists on this path today).
     pub fn is_business(&self) -> bool {
         matches!(self, QuoteRefusal::CartChanged | QuoteRefusal::Expired)
     }

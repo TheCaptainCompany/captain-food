@@ -293,10 +293,13 @@ QuoteVerificationFailed:
     `tests.yaml#/TestPlaceOrderRejectsQuoteVerificationFailed`), a forged signature, an
     unknown/retired `keyId`, a quote naming a different cart/restaurant/catalog than the command's
     live state, a coordinate absent or beyond the live stream head, or a fold read failure. Rejects
-    on the ADR-20260810-112836 §6 technical path (LOUD in telemetry — the `quote.verify` span
-    marked ERROR with `business.failure_reason` recording which of these fired; never on the
+    on the ADR-20260810-112836 §6 technical path — LOUD in telemetry once the flip preconditions
+    land (`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` items 19/21): the `quote.verify` span
+    WILL be marked ERROR with `business.failure_reason` recording which of these fired, once that
+    span is constructed at an instrumented boundary (P5, fix round after presentation pass 1,
+    observability NB15 / reviewer NB19) — not on the
     customer-facing copy, which is identical to `QuoteNoLongerHonoured`'s — the customer sees ONE
-    cause-neutral screen for the whole refusal set). `context: { cartId }` only — no signature, no
+    cause-neutral screen for the whole refusal set. `context: { cartId }` only — no signature, no
     key material, no token bytes anywhere in the context (D-I's spy-binary concern). The
     signature/keyId/foreign-cart/coordinate-beyond-head causes share this SAME code with the
     absent-quote cause but are pinned by NAMED Rust unit tests, not `tests.yaml`, for the same
