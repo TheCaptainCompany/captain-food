@@ -1228,6 +1228,7 @@ creates a second directory entry for the SAME inode — there is no independent 
 concurrent build and test reads, for as long as the hardlink exists. `git status --short` on the
 canonical path will show the mutation (it is the same bytes), which is what makes this catchable at
 all — but only if someone checks; nothing distinguishes a hardlink from a real copy by name alone
-(`ls -li` and matching inode numbers is the only tell). **Rule**: a "scratch copy" of a file inside a
-shared working tree must be `cp`, never `ln` — including inside `/tmp` or a scratchpad, if that
-scratchpad could ever resolve back to the same filesystem/inode as the tracked file.
+(`ls -li` and matching inode numbers is the only tell). A hardlink shares the inode only on the SAME
+filesystem — `ln` fails with `EXDEV` across filesystems — but `ln -s` (a symlink) crosses
+filesystems and has the identical effect: editing through the link edits the target. **Rule**: a
+"scratch copy" of a file inside a shared working tree must be `cp`, never `ln` in either form.

@@ -589,11 +589,11 @@ pub fn render_checkout_html(mut state: CheckoutViewState, lang: &str) -> String 
     let with_stripe_js = state.publishable_key.is_some();
     let body = CheckoutScreen(CheckoutScreenProps { state }).to_html();
     // The suffix stays the literal " - Captain.Food" -- the brand is a proper noun,
-    // locale-invariant, and five other `page_html` callers already spell it identically
-    // (renderer.rs, tracking.rs, sign_in_return.rs, admin_sign_in_return.rs,
-    // invitation_accept.rs). Resolved from the NORMALIZED `lang` above, not the caller's raw
-    // argument, so the tab title agrees with the `<html lang>` attribute and the h1 for a
-    // region-tagged locale (`fr-FR`).
+    // locale-invariant, and four other `page_html` callers spell the suffix identically
+    // (tracking.rs, sign_in_return.rs, admin_sign_in_return.rs, invitation_accept.rs);
+    // renderer.rs carries the bare brand with no suffix. Resolved from the NORMALIZED `lang`
+    // above, not the caller's raw argument, so the tab title agrees with the `<html lang>`
+    // attribute and the h1 for a region-tagged locale (`fr-FR`).
     let title = format!("{} - Captain.Food", crate::i18n::resolve("checkout.title", lang));
     let doc = crate::renderer::page_html(&title, lang, &body);
     if with_stripe_js {
@@ -1217,9 +1217,10 @@ mod tests {
     }
 
     /// #834: the browser tab title resolves `checkout.title` from the same catalog key, with the
-    /// brand suffix " - Captain.Food" kept as the literal five other `page_html` callers already
-    /// spell identically (renderer.rs, tracking.rs, sign_in_return.rs, admin_sign_in_return.rs,
-    /// invitation_accept.rs) -- the brand is a proper noun, locale-invariant.
+    /// brand suffix " - Captain.Food" kept as the literal four other `page_html` callers spell
+    /// identically (tracking.rs, sign_in_return.rs, admin_sign_in_return.rs, invitation_accept.rs
+    /// -- renderer.rs carries the bare brand, no suffix) -- the brand is a proper noun,
+    /// locale-invariant.
     #[cfg(feature = "ssr")]
     #[test]
     fn the_checkout_tab_title_comes_from_the_catalog_in_both_locales() {
@@ -1242,7 +1243,15 @@ mod tests {
     /// caller's raw argument.
     #[cfg(feature = "ssr")]
     #[test]
-    fn a_region_tagged_locale_agrees_across_title_heading_and_lang() {
+    fn region_tagged_and_unsupported_locales_agree_across_title_heading_and_lang() {
+        // The `de` case below only discriminates while these two constants differ -- if they were
+        // ever made equal, `de` would stop pinning anything and the test would pass for the wrong
+        // reason. Fail loudly instead of silently losing coverage.
+        assert_ne!(
+            crate::i18n::DEFAULT_LOCALE,
+            crate::i18n::FALLBACK_LOCALE,
+            "the de case discriminates only while these differ"
+        );
         for lang in ["fr-FR", "de"] {
             let html = render_checkout_html(view_state(true, false), lang);
             assert!(html.contains("<html lang=\"fr\">"), "input {lang:?}: {html}");

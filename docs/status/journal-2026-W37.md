@@ -10,9 +10,11 @@ Journal entries for ISO week 2026-W37, newest first, in the order they were writ
 > (`restaurant_frontoffice.translations.yaml:92`, en "Checkout", fr "Paiement") from the locale
 > already normalized at `render_checkout_html:586` — never the caller's raw argument — instead of
 > the hard-coded English literal `"Checkout"`. The " - Captain.Food" brand suffix stays a literal,
-> exact spelling: five other `page_html` callers (renderer.rs, tracking.rs, sign_in_return.rs,
-> admin_sign_in_return.rs, invitation_accept.rs) already spell it identically, and the brand is a
-> proper noun, locale-invariant. **NO entry was written in `specs/translations.code_refs.yaml`** —
+> exact spelling: four other `page_html` callers (tracking.rs, sign_in_return.rs,
+> admin_sign_in_return.rs, invitation_accept.rs) spell the suffix identically; renderer.rs carries
+> the bare brand with no suffix (corrected at the confirmation round — the round-1/2 hand-backs said
+> "five", which was wrong). The brand is a proper noun, locale-invariant. **NO entry was written in
+> `specs/translations.code_refs.yaml`** —
 > ADR-20260725-013315's over-declaration precedent decided a lens split (reviewer, evans, farley,
 > holub, graphql, vernon, beck said no gate needs it — the screen's own `$ref` already marks
 > `checkout.title` used and an entry would re-create the over-declaration that ADR records; ux,
@@ -61,8 +63,8 @@ Journal entries for ISO week 2026-W37, newest first, in the order they were writ
 > `docs/adr/ADR-20260904-152807-*.md` (addendum, 2026-09-07, this change).
 >
 > **Residue**: `:388` (`format!("{} items - {}", cart_line_count, formatted_total)`, the cart
-> summary) and `:466`-ish
-> (`" from "` between the summary and the restaurant name) stay English pending PR #933's merge and
+> summary) and `:473` (`" from "` between the summary and the restaurant name) stay English pending
+> PR #933's merge and
 > the specs lock lifting; `checkout.processing` is a DECLARED key with no runtime consumer yet (a
 > submit-in-flight signal this SSR tree lacks). `tracking.rs:508` carries the SAME hard-coded-title
 > defect (`page_html("Your order - Captain.Food", lang, &body)`) on the order-tracking screen — a
