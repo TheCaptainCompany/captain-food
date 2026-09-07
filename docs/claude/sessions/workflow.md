@@ -858,7 +858,9 @@ clause and a `— NEW —` clause inserted between test and record.
 message fragment that proves it did.
 
 **Gated at dispatch by Lane D of `.claude/hooks/register-check.sh`** (Rule 1, riding after the
-trail check), proven red-first itself — most of the selftest cases in `register-check-selftest.sh`
+trail check) — **for write-capable dispatches only**; a what-next CONSULT never carries this
+section at all, because it routes to `.claude/agents/architect-consult.md`, which Lane D never
+gates (#926 item 6 / #914 item 10). Proven red-first itself — most of the selftest cases in `register-check-selftest.sh`
 were committed FAILING before the rule existed, then turned green by it (beck, farley). **Not
 true of every case at every stage**: RF4 (`Red-first: none` at 0 hits) was GREEN from day one, but
 for the wrong reason — the rule never fired at 0 hits, so `none` was accepted by the rule's absence,
@@ -1044,15 +1046,22 @@ it?* If the answer names the founder and no `decision queue` row is open, there 
 an admin-gated provisioning, and it is asked as a queue row with options and a recommendation,
 never as a PR left ready-for-review.
 
-## The register-check hook gates every write-capable agent, `architect` included — and a briefing card is a coordinator diff that can be wrong at HEAD (2026-09-04)
+## The register-check hook gates every write-capable agent, `architect` included — consults now route to `architect-consult` instead (2026-09-04, rewritten 2026-09-06)
 
 Two findings from the #639 part C step 3 briefing:
 
-1. **`architect` carries `Write`/`Edit`, so a lens consult sent to it is GATED** by the
-   `PreToolUse` register-check hook even when the prompt says "read-only": the dispatch must carry
-   the `Register check:` trail lines like an executor card. Twelve lenses launched in one message
-   went through; the architect's did not, and the fan-out lost one round-trip. Put the trail on
-   every card, whoever receives it — it is cheap and never wrong.
+1. **`architect` carries `Write`/`Edit`, so a lens consult sent to it was GATED** by the
+   `PreToolUse` register-check hook even when the prompt said "read-only" — twelve lenses launched
+   in one message went through, the architect's did not, and the fan-out lost one round-trip
+   (2026-09-04 finding, kept as history). **The rule now** (#926 item 6 / #914 item 10, consent
+   option (b)): a what-next CONSULT routes to `.claude/agents/architect-consult.md`, the read-only
+   twin of `architect` (`tools: Read, Grep, Glob, Bash` — no `Write`/`Edit`/`Agent`), which Lane D of
+   `register-check.sh` **never gates** — no trail line needed, because a call that cannot produce a
+   diff carries none. The `Register check:`/`Red-first:` trail belongs on **write-capable
+   dispatches only** (`architect`, `executor`, `generator`). A consult sent to `architect` and
+   carrying a trail invented only to satisfy the gate is the theatre this variant exists to end —
+   never "put the trail on every card, whoever receives it" (the 2026-09-04 remedy, now superseded):
+   a read-only call gets no trail, a write-capable one always does.
 2. **A card's option grading is a coordinator claim, and six lenses independently falsified one**
    ("reuse `UnassignDeliveryFromPartner` — additive, GREEN"): the handler refuses a rider-held job,
    the lifecycle table has no edge, the rule names the partner path. The briefing did its job — the
