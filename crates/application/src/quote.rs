@@ -576,6 +576,44 @@ mod tests {
         assert!(verifier.decode_and_check_signature(&token, at(1010)).is_ok());
     }
 
+    /// checkpoint 2, beck (B): a token minted under keyId `"current"` with the PRE-rotation secret,
+    /// verified by a verifier whose `"current"` key has since been ROTATED to a new secret -- the
+    /// keyId still matches, so the verifier picks the SAME key by id, but the HMAC it recomputes
+    /// (over the new secret) can never equal the signature (computed over the old one): `Tampered`,
+    /// never a silent accept and never `UnknownKey` (the id resolves fine; only the bytes disagree).
+    /// Mutant: the signature compare degrades from constant-time equality to a LENGTH-ONLY check
+    /// (`decode_and_check_signature`'s `expected.len() != given.len() || ...`) -- expected red: a
+    /// same-length, wrong-secret signature is accepted as valid.
+    #[test]
+    fn a_quote_under_the_same_key_id_with_a_rotated_secret_is_tampered() {
+        let minter = QuoteMinter::new(SigningKey::from_resolved_secret("current", "pre-rotation-secret"));
+        let verifier =
+            QuoteVerifier::new(SigningKey::from_resolved_secret("current", "post-rotation-secret"), None);
+        let lines = vec![line()];
+        let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
+        assert_eq!(
+            verifier.decode_and_check_signature(&token, at(1010)),
+            Err(QuoteRefusal::Tampered)
+        );
+    }
+
+    /// checkpoint 2, beck (B): a keyId that has been DROPPED from the verifier's set (rotated out of
+    /// the overlap window entirely) refuses `UnknownKey` even when its secret bytes happen to EQUAL
+    /// the current key's -- the lookup is by `keyId`, never by secret, so an id the verifier no
+    /// longer names is unresolvable on id alone regardless of what the bytes would have proven.
+    #[test]
+    fn a_key_id_dropped_from_the_set_is_unknown_even_when_its_secret_equals_the_current_key() {
+        let minter = QuoteMinter::new(SigningKey::from_resolved_secret("retired-id", "shared-secret"));
+        let verifier =
+            QuoteVerifier::new(SigningKey::from_resolved_secret("current", "shared-secret"), None);
+        let lines = vec![line()];
+        let token = minter.mint(cart(), restaurant(), catalog(), v(5), &lines, &money(1500), at(1000));
+        assert_eq!(
+            verifier.decode_and_check_signature(&token, at(1010)),
+            Err(QuoteRefusal::UnknownKey)
+        );
+    }
+
     /// A quote older than the 30-minute backstop refuses `Expired` -- the business cause, never
     /// the structural one.
     #[test]
