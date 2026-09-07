@@ -949,46 +949,93 @@ if ! grep -q 'every_record_in_the_corpus_is_citable_through_lane_d' "$ROOT/tools
   fail=1
 fi
 
-# ── #926 item 5, RESHAPED by farley: a WARN-only regression TRIPWIRE, never a hang bound ────────
-# A post-hoc self-timer cannot BE a hang bound: a hung script never reaches the line that would
-# read it -- CI's `gate-scripts` job already carries `timeout-minutes: 10` for that, at the JOB
-# level. What a self-timer CAN do is make growth VISIBLE: the elapsed wall time is printed on
-# every run (a reading visible in every CI log), and crossing
-# REGISTER_CHECK_SELFTEST_CEILING_SECONDS (default 120s) prints exactly ONE WARN line to stderr,
-# naming itself a TRIPWIRE -- an UNVERIFIED ceiling, never a hang bound (the job timeout above
-# already owns that) and never a METER (#923 §4's `gate_minutes_per_round`, read from CI check-run
-# times, owns that). It NEVER changes the exit code: the every-turn local path from stop-gate.sh
-# must not become a trainer that teaches a session to re-run past a warning.
-# Antecedent: the gate-scripts job's own selftest step measured 4s on five recent green main runs
-# (Actions API, 2026-09-06, 1s granularity) and 4.7s locally on this container.
-# A small in-process FUNCTION, so ST1 below can call it directly with SYNTHETIC elapsed/ceiling
-# values rather than actually sleeping the suite past the ceiling.
-register_check_selftest_ceiling_warn() { # register_check_selftest_ceiling_warn <elapsed> <ceiling>
-  local elapsed="$1" ceiling="$2"
+# ── #928 items 1+2, replacing the #926 item 5 shape: selftest_finish OWNS the elapsed reading, the
+# tripwire WARN and the exit code (ADR-20260906-024838; consent: reviewer, beck, farley). A post-hoc
+# self-timer cannot BE a hang bound: a hung script never reaches the line that would read it --
+# CI's `gate-scripts` job already carries `timeout-minutes: 10` for that, at the JOB level. What a
+# self-timer CAN do is make growth VISIBLE: the elapsed wall time is printed on EVERY run, pass or
+# fail (a reading visible in every CI log, including the failing runs one most wants to time), and
+# crossing REGISTER_CHECK_SELFTEST_CEILING_SECONDS (read INSIDE the function, default 120s) prints
+# exactly ONE WARN line to stderr, naming itself a TRIPWIRE -- an UNVERIFIED ceiling, never a hang
+# bound (the job timeout above already owns that) and never a METER (#923 §4's
+# `gate_minutes_per_round`, read from CI check-run times, owns that). The WARN NEVER changes the
+# exit code -- GATE-STEP-LOCUS (ADR-20260827-081500): the selftest runs inside the always-run
+# gate-scripts job aggregated by name into the required check, so a WARN that flipped the exit would
+# block every merge repo-wide the moment a run crossed the ceiling. The exit is decided purely by
+# `fail`: 0 when it is 0, 2 otherwise. Elapsed is an integer-seconds reading (`date +%s` deltas), so
+# a ceiling of 0 is flaky on a sub-second machine (`[ 0 -gt 0 ]` is false) -- the cases below use -1
+# (beck). Antecedent: the gate-scripts job's own selftest step measured 4s on five recent green main
+# runs (Actions API, 2026-09-06, 1s granularity) and 4.7s locally on this container.
+selftest_finish() { # selftest_finish <elapsed> <fail>
+  local elapsed="$1" fail="$2"
+  local ceiling="${REGISTER_CHECK_SELFTEST_CEILING_SECONDS:-120}"
   if [ "$elapsed" -gt "$ceiling" ]; then
     echo "register-check selftest: WARN -- elapsed ${elapsed}s past REGISTER_CHECK_SELFTEST_CEILING_SECONDS=${ceiling}s (TRIPWIRE, UNVERIFIED ceiling: a run past it is a regression signal, not a hang bound -- CI bounds hangs at the job level, timeout-minutes: 10 -- and not a meter, #923 §4 owns that)" >&2
   fi
+  if [ "$fail" -ne 0 ]; then
+    # #928 D2b (farley/checkpoint): the reading and the FAILED verdict fold into ONE line here --
+    # a separate unconditional "elapsed Xs." line above this branch made the PASS path print the
+    # reading TWICE (once unconditionally, once inside "all cases pass"); this is the single place
+    # the failing path's reading lives now.
+    echo "register-check selftest: FAILED (see cases above) -- elapsed ${elapsed}s." >&2
+    return 2
+  fi
+  echo "register-check selftest: all cases pass (${elapsed}s)."
+  return 0
 }
-# ST1: the WARN fires when elapsed > ceiling and stays SILENT when it does not -- pinned with
-# synthetic values (5s against a ceiling of 0, then 5s against the real default 120) so the case
-# never depends on the suite's own actual runtime.
-st1_out="$(register_check_selftest_ceiling_warn 5 0 2>&1 >/dev/null)"
-if ! printf '%s' "$st1_out" | grep -qF 'TRIPWIRE'; then
-  echo "register-check selftest: case ST1-selftest-ceiling-tripwire-warns FAILED -- no WARN/TRIPWIRE line on stderr with elapsed=5 ceiling=0 (got: $st1_out)" >&2
+# ST1b/ST1c/ST1d call the function with SYNTHETIC elapsed/fail values, so no case depends on the
+# suite's own actual runtime or on forcing a real failure. ST1b and ST1d capture stderr SEPARATELY
+# from stdout (`2>&1 >/dev/null`: stderr goes to the substitution, stdout is discarded) so the
+# WARN's STREAM stays pinned -- checkpoint finding (reviewer): merging both into one capture left a
+# mutant that printed TRIPWIRE to stdout instead of stderr undetected.
+st1b_err="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 0 2>&1 >/dev/null)"; st1b_rc=$?
+if ! printf '%s' "$st1b_err" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- no TRIPWIRE line on stderr with the ceiling at minus one (got stderr: $st1b_err)" >&2
   fail=1
 fi
-st1_quiet="$(register_check_selftest_ceiling_warn 5 120 2>&1 >/dev/null)"
-if [ -n "$st1_quiet" ]; then
-  echo "register-check selftest: case ST1-selftest-ceiling-tripwire-warns FAILED -- unexpected WARN with elapsed=5 ceiling=120 (got: $st1_quiet)" >&2
+if [ "$st1b_rc" -ne 0 ]; then
+  echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- WARN changed the exit code (got $st1b_rc, want 0)" >&2
+  fail=1
+fi
+# Round-2 confirmation finding (same class the checkpoint caught twice): a mutant dropping the
+# elapsed reading from the PASS-path message (`"all cases pass."` with no `(${elapsed}s)`) reds
+# nothing above -- item 1's "reading on EVERY run" was pinned only on the failing half (ST1c). ST1b
+# now also captures stdout SEPARATELY (stderr discarded) and asserts the pass-path reading is there.
+st1b_out="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 0 2>/dev/null)"
+if ! printf '%s' "$st1b_out" | grep -qF '5s'; then
+  echo "register-check selftest: case ST1b-finish-reads-the-ceiling-from-the-environment FAILED -- no elapsed reading on the passing path (got stdout: $st1b_out)" >&2
+  fail=1
+fi
+# ST1c also guards against the two checkpoint survivors (beck/reviewer): an unconditional WARN
+# (`if true` in place of the `-gt` test) and a DEFAULT ceiling moved negative both fire a TRIPWIRE
+# here even though nothing was configured to cross it -- an always-firing tripwire in an every-turn
+# gate is exactly the noise the design fears. The subshell UNSETS the env var so this case stays
+# green even under an ambient REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 already set in the caller's
+# shell (beck).
+st1c_out="$( (unset REGISTER_CHECK_SELFTEST_CEILING_SECONDS; selftest_finish 5 1) 2>&1 )"; st1c_rc=$?
+if ! printf '%s' "$st1c_out" | grep -qF 'elapsed 5s'; then
+  echo "register-check selftest: case ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2 FAILED -- no elapsed reading on the failing path (got: $st1c_out)" >&2
+  fail=1
+fi
+if [ "$st1c_rc" -ne 2 ]; then
+  echo "register-check selftest: case ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2 FAILED -- wrong exit code (got $st1c_rc, want 2)" >&2
+  fail=1
+fi
+if printf '%s' "$st1c_out" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1c-finish-prints-the-reading-on-a-failing-run-and-returns-2 FAILED -- a TRIPWIRE fired under the DEFAULT ceiling with the env var unset (an unconditional WARN, or a negative default ceiling, would make every run noisy) (got: $st1c_out)" >&2
+  fail=1
+fi
+st1d_err="$(REGISTER_CHECK_SELFTEST_CEILING_SECONDS=-1 selftest_finish 5 1 2>&1 >/dev/null)"; st1d_rc=$?
+if ! printf '%s' "$st1d_err" | grep -qF 'TRIPWIRE'; then
+  echo "register-check selftest: case ST1d-the-warn-never-changes-the-exit FAILED -- no TRIPWIRE line on stderr with the ceiling at minus one (got stderr: $st1d_err)" >&2
+  fail=1
+fi
+if [ "$st1d_rc" -ne 2 ]; then
+  echo "register-check selftest: case ST1d-the-warn-never-changes-the-exit FAILED -- WARN changed the exit code (got $st1d_rc, want 2)" >&2
   fail=1
 fi
 
-if [ "$fail" -ne 0 ]; then
-  echo "register-check selftest: FAILED (see cases above)" >&2
-  exit 2
-fi
 SELFTEST_ELAPSED=$(( $(date +%s) - SELFTEST_START_TS ))
-SELFTEST_CEILING="${REGISTER_CHECK_SELFTEST_CEILING_SECONDS:-120}"
-register_check_selftest_ceiling_warn "$SELFTEST_ELAPSED" "$SELFTEST_CEILING"
-echo "register-check selftest: all cases pass (${SELFTEST_ELAPSED}s)."
-exit 0
+# The real call site: one line. selftest_finish prints the reading on every run (pass or fail,
+# GATE-STEP-LOCUS above is why the WARN inside it is exit-neutral everywhere) and decides the exit.
+selftest_finish "$SELFTEST_ELAPSED" "$fail"; exit $?
