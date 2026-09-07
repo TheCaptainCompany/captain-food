@@ -2,6 +2,64 @@
 
 Journal entries for ISO week 2026-W37, newest first, in the order they were written.
 
+> **2026-09-07 — [#816 "The priced quote token"](https://github.com/TheCaptainCompany/captain-food/issues/816),
+> phase C2: checkpoint 2's fourteen-lens fixes (section (0) A–O) + the D-J client minimum
+> (section (1)), draft [PR #933](https://github.com/TheCaptainCompany/captain-food/pull/933).**
+> Sixteen commits on top of phase C's landed write-side verify guard. Section (0), one commit per
+> lettered item: **A** a test-double bug (`TestCatalogs::add` appended instead of replacing,
+> making every "HEAD moves" quote test vacuous); **B/B2** the retired-key overlap arm (rotated
+> secret → `Tampered`, a dropped id → `UnknownKey`, distinct from a shared-secret coincidence);
+> **C/C2** THE WALK hardened (assert HEAD actually moved, drop a dead spy, prove the fold is never
+> consulted with the door CLOSED via a panicking fold authority) and every quote-refusal unit test
+> now runs over a `CountingGateway` (zero PaymentIntents, provably, not merely "the fake never
+> counted"); **D** `errors.yaml#/QuoteRequired` purged (never existed) and the legal display
+> guarantee's "in either door state" overclaim struck — CLOSED is now a stated EXPOSURE, not a
+> guarantee; **E** a stale "no verify logic reads this yet" comment corrected (phase C already
+> wired it); **G** `verify_quote` now returns the fold's WHOLE `PricedCart` (items+breakdown+total,
+> one coordinate) so `OrderPlaced`'s frozen lines always sum to what was actually charged; **H**
+> `CartQuote`'s write-side doc corrected from DARK to WIRED; **I** `crates/web`'s `PriceMismatch`
+> residue retargeted to `QuoteVerificationFailed`; **J** `QUOTE_SIGNING_KEY_HMAC_SECRET` reverted to
+> `required: []` (a brief promotion added zero safety with the door still closed and wedged all 14
+> deploy manifests — the promotion moves to the flip card); **K** the
+> `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` fleet-parity gauge fed by the interlock's own WITNESS at both
+> composition roots, never the raw config bool (closing a DB-less-monolith reporting hole); **M**
+> the fold's recompute now compared to the token's `total_cents` (refuses `TotalMismatch` on
+> disagreement), binding checked BEFORE staleness (an expired foreign-cart token now reports the
+> loud `ForeignCart` cause), transient `as_of` failures mapped to `FoldUnavailable` honestly, a new
+> `QuoteRefusal::Absent`, and a proof that a garbage quote is ignored with the door CLOSED; **N**
+> the monolith's two independently-built bulkhead pools (4 connections instead of the intended
+> shared 2) unified into one, the DB-gated benchmark's "sql" leg retimed to the query `at_head`
+> actually issues, and DB-failure labels split into `acquire_timeout`/`statement_timeout`/the two
+> structural causes instead of one wrong or silent bucket; **O** the `quote.verify` span exemption
+> rationale corrected (a Cargo/SDK-free layering fact, never a door-licensing one) and the
+> `{ any_of: [quote.verify, command.validate] }` alternation's tautology recorded as a flip
+> precondition (`QUOTE-MINT-PRECONDITIONS` item 18).
+>
+> Section (1), the D-J client minimum, one commit per bullet: checkout's `place_order` action now
+> sends `quote: '{{ cart.quote }}'` — the SAME `cart.current` read that painted the recap, never
+> one stashed from `/cart` — and drops `expectedTotal` from the wire entirely (`#429`'s browser
+> submit leg stays unwired — antecedent, not pulled in); `order_tracking` gains
+> `operationStatus.byMessage` and the ACTUAL wiring its own `TrackingState.refused`/render logic
+> had described but nothing ever called (`check_place_order_rejection`: one read, no polling,
+> settles/clears the pending record on the observed terminal verdict); and a new DB-gated walk
+> scenario proves a cart edited after the paint renders `QuoteNoLongerHonoured`'s FRENCH message
+> through `operationStatus` end to end, never a bare code (holub's STOP condition, discharged).
+>
+> **Red-first, quoted and reverted, for every item that changed behaviour**: A/G's mutants each
+> reproduced the exact defect they fix; C2's mutant (move `verify_quote` below `payments.request`)
+> reds all seven zero-intent tests at once; M's `TotalMismatch` mutant (skip the compare) and the
+> checkout/tracking/walk mutants (send a stashed quote; never settle the pending record; always the
+> raw error code) each panicked on their own named assertion, confirmed, then reverted.
+>
+> **Card defect noted, not a refusal**: the dispatch's own line-number citations
+> (`restaurant_frontoffice.yaml:72`, `standalone.rs:~357`) were stale by the time this run reached
+> them — the cited PROSE was found and fixed at its actual, shifted location each time; the finding
+> was ABOUT the comment, so a shifted line number never blocked it.
+>
+> Merged `origin/main` mid-run (a merge commit, `3e086fd4`) for Lane B's #834/PR #939, which also
+> touched `crates/web/src/checkout.rs` — auto-merged cleanly, `cargo test -p web --features ssr`
+> reconfirmed green (236/236) before continuing.
+
 > **2026-09-07 — [#834 "Four hard-coded English strings on the checkout pay step, and two declared
 > keys with no runtime consumer"](https://github.com/TheCaptainCompany/captain-food/issues/834),
 > PARTIAL slice, draft [PR #939](https://github.com/TheCaptainCompany/captain-food/pull/939), Lane B
