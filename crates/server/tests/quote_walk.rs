@@ -86,12 +86,44 @@ async fn append_event(pool: &PgPool, stream_name: &str, version: i32, event_type
     .unwrap_or_else(|e| panic!("append {event_type} on {stream_name}: {e}"));
 }
 
+/// The fold authority the door-OFF fleet is built over (checkpoint 2, beck item C): `verify_quote`
+/// returns `Ok(None)` before ever touching `guard.fold_authority` while `guard.is_open()` is
+/// false, so a fold that PANICS if called is the door-CLOSED fleet's own proof that "the fold is
+/// never consulted with the door closed" — a silent, undetected read here would previously have
+/// been indistinguishable from the fold agreeing with HEAD by coincidence.
+struct PanickingFoldAuthority;
+#[async_trait::async_trait]
+impl application::ports::AsOfPriceAuthority for PanickingFoldAuthority {
+    async fn as_of(
+        &self,
+        _catalog_id: domain::generated::scalars::CatalogId,
+        _version: domain::catalog_as_of::CatalogVersion,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, domain::shared::errors::DomainError> {
+        panic!("PanickingFoldAuthority::as_of -- the write door is CLOSED, the fold must never be consulted");
+    }
+    async fn at_head(
+        &self,
+        _catalog_id: domain::generated::scalars::CatalogId,
+        _correlation_id: uuid::Uuid,
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, domain::shared::errors::DomainError> {
+        panic!("PanickingFoldAuthority::at_head -- the write door is CLOSED, the fold must never be consulted");
+    }
+}
+
 /// The write-side worker fleet, parameterised on the quote guard's two interlocked gates (the
 /// `rider_standing_walk.rs::spawn_mailbox_workers_with_door` shape) — the walk's main leg runs
 /// both ON; `door_off_walk` below runs both OFF, over a SEPARATE fleet (two fleets never share a
-/// lease on the same actor type in one test process).
+/// lease on the same actor type in one test process). The door-OFF fleet's `QuoteGuard` is built
+/// over `PanickingFoldAuthority` rather than the real Postgres adapter (beck item C): the CLOSED
+/// arm must never reach the fold at all, so wiring a fold that panics on any call is a stronger
+/// assertion than merely observing the right charge.
 fn spawn_mailbox_workers_with_quote_door(pool: &PgPool, bus: actor_client::OperationStatusBus, quote_door_open: bool) {
-    let fold_pool = infrastructure::PgAsOfCatalogRepository::bulkhead_pool(pool);
+    let fold_authority: Arc<dyn application::ports::AsOfPriceAuthority> = if quote_door_open {
+        let fold_pool = infrastructure::PgAsOfCatalogRepository::bulkhead_pool(pool);
+        Arc::new(infrastructure::PgAsOfCatalogRepository::new(fold_pool))
+    } else {
+        Arc::new(PanickingFoldAuthority)
+    };
     let quote_guard: Arc<application::quote::QuoteGuard> = Arc::new(
         application::quote::QuoteGuard::resolve_at_boot(
             quote_door_open,
@@ -99,7 +131,7 @@ fn spawn_mailbox_workers_with_quote_door(pool: &PgPool, bus: actor_client::Opera
             false,
             walk_key(),
             None,
-            Arc::new(infrastructure::PgAsOfCatalogRepository::new(fold_pool)),
+            fold_authority,
         )
         .expect("both gates move together, the interlock cannot refuse"),
     );
@@ -161,12 +193,13 @@ fn spawn_mailbox_workers_with_quote_door(pool: &PgPool, bus: actor_client::Opera
     }
 }
 
-/// A REAL Stripe-shaped double that RECORDS the amount it was asked to authorize (never merely
-/// "accepted or not") -- the walk's own proof that the charge equals the quoted total.
+/// A REAL Stripe-shaped double -- the walk's own proof that the charge equals the quoted total is
+/// the PERSISTED `PaymentIntentCreated.checkout.totalAmount` row (queried directly from
+/// `domain_events` below), never a spy field on this gateway: a prior `last_amount_cents` mutex
+/// here recorded the authorized amount but nothing ever asserted it (checkpoint 2, beck item C —
+/// removed as dead).
 #[derive(Default)]
-struct WalkGateway {
-    last_amount_cents: std::sync::Mutex<Option<i64>>,
-}
+struct WalkGateway;
 #[async_trait::async_trait]
 impl PaymentService for WalkGateway {
     async fn request(
@@ -174,7 +207,7 @@ impl PaymentService for WalkGateway {
         input: application::generated::services::PaymentRequestInput,
         _meta: &application::generated::services::ServiceCallMeta,
     ) -> Result<application::generated::services::PaymentRequestOutput, domain::shared::errors::DomainError> {
-        *self.last_amount_cents.lock().unwrap() = Some(input.amount.amount_cents.0);
+        let _ = input;
         Ok(application::generated::services::PaymentRequestOutput {
             payment_intent_id: domain::generated::scalars::PaymentIntentId("pi_quote_walk".into()),
             client_secret: "pi_quote_walk_secret".into(),
@@ -327,9 +360,12 @@ async fn seed_checkout_world(pool: &PgPool, restaurant_id: uuid::Uuid, catalog_i
 /// THE WALK, door-OPEN: mint at the read door, checkout through the write door, both interlocked
 /// gates ON. The catalog HEAD moves (a second `ProductAdded` at 1900) AFTER the mint but BEFORE
 /// `placeOrder` — the charge must be the QUOTED total (1500, the coordinate the mint used), never
-/// HEAD's new 1900.
+/// HEAD's new 1900. Named `the_quote_walk_charges_the_price_shown_even_after_head_moves` until
+/// checkpoint 2 (beck item C), which renamed it to the product's own outcome sentence, the SAME
+/// name `commands::quote_guard_tests::the_customer_is_charged_the_price_they_were_shown` uses at
+/// the unit level -- this is its end-to-end twin, over the real router/mailbox/projector stack.
 #[tokio::test]
-async fn the_quote_walk_charges_the_price_shown_even_after_head_moves() {
+async fn the_customer_is_charged_the_price_they_were_shown() {
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let Some(url) = db_test_gate::database_url("quote_walk") else { return };
     let _guard = DB_LOCK.lock().await;
@@ -377,6 +413,22 @@ async fn the_quote_walk_charges_the_price_shown_even_after_head_moves() {
         },
     })).await;
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (head move)");
+
+    // 2b) Prove HEAD actually moved (checkpoint 2, beck item C): the LIVE projection's `current`
+    // read now answers 1900 -- without this the test could pass vacuously if the ProductAdded
+    // above never reached the projection at all (e.g. a broken `run_once`), which would make the
+    // "1500 survives a head move" proof below meaningless (there would be no move to survive).
+    let resp = schema
+        .execute(
+            async_graphql::Request::new(current_q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(domain::generated::scalars::CustomerId(customer_id)))
+                .data(tenant_of(restaurant_id)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "current (post-head-move) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["current"]["totalAmount"]["amountCents"], json!(1900), "HEAD must have actually moved to 1900 before placeOrder -- otherwise this test proves nothing");
 
     // 3) `placeOrder` with the STALE-HEAD quote, write door OPEN.
     let mutation = format!(
@@ -448,4 +500,18 @@ async fn the_quote_walk_door_off_still_places_the_order_at_head() {
     let op = poll_operation(&schema, &message_id).await;
     eprintln!("TRANSCRIPT door-OFF: placeOrder operationStatus={:?} (quote never submitted, door closed)", op["status"]);
     assert_eq!(op["status"], "SUCCEEDED", "door-OFF placeOrder operation: {op:?} -- the CLOSED arm must score success exactly as before this deliverable");
+
+    // checkpoint 2, beck item C: the charge equals HEAD (1500 -- unmoved in this test) because the
+    // CLOSED arm charges `priced.total_amount` (the live projection), never a quote. The fleet's
+    // `QuoteGuard` was built over `PanickingFoldAuthority` (never the real Postgres adapter) --
+    // had `verify_quote` consulted the fold with the door closed, this worker would have panicked
+    // instead of reaching SUCCEEDED at all, so reaching this assertion is itself part of the proof.
+    let intent_rows = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT payload FROM domain_events WHERE event_type = 'PaymentIntentCreated' ORDER BY position DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the PaymentIntentCreated row");
+    let charged = intent_rows["checkout"]["totalAmount"]["amountCents"].as_i64();
+    assert_eq!(charged, Some(1500), "door-OFF charges HEAD (1500), the fold never consulted: {charged:?}");
 }
