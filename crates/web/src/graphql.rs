@@ -225,7 +225,7 @@ impl Transport for HttpTransport {
     }
 }
 
-/// The one-shot 401-refresh seam (#904, ADR-20260905-101349 §13 — the member door's flip
+/// The 401-refresh seam (#904, ADR-20260905-101349 §13 — the member door's flip
 /// precondition). One method so the production POST to `/auth/refresh` and the test double's
 /// call-counting are the ONLY two implementations anyone ever needs — the decorator below never
 /// inspects the cookie itself. `true` = the session rotated; the caller reissues the ORIGINAL
@@ -236,39 +236,43 @@ pub trait Refresher: MaybeSync {
     async fn refresh(&self) -> bool;
 }
 
-/// Wraps any [`Transport`] with the EXACTLY-ONCE 401-refresh-and-reissue rule (#904): on the first
-/// HTTP 401 of the load, call the [`Refresher`] once and — if it rotated the session — reissue the
-/// SAME document + variables once; every subsequent 401 of the same load (whether the refresh
-/// itself failed, or a second request 401s after a successful refresh — a provider outage doesn't
-/// get re-tried per request) returns straight through untouched. **Only a bare HTTP 401 arms it —
-/// a 403 NEVER does** (ADR-20260904-081527 §4/`server/src/auth.rs`'s `AuthError::Forbidden` arm: a
-/// rotated token carries the exact same role, so a `RoleGuard` refusal would loop forever if it
-/// re-armed a refresh). GraphQL `errors`,
-/// network failures and every other status pass through unexamined — refreshing a cookie can never
-/// fix a malformed document or a role a fresh cookie still lacks.
+/// Wraps any [`Transport`] with the 401-refresh-and-reissue rule (#904, latch design #916 item 1):
+/// on a bare HTTP 401 while the page is NOT latched, latch it, call the [`Refresher`] once and —
+/// if it rotated the session — reissue the SAME document + variables once. The latch is cleared
+/// again STRICTLY AFTER inspecting that reissue's result, and only if it came back `Ok`: a
+/// successful refresh re-arms the page for its NEXT expiry, rather than spending a once-per-load
+/// budget. A 401 that arrives while the page IS latched (a failed refresh, a reissue that still
+/// 401s or otherwise errs, or a genuinely concurrent second 401) returns straight through
+/// untouched — the latch is a memory that the last refresh attempt did not fix things, not a
+/// counter of how many refreshes have run. **Only a bare HTTP 401 arms it — a 403 NEVER does**
+/// (ADR-20260904-081527 §4/`server/src/auth.rs`'s `AuthError::Forbidden` arm: a rotated token
+/// carries the exact same role, so a `RoleGuard` refusal would loop forever if it re-armed a
+/// refresh). GraphQL `errors`, network failures and every other status pass through unexamined —
+/// refreshing a cookie can never fix a malformed document or a role a fresh cookie still lacks.
 ///
-/// The one-shot state is an `Arc<AtomicBool>`, not the `Rc<Cell<bool>>` a wasm32-only decorator
-/// would reach for first: [`Transport`] requires [`MaybeSync`] (== `Sync` off wasm32, so the native
+/// The latch is an `Arc<AtomicBool>`, not the `Rc<Cell<bool>>` a wasm32-only decorator would
+/// reach for first: [`Transport`] requires [`MaybeSync`] (== `Sync` off wasm32, so the native
 /// `#[tokio::test]`s this module is tested with — beck's Q1 — can hold a `&dyn Transport` across an
 /// `.await`), and `Rc`/`Cell` are `!Sync` on every target. `AtomicBool` costs nothing extra on
 /// wasm32's single thread and satisfies the bound everywhere. Composing ONE instance per screen
 /// load (`renderer::hydrate`) and sharing its `Arc` with the SAME load's mutation dispatcher
 /// (`interact::install`) is what makes a refresh failure "remembered for the page", not just for
-/// one resolver — the hydrate loop is sequential (one `.await` at a time), so there is no
-/// concurrent-refresh race to additionally guard against.
+/// one resolver. The `swap(true, ...)` on arming is still load-bearing even though the hydrate
+/// loop itself is sequential: it is what stops a CONCURRENT 401 arriving through the shared-Arc
+/// mutation dispatcher from launching a second, overlapping refresh-and-reissue for the same page.
 pub struct RefreshingTransport {
     inner: Box<dyn Transport>,
     refresher: Box<dyn Refresher>,
-    used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    latched: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RefreshingTransport {
     pub fn new(
         inner: Box<dyn Transport>,
         refresher: Box<dyn Refresher>,
-        used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        latched: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
-        Self { inner, refresher, used }
+        Self { inner, refresher, latched }
     }
 }
 
@@ -279,20 +283,27 @@ impl Transport for RefreshingTransport {
         let result = self.inner.execute(document, variables.clone()).await;
         let Err(TransportError::Status { status: 401 }) = &result else {
             // Not a bare 401 (a 403, a network failure, GraphQL `errors`, malformed, or success):
-            // never arms or consumes the one shot.
+            // never arms or clears the latch.
             return result;
         };
-        if self.used.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            // Already spent this load's one shot — a second 401 (failed refresh, or a fresh one
-            // after a successful refresh) goes straight to the caller.
+        if self.latched.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            // Already latched — a failed refresh, a reissue that still errored, or a concurrent
+            // second 401 racing in through the mutation dispatcher — goes straight to the caller.
             return result;
         }
         if !self.refresher.refresh().await {
             // The refresh call itself failed: the ORIGINAL 401 is what the caller sees — never a
-            // different error, never a retry loop.
+            // different error, never a retry loop. The page stays latched.
             return result;
         }
-        self.inner.execute(document, variables).await
+        let reissue = self.inner.execute(document, variables).await;
+        if reissue.is_ok() {
+            // Only a successful reissue proves the refresh actually fixed things: re-arm the
+            // latch for the page's next expiry. Any Err here (401, 403, network, malformed)
+            // leaves it latched — inspected STRICTLY AFTER this call, never before it.
+            self.latched.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        reissue
     }
 }
 
@@ -803,32 +814,86 @@ mod tests {
         assert_eq!(refresher.call_count(), 1, "refresher count {} != 1", refresher.call_count());
     }
 
-    /// Red-first: a mutant that refreshes PER REQUEST (instead of once per load) fails this with
-    /// "refresher count 3 != 1" once three 401 reads have gone through the same transport.
+    /// Red-first (#916 item 1, ADR-20260905-101349 §13 pinning the OUTCOME not the per-load
+    /// count): a SUCCESSFUL refresh must re-arm the latch for the NEXT expiry — the concept is a
+    /// memory of a failed refresh, not a budget spent once per page load. At base (before this
+    /// fix) read 2 gets the ORIGINAL 401 back untouched because the flag never resets after a
+    /// successful reissue; the verbatim red is quoted in the hand-back.
     #[tokio::test]
-    async fn three_401_reads_refresh_exactly_once() {
+    async fn a_successful_refresh_re_arms_for_the_next_expiry() {
         let (t, refresher) = refreshing(
             vec![
                 Err(TransportError::Status { status: 401 }),
                 Ok(json!({ "a": 1 })),
                 Err(TransportError::Status { status: 401 }),
+                Ok(json!({ "b": 2 })),
+            ],
+            CountingRefresher::new(true),
+        );
+        let first = t.execute("query { a }", json!({})).await;
+        assert!(first.is_ok(), "read 1: {first:?} is not Ok(...)");
+        let second = t.execute("query { b }", json!({})).await;
+        assert!(second.is_ok(), "read 2: {second:?} is not Ok(...)");
+        assert_eq!(refresher.call_count(), 2, "refresher count {} != 2", refresher.call_count());
+    }
+
+    /// Pin (a) (#916 item 1), replacing `three_401_reads_refresh_exactly_once`: its surviving
+    /// property is that a refresh whose REISSUE still 401s leaves the page latched — the refresher
+    /// ran but fixed nothing, so no fresh attempt is due until the next real 401. GREEN at base
+    /// (a regression pin, not a red-first test): base already returns the original 401 untouched
+    /// on a second read here, it just does so for the wrong reason (an unconditional one-shot
+    /// rather than "the reissue didn't come back Ok"). The three-entry script is exact: a
+    /// per-request or always-re-arm mutant over-consumes it and `FakeTransport` panics
+    /// "unscripted call" rather than merely miscounting (beck).
+    #[tokio::test]
+    async fn a_refresh_whose_reissue_still_401s_latches_the_page() {
+        let (t, refresher) = refreshing(
+            vec![
+                Err(TransportError::Status { status: 401 }),
+                Err(TransportError::Status { status: 401 }),
                 Err(TransportError::Status { status: 401 }),
             ],
             CountingRefresher::new(true),
         );
-        // First read: 401 -> refresh -> reissue -> succeeds.
-        assert!(t.execute("query { a }", json!({})).await.is_ok());
-        // Second and third reads: the load's one shot is already spent (`used` stays true whether
-        // the FIRST refresh succeeded or not) — a second 401 is returned untouched, never retried.
-        assert!(matches!(
-            t.execute("query { b }", json!({})).await,
-            Err(TransportError::Status { status: 401 })
-        ));
-        assert!(matches!(
-            t.execute("query { c }", json!({})).await,
-            Err(TransportError::Status { status: 401 })
-        ));
+        let first = t.execute("query { a }", json!({})).await;
+        assert!(
+            matches!(first, Err(TransportError::Status { status: 401 })),
+            "read 1: {first:?} is not Err(Status 401)"
+        );
+        let second = t.execute("query { b }", json!({})).await;
+        assert!(
+            matches!(second, Err(TransportError::Status { status: 401 })),
+            "read 2: {second:?} is not Err(Status 401)"
+        );
         assert_eq!(refresher.call_count(), 1, "refresher count {} != 1", refresher.call_count());
+
+        // Second arm: the reissue's Err need not be a 401 to leave the page latched -- ANY Err
+        // (401, 403, network, malformed) does. `Network` is the cheapest non-401 variant
+        // `FakeTransport` can script without extra fields, so it stands in for the class.
+        let (t2, refresher2) = refreshing(
+            vec![
+                Err(TransportError::Status { status: 401 }),
+                Err(TransportError::Network("connection reset by peer".into())),
+                Err(TransportError::Status { status: 401 }),
+            ],
+            CountingRefresher::new(true),
+        );
+        let first2 = t2.execute("query { a }", json!({})).await;
+        assert!(
+            matches!(first2, Err(TransportError::Network(_))),
+            "read 1 (network arm): {first2:?} is not Err(Network(_))"
+        );
+        let second2 = t2.execute("query { b }", json!({})).await;
+        assert!(
+            matches!(second2, Err(TransportError::Status { status: 401 })),
+            "read 2 (network arm): {second2:?} is not Err(Status 401)"
+        );
+        assert_eq!(
+            refresher2.call_count(),
+            1,
+            "refresher count (network arm) {} != 1",
+            refresher2.call_count()
+        );
     }
 
     /// Red-first: a mutant that refreshes on ANY non-2xx (not just a bare 401) fails this with
