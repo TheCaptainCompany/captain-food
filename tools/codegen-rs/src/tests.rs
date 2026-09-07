@@ -2096,14 +2096,22 @@ keys:
         // application handler, so their spans need a framework-boundary seam that does not exist
         // yet (follow-up owed from the #180 Phase 4 report; the write path's cart/pricing steps
         // are currently visible only through the read-side `cart.price` twin). `quote.verify`
-        // (#933 B'.10, PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-F) joins them for a
-        // DIFFERENT, narrower reason: it is named in place-order's success-rule alternation
-        // (`{ any_of: ["quote.verify", "command.validate"] }`) ahead of its own call site
-        // (gate-then-stabilize) -- the guard it will wrap is licensed only once the write door
-        // opens (ADR-20260904-081527 §8's seventh carve-out), so no production call site may exist
-        // before then. An entry that GAINS a call site fails below until the exemption is removed
-        // -- a stale exemption is a gate failure, never a quiet allowance (the warning-ratchet
-        // discipline).
+        // (#933 B'.10, PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-F) joins them for the
+        // SAME structural reason as its two siblings above (corrected, checkpoint 2 item O,
+        // observability -- this used to say the guard it wraps "is licensed only once the write
+        // door opens", which is FALSE as of phase C: `application::quote::verify_quote` is wired
+        // and ships behind the door for real, CLOSED a no-op and OPEN doing the work, both today).
+        // The constructor is DECLARED; `crates/application` is SDK-free by design (Cargo pins the
+        // tracing facade, #191) and cannot import `telemetry`, so the span can only be constructed
+        // at an UNFENCED instrumented boundary OUTSIDE `application` (a `crates/server`-side
+        // wrapper around the `verify_quote` call) -- that wiring is a FLIP PRECONDITION
+        // (`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` item 18), never a licensing gate on the
+        // guard's own logic, which already runs unconditionally. It is also named in place-order's
+        // success-rule alternation (`{ any_of: ["quote.verify", "command.validate"] }`), which is a
+        // TAUTOLOGY until this wiring lands (`command.validate` is independently `required: true`
+        // on this same contract). An entry that GAINS a call site fails below until the exemption
+        // is removed -- a stale exemption is a gate failure, never a quiet allowance (the
+        // warning-ratchet discipline).
         const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] = &[
             ("place-order", "cart.read"),
             ("place-order", "pricing.compute"),

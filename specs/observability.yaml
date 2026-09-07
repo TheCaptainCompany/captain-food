@@ -184,9 +184,17 @@ place-order:
     # `ENFORCE_SERVICE_HOURS_GUARD`. `required: false`: it exists only once the write door
     # (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`) is OPEN; the door defaults CLOSED
     # everywhere, so this span is silent in production today, exactly like `cart-price`'s
-    # `catalog.as_of.fold` above. Late-bound outcome/token-field attributes (incl. the negative
-    # case) land with the guard's own Rust in the phase that opens the door -- this row exists NOW
-    # so that phase needs no observability.yaml change of its own (gate-then-stabilize).
+    # `catalog.as_of.fold` above. CORRECTED (checkpoint 2 item O, observability;
+    # docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml item 18): phase C already wired and ships the
+    # GUARD's own Rust behind the door for real (`application::quote::verify_quote`) -- what still
+    # does not exist is the SPAN CONSTRUCTOR CALL, because `crates/application` is SDK-free by
+    # design (Cargo pins the tracing facade, #191) and cannot import `telemetry` at all; the
+    # constructor can only be invoked at an unfenced instrumented boundary outside `application`.
+    # The late-bound outcome/token-field attributes (incl. the negative case) and that boundary
+    # wiring are a FLIP PRECONDITION, and — contrary to what this comment used to claim — the flip
+    # DOES need an observability.yaml change of its own: at minimum `business.quote_outcome`,
+    # `business.failure_reason` and `otel.status_code` need declaring here once the wiring lands,
+    # so this row's current shape is a placeholder, not the wiring's final one.
     - name: "quote.verify"
       kind: INTERNAL
       required: false
