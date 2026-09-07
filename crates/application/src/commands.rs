@@ -5532,8 +5532,18 @@ mod quote_guard_tests {
         offers: Mutex<Vec<(RestaurantId, OfferView)>>,
     }
     impl TestCatalogs {
+        /// REPLACES the entry for `(restaurant_id, view.offer_id)` if one is already seeded, else
+        /// appends -- a plain `push` made every "HEAD moves" test a no-op: `offer_by_id` is
+        /// first-match-wins, so a later `add()` simulating a price change was silently shadowed by
+        /// `world()`'s original seed and the projection this double answers never actually moved
+        /// (beck, checkpoint 2 item A).
         fn add(&self, restaurant_id: RestaurantId, view: OfferView) {
-            self.offers.lock().unwrap().push((restaurant_id, view));
+            let mut offers = self.offers.lock().unwrap();
+            if let Some(existing) = offers.iter_mut().find(|(r, o)| *r == restaurant_id && o.offer_id == view.offer_id) {
+                existing.1 = view;
+            } else {
+                offers.push((restaurant_id, view));
+            }
         }
     }
     #[async_trait]
