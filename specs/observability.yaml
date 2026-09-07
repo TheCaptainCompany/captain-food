@@ -457,12 +457,16 @@ place-order:
         # A SECOND alternation (B'.10, landed ahead of the runtime -- gate-then-stabilize): the
         # write-side guard chain must show ONE of the two legal shapes. CLOSED (today, everywhere):
         # `command.validate` alone runs the guard chain and `quote.verify` never constructs, so the
-        # second branch is what satisfies this today. OPEN (once
+        # second branch is what satisfies this today. P3 (fix round after presentation pass 1,
+        # observability NB13): the alternation is a TAUTOLOGY today, not an independent second
+        # check -- `command.validate` is ALREADY `required: true` on its own (D-A changes no
+        # behaviour there), so it satisfies this rule on every run regardless of whether
+        # `quote.verify` ever fires; the alternation carries no discriminating power until
+        # `quote.verify` is actually wired at an instrumented boundary. OPEN (once
         # `configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` flips): `quote.verify` ALSO
-        # constructs (D-F), independently satisfying the alternation from the first branch --
-        # `command.validate` keeps firing in both arms (it is `required: true` on its own, D-A
-        # changes no behaviour there), so this rule needs no observability.yaml edit when that
-        # phase lands.
+        # constructs (D-F) -- turning this into a real either/or is item (20) of
+        # `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml`, and DOES land as an observability.yaml
+        # edit (a discriminating alternation), never a no-op.
         - { any_of: ["quote.verify", "command.validate"] }
         - "pricing.compute"
         - "payment.intent.create"
