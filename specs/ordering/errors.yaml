@@ -290,18 +290,21 @@ QuoteVerificationFailed:
     WIRED (ADR-20260906-192007 D-D i/iii, D-F/D-G): the ONE structural/technical error for every
     verify-guard refusal cause OTHER than `QuoteNoLongerHonoured`'s two — an ABSENT `quote` when
     the write door is open (D-A; genuinely tests.yaml-coverable, no signature needed, see
-    `tests.yaml#/TestPlaceOrderRejectsQuoteRequired`), a forged signature, an unknown/retired
-    `keyId`, a quote naming a different cart/restaurant/catalog than the command's live state, a
-    coordinate absent or beyond the live stream head, or a fold read failure. Rejects on the
-    ADR-20260810-112836 §6 technical path (LOUD in telemetry — the `quote.verify` span marked
-    ERROR with `business.failure_reason` recording which of these fired; never on the
+    `tests.yaml#/TestPlaceOrderRejectsQuoteVerificationFailed`), a forged signature, an
+    unknown/retired `keyId`, a quote naming a different cart/restaurant/catalog than the command's
+    live state, a coordinate absent or beyond the live stream head, or a fold read failure. Rejects
+    on the ADR-20260810-112836 §6 technical path (LOUD in telemetry — the `quote.verify` span
+    marked ERROR with `business.failure_reason` recording which of these fired; never on the
     customer-facing copy, which is identical to `QuoteNoLongerHonoured`'s — the customer sees ONE
     cause-neutral screen for the whole refusal set). `context: { cartId }` only — no signature, no
     key material, no token bytes anywhere in the context (D-I's spy-binary concern). The
     signature/keyId/foreign-cart/coordinate-beyond-head causes share this SAME code with the
     absent-quote cause but are pinned by NAMED Rust unit tests, not `tests.yaml`, for the same
     reason `QuoteNoLongerHonoured` names above (`application::commands::tests::
-    a_forged_signature_refuses_with_quote_verification_failed` and its siblings).
+    a_forged_signature_refuses_with_quote_verification_failed` and its siblings). Messages below
+    are ux's DRAFT for counsel review (CQ-7, never clearance) — not yet legally cleared copy, the
+    SAME posture `QuoteNoLongerHonoured`'s copy states (checkpoint 2, legal item D: this
+    description previously omitted the marker its sibling error already carried).
   context:
     cartId: { $ref: 'scalars.yaml#/CartId' }
   messages:

@@ -2968,10 +2968,10 @@ async fn test_place_order_recomputes_price_server_side() {
     ]);
 }
 
-/// tests.yaml#/tests/TestPlaceOrderRejectsQuoteRequired — "The write door OPEN and no signed quote submitted rejects the checkout before any payment authorization (ADR-20260906-192007 D-A/D-F/D-G)"
+/// tests.yaml#/tests/TestPlaceOrderRejectsQuoteVerificationFailed — "The write door OPEN and no signed quote submitted rejects the checkout before any payment authorization (ADR-20260906-192007 D-A/D-F/D-G)"
 /// rules: ServerPriceAuthority
 #[tokio::test]
-async fn test_place_order_rejects_quote_required() {
+async fn test_place_order_rejects_quote_verification_failed() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
@@ -2984,9 +2984,9 @@ async fn test_place_order_rejects_quote_required() {
     let run_quote_required_on_place_order: bool = true;
     let run_fold_priced_cart_read_for_quote_guard: bool = true;
     let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
-    let err = result.expect_err("TestPlaceOrderRejectsQuoteRequired: the spec expects a typed rejection");
-    support::assert_thrown("TestPlaceOrderRejectsQuoteRequired", &err, &["QuoteVerificationFailed"]);
-    bed.assert_appended("TestPlaceOrderRejectsQuoteRequired", &before, &[]);
+    let err = result.expect_err("TestPlaceOrderRejectsQuoteVerificationFailed: the spec expects a typed rejection");
+    support::assert_thrown("TestPlaceOrderRejectsQuoteVerificationFailed", &err, &["QuoteVerificationFailed"]);
+    bed.assert_appended("TestPlaceOrderRejectsQuoteVerificationFailed", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPlaceOrderRejectsUnresolvablePrice — "A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)"

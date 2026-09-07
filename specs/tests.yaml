@@ -2552,7 +2552,7 @@ tests:
     then:
       - { $ref: '#/fixtures/paymentIntentCreatedCollection' }
 
-  TestPlaceOrderRejectsQuoteRequired:
+  TestPlaceOrderRejectsQuoteVerificationFailed:
     name: "The write door OPEN and no signed quote submitted rejects the checkout before any payment authorization (ADR-20260906-192007 D-A/D-F/D-G)"
     rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }

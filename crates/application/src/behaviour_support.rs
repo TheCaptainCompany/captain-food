@@ -121,7 +121,7 @@ pub fn quote_guard_closed() -> crate::quote::QuoteGuard {
 
 /// The `when.gates`-driven `QuoteGuard` a PlaceOrder scenario opening
 /// `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`/`RUN_FOLD_PRICED_CART_READ` threads (BT_GATE_CONSUMING).
-/// `TestPlaceOrderRejectsQuoteRequired` is the ONE scenario that opens both today — its `quote`
+/// `TestPlaceOrderRejectsQuoteVerificationFailed` is the ONE scenario that opens both today — its `quote`
 /// stays absent, refusing before the fold authority is ever touched, so the panic-on-call stub is
 /// the honest value here (the SAME `UncalledFoldAuthority` shape `quote_guard_closed` uses
 /// internally via `closed_for_tests`), never a real Postgres-backed one this in-memory suite has
@@ -153,7 +153,7 @@ pub fn quote_guard_for(run_quote_required_on_place_order: bool, run_fold_priced_
         None,
         std::sync::Arc::new(UncalledFoldAuthority),
     )
-    .expect("TestPlaceOrderRejectsQuoteRequired opens both gates together -- the interlock cannot refuse")
+    .expect("TestPlaceOrderRejectsQuoteVerificationFailed opens both gates together -- the interlock cannot refuse")
 }
 
 // ------------------------------------------------------------------------------------------------

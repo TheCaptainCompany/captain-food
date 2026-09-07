@@ -285,9 +285,9 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     ("PlaceOrder", "ENFORCE_SERVICE_HOURS_GUARD", "enforce_service_hours_guard"),
     // ADR-20260906-192007 D-F/D-G: the signed-quote write door's own interlocked pair -- both
     // must be named in the SAME test's `when.gates` to open the guard (D-B's interlock), so a
-    // scenario names both or neither. `TestPlaceOrderRejectsQuoteRequired` is the one scenario
-    // that opens both; every other PlaceOrder test gets `false` for both (the spec defaults),
-    // exactly `quote_guard_closed()`'s own posture.
+    // scenario names both or neither. `TestPlaceOrderRejectsQuoteVerificationFailed` is the one
+    // scenario that opens both; every other PlaceOrder test gets `false` for both (the spec
+    // defaults), exactly `quote_guard_closed()`'s own posture.
     ("PlaceOrder", "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", "run_quote_required_on_place_order"),
     ("PlaceOrder", "RUN_FOLD_PRICED_CART_READ", "run_fold_priced_cart_read_for_quote_guard"),
     // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's release gate, read

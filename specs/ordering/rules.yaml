@@ -61,8 +61,11 @@ ServerPriceAuthority:
     the signed `quote`, D-A/D-J) and ignored by the server — no shipped client sends it outside a
     test fixture (`crates/web/src/checkout.rs:610`), and nothing checks it. `quote` is accepted on
     the command, structurally, and NEVER READ. OPEN — once the write door is open: an absent
-    `quote` refuses at the handler with `errors.yaml#/QuoteRequired` (typed, never an SDL non-null
-    violation, so requiredness can flip with no SDL edit); a present `quote` is VERIFIED
+    `quote` refuses at the handler with `errors.yaml#/QuoteVerificationFailed` (typed, never an SDL
+    non-null violation, so requiredness can flip with no SDL edit — corrected checkpoint 2, legal
+    item D: `errors.yaml#/QuoteRequired` never existed as a catalogued error, the absent-quote
+    cause was always folded into `QuoteVerificationFailed`'s structural set); a present `quote` is
+    VERIFIED
     (`application::quote::verify_quote`) — signature under the live key set, `keyId` in that set,
     mintedAt within the 30-minute `QUOTE-STALENESS` backstop, cartId/restaurantId/catalog identity
     matching the command's live state, and the cart's priceable content unchanged since the quote
@@ -79,13 +82,19 @@ ServerPriceAuthority:
     re-source, so a pass always charges exactly the fold's own recompute at the token's coordinate
     (which, by construction, is the total the customer was shown).
 
-    Refusals (D-D): `errors.yaml#/QuoteRequired` (absent quote); `errors.yaml#/QuoteNoLongerHonoured`
-    (the ONE business refusal — a cart edited after minting, or an expired quote);
-    `errors.yaml#/QuoteVerificationFailed` (the ADR-20260810-112836 §6 technical path for every
-    structural cause — forged signature, a foreign cart's quote, a retired key, a coordinate
-    beyond the stream's own head, a fold read failure). The customer sees ONE cause-neutral screen
-    for the whole set. LEGAL DISPLAY GUARANTEE (Code de la consommation L112-1/L221-5 posture): the
-    amount charged never exceeds the CTA total the consumer agreed to, in either door state.
+    Refusals (D-D): `errors.yaml#/QuoteVerificationFailed` (the ADR-20260810-112836 §6 technical
+    path for every structural cause — an absent quote, forged signature, a foreign cart's quote, a
+    retired key, a coordinate beyond the stream's own head, a fold read failure);
+    `errors.yaml#/QuoteNoLongerHonoured` (the ONE business refusal — a cart edited after minting,
+    or an expired quote). The customer sees ONE cause-neutral screen for the whole set. LEGAL
+    DISPLAY GUARANTEE (Code de la consommation L112-1/L221-5 posture): the amount charged never
+    exceeds the CTA total the consumer agreed to — STRUCK "in either door state" (checkpoint 2,
+    legal BLOCKER item D): the guarantee holds BY CONSTRUCTION only with the write door OPEN, and
+    only over the catalog-lines component the signed token binds (fees are UNBOUND by any token —
+    D-E — though zero fee legs exist today, so this is inert, not yet exercised). CLOSED is a
+    stated EXPOSURE, not a guarantee: the charge is the live HEAD recompute, unverified against
+    whatever total the customer was actually shown (no signed artifact of that number exists on
+    this arm) — the same gap this whole deliverable exists to close once the door flips.
     `errors.yaml#/PriceMismatch` is RETIRED (deleted) — repurposing it was refused (evans): its
     copy ("Prices have changed…") is false for the structural refusal causes the new set
     enumerates. `errors.yaml#/PriceUnresolvable` is unchanged, either arm: a cart line whose price

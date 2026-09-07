@@ -238,7 +238,7 @@ keys:
       structurally and NEVER READ -- every order is priced and charged AT HEAD from the live
       catalog projection, exactly as before this key existed; `expectedTotal`'s equality check is
       deleted (`errors.yaml#/PriceMismatch` retired). OPEN: an absent `quote` refuses at the
-      handler with `errors.yaml#/QuoteRequired` (typed, never SDL non-null); a present `quote` is
+      handler with `errors.yaml#/QuoteVerificationFailed` (typed, never SDL non-null); a present `quote` is
       verified (`application::quote::verify_quote`) against `as_of(catalogId, V)` at the
       coordinate it names (never `at_head` -- D-F), and a mismatch produces exactly one of the
       enumerated refusals (D-D) -- the charge becomes that fold's `price_cart_at` recompute, never

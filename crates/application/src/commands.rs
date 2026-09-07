@@ -2679,7 +2679,7 @@ pub async fn place_replacement_order(
 /// price rejects fail-closed with `errors.yaml#/PriceUnresolvable`), then the signed-quote verify
 /// guard (`crate::quote::verify_quote`, ADR-20260906-192007 D-F): CLOSED (the write door's
 /// default everywhere), a no-op — the charge stays the HEAD-projection total above, `cmd.quote`
-/// unread, exactly today's behaviour; OPEN, an absent quote refuses `QuoteRequired`, a present one
+/// unread, exactly today's behaviour; OPEN, an absent quote refuses `QuoteVerificationFailed`, a present one
 /// is verified and the charge becomes the FRESH fold recompute at the token's own coordinate. The
 /// retired `expectedTotal` equality check (`errors.yaml#/PriceMismatch`) is deleted — no shipped
 /// client ever sent it. Then create the Stripe PaymentIntent through the generated
@@ -2871,7 +2871,7 @@ pub async fn place_order(
     // CLOSED (`quote_guard.is_open()` false, the default everywhere): `verify_quote` returns
     // `Ok(None)` immediately without inspecting `cmd.quote`/`catalogs`/`cart.lines` at all — the
     // charge stays `priced.total_amount` (the HEAD-projection total), today's behaviour verbatim.
-    // OPEN: an absent `cmd.quote` refuses `QuoteRequired`; every structural/business refusal is
+    // OPEN: an absent `cmd.quote` refuses `QuoteVerificationFailed`; every structural/business refusal is
     // ONE of the enumerated causes (D-D); on success the charge becomes the FRESH
     // `price_cart_at` recompute at the token's own coordinate — never `priced.total_amount`,
     // which is the HEAD-projection value the fold may disagree with (young's red-first:
