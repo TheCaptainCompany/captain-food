@@ -1218,3 +1218,17 @@ read of the expected value cannot distinguish "correctly re-recorded" from "neve
 last real write" whenever those two coincide, which they do exactly when the correct answer is a
 constant (a rest state like "0 while idle"). See `crates/infrastructure/tests/rider_standing_lag_metric.rs`
 (`the_rider_group_lag_gauge_is_re_recorded_on_an_idle_pass`) for the applied shape.
+
+## 19l. A "scratch copy" made with `ln` is a HARDLINK — it shares the inode, so editing it edits the shared tree (#834, 2026-09-07)
+
+**Cost**: one false stop-hook report plus a planted mutant left visible in the shared checkout tree
+during a checkpoint another lens was reading. A hardlink (`ln src dst`, as opposed to `cp src dst`)
+creates a second directory entry for the SAME inode — there is no independent copy, so a mutant
+"planted" by editing the hardlinked scratch file mutates the real, shared file that every other
+concurrent build and test reads, for as long as the hardlink exists. `git status --short` on the
+canonical path will show the mutation (it is the same bytes), which is what makes this catchable at
+all — but only if someone checks; nothing distinguishes a hardlink from a real copy by name alone
+(`ls -li` and matching inode numbers is the only tell). A hardlink shares the inode only on the SAME
+filesystem — `ln` fails with `EXDEV` across filesystems — but `ln -s` (a symlink) crosses
+filesystems and has the identical effect: editing through the link edits the target. **Rule**: a
+"scratch copy" of a file inside a shared working tree must be `cp`, never `ln` in either form.
