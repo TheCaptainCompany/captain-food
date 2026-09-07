@@ -89,17 +89,16 @@ struct Driver {
 /// and the boot-time pending resume. Called once from `hydrate()`. `screen` is the matched screen
 /// of THIS page — the bounce decision on a refused Tell reads its `restricted_route`/
 /// `unauthenticated_route`, the same pair the hydrate loop's refused READS already read.
-/// `refresh_used` (#904, ADR-20260905-101349 §13; latch design #916 item 1) is the SAME
-/// refresh-failure latch `hydrate()`'s read transport shares — a memory that the last refresh did
-/// not fix things, re-armed on a successful reissue, not a once-per-load budget — so a refresh
-/// failure is remembered for the WHOLE page — reads and mutations alike — not re-attempted the
-/// moment a button click follows a failed read.
+/// `refresh_latched` (#904, ADR-20260905-101349 §13; latch design #916 item 1) is the SAME
+/// refresh-failure latch `hydrate()`'s read transport shares, so a refresh failure is remembered
+/// for the WHOLE page — reads and mutations alike — not re-attempted the moment a button click
+/// follows a failed read.
 pub fn install(
     origin: &str,
     role: Role,
     session: SessionId,
     screen: &'static Screen,
-    refresh_used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    refresh_latched: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let current_path_and_query = web_sys::window()
         .map(|w| {
@@ -111,7 +110,7 @@ pub fn install(
         transport: Rc::new(crate::graphql::RefreshingTransport::new(
             Box::new(HttpTransport::new(origin, role, session)),
             Box::new(crate::graphql::HttpRefresher::new(origin, session)),
-            refresh_used,
+            refresh_latched,
         )),
         store: Rc::new(BrowserPendingStore),
         socket: Rc::new(RefCell::new(None)),

@@ -250,6 +250,14 @@ pub trait Refresher: MaybeSync {
 /// refresh). GraphQL `errors`, network failures and every other status pass through unexamined —
 /// refreshing a cookie can never fix a malformed document or a role a fresh cookie still lacks.
 ///
+/// A STALE 401 (a request issued with the OLD cookie whose response lands only after the page has
+/// already re-armed) triggers a second, bounded refresh with the already-rotated cookie — this is
+/// not a loop, since every re-arm still requires its OWN `Ok` reissue (graphql-architect); nobody
+/// should "fix" that bounded retry back into a once-per-load budget. A transient NETWORK error on
+/// the reissue latches the page until the next reload — the next expiry then bounces straight to
+/// re-authentication with no further retry, which is correct per pin (a)'s second arm, not a gap
+/// (holub; recorded as #943 item 3).
+///
 /// The latch is an `Arc<AtomicBool>`, not the `Rc<Cell<bool>>` a wasm32-only decorator would
 /// reach for first: [`Transport`] requires [`MaybeSync`] (== `Sync` off wasm32, so the native
 /// `#[tokio::test]`s this module is tested with — beck's Q1 — can hold a `&dyn Transport` across an
@@ -779,7 +787,7 @@ mod tests {
         assert_eq!(t.endpoint(), "http://127.0.0.1:8080/customer/graphql");
     }
 
-    // ---- D1 (#904, ADR-20260905-101349 §13): the one-shot 401-refresh decorator ----
+    // ---- D1 (#904, ADR-20260905-101349 §13): the 401-refresh latch decorator ----
 
     use super::test_support::CountingRefresher;
     use std::sync::atomic::AtomicBool;
@@ -817,8 +825,13 @@ mod tests {
     /// Red-first (#916 item 1, ADR-20260905-101349 §13 pinning the OUTCOME not the per-load
     /// count): a SUCCESSFUL refresh must re-arm the latch for the NEXT expiry — the concept is a
     /// memory of a failed refresh, not a budget spent once per page load. At base (before this
-    /// fix) read 2 gets the ORIGINAL 401 back untouched because the flag never resets after a
-    /// successful reissue; the verbatim red is quoted in the hand-back.
+    /// fix, and again under mutant M1 — never re-arm, restore the unconditional latch — planted on
+    /// the fix and reverted) read 2 gets the ORIGINAL 401 back untouched because the flag never
+    /// resets after a successful reissue. Verbatim panic, baked in here because a hand-back
+    /// comment is not durable:
+    /// ```text
+    /// read 2: Err(Status { status: 401 }) is not Ok(...)
+    /// ```
     #[tokio::test]
     async fn a_successful_refresh_re_arms_for_the_next_expiry() {
         let (t, refresher) = refreshing(
@@ -837,14 +850,30 @@ mod tests {
         assert_eq!(refresher.call_count(), 2, "refresher count {} != 2", refresher.call_count());
     }
 
-    /// Pin (a) (#916 item 1), replacing `three_401_reads_refresh_exactly_once`: its surviving
-    /// property is that a refresh whose REISSUE still 401s leaves the page latched — the refresher
-    /// ran but fixed nothing, so no fresh attempt is due until the next real 401. GREEN at base
-    /// (a regression pin, not a red-first test): base already returns the original 401 untouched
-    /// on a second read here, it just does so for the wrong reason (an unconditional one-shot
-    /// rather than "the reissue didn't come back Ok"). The three-entry script is exact: a
-    /// per-request or always-re-arm mutant over-consumes it and `FakeTransport` panics
-    /// "unscripted call" rather than merely miscounting (beck).
+    /// Pin (a) (#916 item 1), replacing `three_401_reads_refresh_exactly_once` (name and comment
+    /// gone, not repurposed): its surviving property is that a refresh whose REISSUE still 401s
+    /// leaves the page latched — the refresher ran but fixed nothing, so no fresh attempt is due
+    /// until the next real 401. GREEN at base (a regression pin, not a red-first test): base
+    /// already returns the original 401 untouched on a second read here, it just does so for the
+    /// wrong reason (an unconditional one-shot rather than "the reissue didn't come back Ok").
+    ///
+    /// Primary arm — the three-entry script is exact: a per-request or always-re-arm mutant
+    /// over-consumes it and `FakeTransport` panics "unscripted call" rather than merely
+    /// miscounting (beck). Mutant M2 (re-arm regardless of, or before, the reissue's result)
+    /// reds this arm with:
+    /// ```text
+    /// FakeTransport: unscripted call: query { b }
+    /// ```
+    ///
+    /// Second arm (`_net` documents, distinct from the primary arm's, so a red names WHICH arm
+    /// caught it): the reissue's Err need not be a 401 to leave the page latched — ANY Err (401,
+    /// 403, network, malformed) does. `Network` is the cheapest non-401 variant `FakeTransport`
+    /// can script without extra fields. Mutant M4 (re-arm unless the reissue is specifically a
+    /// bare 401) passes the PRIMARY arm — a reissue-401 correctly stays latched under M4 too — but
+    /// wrongly clears the latch on this arm's non-401 reissue, reds with:
+    /// ```text
+    /// FakeTransport: unscripted call: query { b_net }
+    /// ```
     #[tokio::test]
     async fn a_refresh_whose_reissue_still_401s_latches_the_page() {
         let (t, refresher) = refreshing(
@@ -867,9 +896,6 @@ mod tests {
         );
         assert_eq!(refresher.call_count(), 1, "refresher count {} != 1", refresher.call_count());
 
-        // Second arm: the reissue's Err need not be a 401 to leave the page latched -- ANY Err
-        // (401, 403, network, malformed) does. `Network` is the cheapest non-401 variant
-        // `FakeTransport` can script without extra fields, so it stands in for the class.
         let (t2, refresher2) = refreshing(
             vec![
                 Err(TransportError::Status { status: 401 }),
@@ -878,12 +904,12 @@ mod tests {
             ],
             CountingRefresher::new(true),
         );
-        let first2 = t2.execute("query { a }", json!({})).await;
+        let first2 = t2.execute("query { a_net }", json!({})).await;
         assert!(
             matches!(first2, Err(TransportError::Network(_))),
             "read 1 (network arm): {first2:?} is not Err(Network(_))"
         );
-        let second2 = t2.execute("query { b }", json!({})).await;
+        let second2 = t2.execute("query { b_net }", json!({})).await;
         assert!(
             matches!(second2, Err(TransportError::Status { status: 401 })),
             "read 2 (network arm): {second2:?} is not Err(Status 401)"
