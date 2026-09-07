@@ -375,6 +375,18 @@ tools with absolute paths do not enforce worktree isolation (the git hook does, 
 `curl -o` does not) — a worktree-scoped dispatch card must say "never write to the shared checkout
 path" explicitly, and this one now does.
 
+## `SendMessage` to a finished agent RESUMES it — map ids from each launch result, never from launch order (2026-09-07, PR #933 checkpoint 2)
+
+Fourteen lenses and one executor launched in one response return fifteen `agentId`s in one block; the
+coordinator addressed three executor instructions (fix items, a base confirmation) to the FIRST id in
+the block believing it was the last, and the first id was the read-only `reviewer`. `SendMessage` to a
+completed agent resumes it from its transcript, so the reviewer woke with executor instructions —
+it honoured its read-only definition and touched nothing, but the executor sat idle on a base-mismatch
+refusal for twenty minutes. Rule: before any `SendMessage`, resolve the target from the launch result
+whose `description` names the agent (or from the task-notification that carries its id), and quote
+that id in the message summary; a resumed lens is a wasted Opus turn at best and an unlicensed edit at
+worst. Cost that earned it: ~20 min of idle executor plus three lens-resume turns.
+
 ## The 38GB effective quota, ENOSPC-safe cargo flags, and the capture-share trap (2026-08-28)
 
 The #641 executor measured what the earlier disk note implied: the session's writable allowance is

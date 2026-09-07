@@ -975,9 +975,23 @@ is itself the argument: **a list that grows has no business stating its own leng
   test-crates` panics unless `DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres` is
   ALSO exported (`crates/db_test_gate/src/lib.rs`, the #474 inversion). A reviewer lost a full run
   to "cluster up, URL unset" on #849 after this section first said "alone suffices" — corrected
-  2026-09-03. Do NOT `ALTER USER postgres …` over the socket
-  (peer auth refuses it) and do not reach for `su postgres -c` (the sandbox refuses it). A card that
-  carried the `ALTER USER` step cost one denied command per executor.
+  2026-09-03. ~~Do NOT `ALTER USER postgres …` over the socket (peer auth refuses it) and do not
+  reach for `su postgres -c` (the sandbox refuses it). A card that carried the `ALTER USER` step
+  cost one denied command per executor.~~ **Superseded 2026-09-06 (#876)**: struck, not deleted —
+  the #849 cost (one denied command per executor for the card that tried `ALTER USER`) was real and
+  measured THERE; it just does not generalize, per the next bullet, where the identical recipe
+  worked.
+  **Did NOT hold on 2026-09-06 in the Lane B container (#876)**: the line above said *"the password
+  is already `postgres`"* and *"do not reach for `su postgres -c` (the sandbox refuses it)"* — both
+  false there. `PGPASSWORD=postgres psql -h localhost -U postgres -c 'select 1'` failed with
+  `password authentication failed for user "postgres"` (`tools/db-preflight.sh`'s `pg_isready` check
+  passed anyway — it only proves reachability, never authentication, so its OK line is not proof the
+  credentials work). `su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\""`
+  worked cleanly over the LOCAL socket (peer auth matches the OS user `postgres` to the PG role
+  `postgres`) and fixed it in one command. Container image state for this recipe is NOT stable
+  across sessions — verify the password with an actual authenticated `psql`/`sqlx` connection, not
+  `pg_isready`, before trusting either half of this bullet, and reach for `su postgres -c` if it
+  fails; it is not blocked here.
 - **`link-check` is the LAST step of `make rust`, after the full build.** A guessed relative link in
   a docs file therefore costs a whole `make rust` cycle to discover. Run `python3
   tools/link-check.py` (seconds) before `make rust` whenever a change writes a relative link.
@@ -1181,3 +1195,40 @@ the first clean compile is not evidence the guarded arm's fallback exists.
 pass on an `interact.rs` edit proves nothing. Only `cargo clippy -p web --target wasm32-unknown-unknown
 --no-default-features --features hydrate` and `make wasm` touch it; run both, every time, for any change under
 `interact.rs`.
+
+## 19k. An `InMemoryMetricExporter::reset()` does not reset the SDK's Gauge aggregator — a "was it re-recorded" test needs a poke, not a before/after read (#876, 2026-09-06)
+
+**Cost**: one redesigned test. A test asserting a Gauge instrument was RE-RECORDED (as opposed to
+merely still holding an old, coincidentally-correct value) cannot use the obvious shape — reset the
+exporter, do the thing, flush, assert the value — because `InMemoryMetricExporter::reset()` clears
+only the exporter's OWN buffer of already-exported `ResourceMetrics`; it never touches the SDK's
+`LastValue` aggregator (`opentelemetry_sdk::metrics::internal::last_value`). `opentelemetry_sdk`'s
+default aggregation temporality for every instrument is `Temporality::Cumulative`
+(`#[default]` on the enum), and `LastValue::cumulative()` calls `collect_readonly`, which reads
+whatever the aggregator CURRENTLY holds — it never asks whether anything `.record()`ed again since
+the previous collection. So a Gauge re-exports its last value on EVERY `force_flush()` forever,
+whether touched again or not; there is no "went stale, stopped exporting" signal to observe through
+this API at all (`Temporality::Delta`'s `LastValue::delta()` uses `collect_and_reset` instead and
+WOULD show the absence — untried here, since it would also change what the code under test
+observes, not just the test). **Rule**: to prove an instrument was touched again (idle-pass
+re-recording, a periodic refresh, anything where "unchanged" is a legitimate value), call the SAME
+production function directly with a value the code under test would never itself produce (a poke),
+assert the poke, THEN run the code under test and assert the poke is gone — a plain before/after
+read of the expected value cannot distinguish "correctly re-recorded" from "never touched since the
+last real write" whenever those two coincide, which they do exactly when the correct answer is a
+constant (a rest state like "0 while idle"). See `crates/infrastructure/tests/rider_standing_lag_metric.rs`
+(`the_rider_group_lag_gauge_is_re_recorded_on_an_idle_pass`) for the applied shape.
+
+## 19l. A "scratch copy" made with `ln` is a HARDLINK — it shares the inode, so editing it edits the shared tree (#834, 2026-09-07)
+
+**Cost**: one false stop-hook report plus a planted mutant left visible in the shared checkout tree
+during a checkpoint another lens was reading. A hardlink (`ln src dst`, as opposed to `cp src dst`)
+creates a second directory entry for the SAME inode — there is no independent copy, so a mutant
+"planted" by editing the hardlinked scratch file mutates the real, shared file that every other
+concurrent build and test reads, for as long as the hardlink exists. `git status --short` on the
+canonical path will show the mutation (it is the same bytes), which is what makes this catchable at
+all — but only if someone checks; nothing distinguishes a hardlink from a real copy by name alone
+(`ls -li` and matching inode numbers is the only tell). A hardlink shares the inode only on the SAME
+filesystem — `ln` fails with `EXDEV` across filesystems — but `ln -s` (a symlink) crosses
+filesystems and has the identical effect: editing through the link edits the target. **Rule**: a
+"scratch copy" of a file inside a shared working tree must be `cp`, never `ln` in either form.
