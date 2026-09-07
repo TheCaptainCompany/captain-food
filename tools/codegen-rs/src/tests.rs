@@ -17605,13 +17605,25 @@ mod screen_fulfillability {
     #[test]
     fn a_declaration_over_a_fulfillable_read_is_an_error_and_the_bridge_is_consumed() {
         let mut model = real_model();
-        let decl: Value = serde_yaml::from_str(
-            "- resolver: { $ref: '#/resolvers/order.byId' }\n  missing_arg: { $ref: 'api.yaml#/queries/order/args/id' }\n  supplied_by: none\n  note: 'planted — must be refused'\n",
+        let planted: Value = serde_yaml::from_str(
+            "resolver: { $ref: '#/resolvers/order.byId' }\nmissing_arg: { $ref: 'api.yaml#/queries/order/args/id' }\nsupplied_by: none\nnote: 'planted — must be refused'\n",
         )
         .unwrap();
-        let prev = screen_mut(&mut model, "screens/restaurant_frontoffice.yaml", "order_tracking")
-            .insert(Value::from("skipped_reads"), decl);
-        assert!(prev.is_none(), "order_tracking must not already declare skips — vacuous plant");
+        // #816 checkpoint 2 item (1): order_tracking now legitimately declares its OWN
+        // skipped_reads entry (operationStatus.byMessage, genuinely unfulfillable — messageId has
+        // no route/pin/host source). APPEND the planted bad entry onto that real one, rather than
+        // assuming a fresh/empty key -- the two coexist: the real entry must stay unflagged (the
+        // assertion below still checks that), and only the planted one must be caught.
+        let existing = screen_mut(&mut model, "screens/restaurant_frontoffice.yaml", "order_tracking")
+            .get_mut("skipped_reads")
+            .and_then(|v| v.as_sequence_mut())
+            .unwrap_or_else(|| {
+                panic!(
+                    "order_tracking must already declare skipped_reads (operationStatus.byMessage) \
+                     -- this test's setup is stale, update it rather than assuming an empty key"
+                )
+            });
+        existing.push(planted);
         let found = hits(&model, "screen-skipped-read-fulfillable");
         assert!(
             found.iter().any(|h| h.contains("order_tracking") && h.contains("order.byId")),
