@@ -780,6 +780,25 @@ mod tests {
         &html[open..=close]
     }
 
+    /// The exact `<title>...</title>` element -- so a red `assert_eq!` prints that ~40-byte slice,
+    /// never the whole ~5 KB document.
+    #[cfg(feature = "ssr")]
+    fn title_element(html: &str) -> &str {
+        let at = html.find("<title>").expect("title element exists");
+        let end = at + html[at..].find("</title>").expect("title end") + "</title>".len();
+        &html[at..end]
+    }
+
+    /// The exact `<h1>...</h1>` inside `back_button_header` -- that header carries no id, so this
+    /// walks the literal `data-c` prefix rather than `element_tag`.
+    #[cfg(feature = "ssr")]
+    fn heading_element(html: &str) -> &str {
+        let marker = "data-c=\"back_button_header\">";
+        let after = html.find(marker).expect("heading element exists") + marker.len();
+        let end = after + html[after..].find("</h1>").expect("heading end") + "</h1>".len();
+        &html[after..end]
+    }
+
     /// The markup of the `data-s="<name>"` section -- so an assertion about the order summary
     /// reads THAT section, not a total that happens to appear elsewhere on the page (it is also on
     /// the pay button, which is the whole point of the other test).
@@ -1177,26 +1196,24 @@ mod tests {
         assert!(en.contains("Payment temporarily unavailable"), "{en}");
     }
 
-    /// #834 (ADR-20260812-143619): asserts what `checkout.title` SAYS in the screen's own header
-    /// element, never a page-wide `contains` -- a bare `contains("Paiement")` would already be
-    /// GREEN at the base, since `payment_failed_state`/`payment_unavailable_state` above both carry
-    /// "Paiement..." copy of their own. `back_button_header` carries no id, so this is an exact
-    /// substring assertion, not `element_tag`.
+    /// #834: asserts what `checkout.title` SAYS in the screen's own header element -- the test
+    /// asserts what the copy SAYS, never that it complies, which this repo has no standing to
+    /// assert (ADR-20260812-143619). Never a page-wide `contains`: a bare `contains("Paiement")`
+    /// would already be GREEN at the base, since `payment_failed_state`/`payment_unavailable_state`
+    /// above both carry "Paiement..." copy of their own. A `checkout.contact` mutant (identical
+    /// string "Contact" in en AND fr, restaurant_frontoffice.translations.yaml:94) also reds this
+    /// exact-value assertion on EACH arm independently -- confirmed by planting it and observing
+    /// the en arm red with the fr assertion removed, not inferred "by construction" -- so no
+    /// separate wrong-key test is kept.
     #[cfg(feature = "ssr")]
     #[test]
     fn the_checkout_heading_comes_from_the_catalog_in_both_locales() {
         let fr = render_checkout_html(view_state(true, false), "fr");
-        assert!(
-            fr.contains("data-c=\"back_button_header\"><h1>Paiement</h1>"),
-            "fr heading must resolve checkout.title: {fr}"
-        );
+        assert_eq!(heading_element(&fr), "<h1>Paiement</h1>");
         // Regression guard only -- the literal this replaces already equalled the en catalog
         // value, so this arm can never be red at the base.
         let en = render_checkout_html(view_state(true, false), "en");
-        assert!(
-            en.contains("data-c=\"back_button_header\"><h1>Checkout</h1>"),
-            "en heading must resolve checkout.title: {en}"
-        );
+        assert_eq!(heading_element(&en), "<h1>Checkout</h1>");
     }
 
     /// #834: the browser tab title resolves `checkout.title` from the same catalog key, with the
@@ -1207,40 +1224,34 @@ mod tests {
     #[test]
     fn the_checkout_tab_title_comes_from_the_catalog_in_both_locales() {
         let fr = render_checkout_html(view_state(true, false), "fr");
-        assert!(fr.contains("<title>Paiement - Captain.Food</title>"), "{fr}");
+        assert_eq!(title_element(&fr), "<title>Paiement - Captain.Food</title>");
         // Regression guard only, same reason as the heading test above.
         let en = render_checkout_html(view_state(true, false), "en");
-        assert!(en.contains("<title>Checkout - Captain.Food</title>"), "{en}");
+        assert_eq!(title_element(&en), "<title>Checkout - Captain.Food</title>");
     }
 
-    /// #834: a wrong-key mutant (resolving `checkout.contact` instead of `checkout.title`) must
-    /// red BOTH locale arms -- `checkout.contact` resolves to the identical string "Contact" in
-    /// en AND fr (restaurant_frontoffice.translations.yaml:94), so only an exact-value assertion
-    /// against the resolved `checkout.title`, never an en-vs-fr substitution, can catch it.
-    #[cfg(feature = "ssr")]
-    #[test]
-    fn a_wrong_key_reds_both_locales() {
-        let fr = render_checkout_html(view_state(true, false), "fr");
-        assert!(
-            fr.contains("data-c=\"back_button_header\"><h1>Paiement</h1>"),
-            "a checkout.contact mutant would render Contact here: {fr}"
-        );
-        let en = render_checkout_html(view_state(true, false), "en");
-        assert!(
-            en.contains("data-c=\"back_button_header\"><h1>Checkout</h1>"),
-            "a checkout.contact mutant would render Contact here too: {en}"
-        );
-    }
-
-    /// #834 (vernon): a region-tagged locale (`fr-FR`) must agree across the tab title, the
-    /// heading and `<html lang>` -- all three must trace to the ONE normalized locale computed at
-    /// `render_checkout_html`'s :586, never to the caller's raw argument.
+    /// #834 (vernon + beck): the tab title, the heading and `<html lang>` must all resolve to the
+    /// SAME locale for a region-tagged input (`fr-FR`) AND for an UNSUPPORTED one (`de`). The `de`
+    /// case is the one that actually pins the ordering: `render_checkout_html`'s own fallback
+    /// (`DEFAULT_LOCALE = "fr"`, i18n.rs:19) and `i18n::resolve`'s fallback for an unrecognized
+    /// locale argument (`FALLBACK_LOCALE = "en"`, i18n.rs:20) are DIFFERENT constants, so resolving
+    /// the title from `lang` BEFORE normalization would render an English title over a French
+    /// heading and `<html lang="fr">` -- `fr-FR` alone cannot catch that, because
+    /// `i18n::normalize_locale` already reduces `"fr-FR"` to `"fr"` inside `resolve` itself. This
+    /// pins that the title is resolved from the locale already normalized at :586, never the
+    /// caller's raw argument.
     #[cfg(feature = "ssr")]
     #[test]
     fn a_region_tagged_locale_agrees_across_title_heading_and_lang() {
-        let html = render_checkout_html(view_state(true, false), "fr-FR");
-        assert!(html.contains("<html lang=\"fr\">"), "{html}");
-        assert!(html.contains("<title>Paiement - Captain.Food</title>"), "{html}");
-        assert!(html.contains("data-c=\"back_button_header\"><h1>Paiement</h1>"), "{html}");
+        for lang in ["fr-FR", "de"] {
+            let html = render_checkout_html(view_state(true, false), lang);
+            assert!(html.contains("<html lang=\"fr\">"), "input {lang:?}: {html}");
+            assert_eq!(
+                title_element(&html),
+                "<title>Paiement - Captain.Food</title>",
+                "input {lang:?}"
+            );
+            assert_eq!(heading_element(&html), "<h1>Paiement</h1>", "input {lang:?}");
+        }
     }
 }
