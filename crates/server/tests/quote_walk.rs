@@ -515,3 +515,148 @@ async fn the_quote_walk_door_off_still_places_the_order_at_head() {
     let charged = intent_rows["checkout"]["totalAmount"]["amountCents"].as_i64();
     assert_eq!(charged, Some(1500), "door-OFF charges HEAD (1500), the fold never consulted: {charged:?}");
 }
+
+/// An in-process `web::graphql::Transport` over the walk's own `CaptainSchema` -- no HTTP, no
+/// second process: `TrackingState::check_place_order_rejection` (crates/web) needs a `Transport`
+/// to resolve `operationStatus.byMessage` through, and this is the SAME schema
+/// `poll_operation`/the mutations above already execute against directly, wrapped so the
+/// production `web::graphql::execute_resolver` call inside it works unmodified. The locale rides
+/// as request DATA (`server::graphql_locale::RequestLocale`), the SAME seam
+/// `RequestLocale::from_headers` populates on a real HTTP request.
+struct SchemaTransport<'a> {
+    schema: &'a server::graphql_schema::CaptainSchema,
+    role: RequestRole,
+    locale: server::graphql_locale::RequestLocale,
+}
+
+#[async_trait::async_trait]
+impl web::graphql::Transport for SchemaTransport<'_> {
+    async fn execute(&self, document: &str, variables: serde_json::Value) -> Result<serde_json::Value, web::graphql::TransportError> {
+        let vars = variables.as_object().cloned().unwrap_or_default();
+        let request = async_graphql::Request::new(document)
+            .variables(async_graphql::Variables::from_json(serde_json::Value::Object(vars)))
+            .data(acting(self.role))
+            .data(self.locale);
+        let resp = self.schema.execute(request).await;
+        if !resp.errors.is_empty() {
+            return Err(web::graphql::TransportError::Errors {
+                message: format!("{:?}", resp.errors),
+                extensions: Vec::new(),
+            });
+        }
+        resp.data
+            .into_json()
+            .map_err(|e| web::graphql::TransportError::Malformed(e.to_string()))
+    }
+}
+
+/// checkpoint 2, section (1) bullet 3 (holub's STOP condition, discharged): door ON, the cart is
+/// edited AFTER the paint (the SAME staleness beck's unit-level
+/// `a_cart_edited_after_the_mint_is_refused_with_quote_no_longer_honoured` pins, here over the
+/// REAL router/mailbox/projector stack) -- `placeOrder` refuses `QuoteNoLongerHonoured`, and the
+/// RENDERED `order_tracking` HTML (via the exact `TrackingState::check_place_order_rejection` +
+/// `render_tracking_html` path a browser's post-hydration re-render runs) carries the SERVER's
+/// own FRENCH message through `operationStatus` -- never a bare code, never the wrong locale.
+#[tokio::test]
+async fn a_cart_edited_after_the_paint_renders_quote_no_longer_honoured_in_french_via_operation_status() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("quote_walk_tracking_refusal") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let restaurant_id = uuid::Uuid::new_v4();
+    let catalog_id = uuid::Uuid::new_v4();
+    let cart_id = uuid::Uuid::new_v4();
+    let offer_id = uuid::Uuid::new_v4();
+    let customer_id = uuid::Uuid::new_v4();
+    seed_checkout_world(&pool, restaurant_id, catalog_id, cart_id, offer_id, customer_id, 1500).await;
+
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers_with_quote_door(&pool, status_bus.clone(), true);
+    let schema = schema_over(&pool, status_bus, true);
+
+    // 1) The door-OPEN read mints a quote at the fold's coordinate (V=2).
+    let current_q = r#"query { current { id totalAmount { amountCents } quote } }"#;
+    let resp = schema
+        .execute(
+            async_graphql::Request::new(current_q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(domain::generated::scalars::CustomerId(customer_id)))
+                .data(tenant_of(restaurant_id)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "current errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let quote = data["current"]["quote"].as_str().expect("a non-null quote (door OPEN)").to_string();
+
+    // 2) The cart is edited AFTER the paint -- a second line lands on the SAME cart stream,
+    // moving the lines digest the quote was bound to.
+    append_event(&pool, &format!("Cart-{cart_id}"), 3, "CartLineAdded", json!({
+        "cartId": cart_id,
+        "line": { "cartLineId": uuid::Uuid::new_v4(), "offerId": offer_id, "quantity": 1, "selectedOptionIds": [] },
+    })).await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (cart edit)");
+
+    // 3) `placeOrder` with the now-STALE quote, write door OPEN -- refuses QuoteNoLongerHonoured.
+    let order_id = uuid::Uuid::new_v4();
+    let mutation = format!(
+        r#"mutation {{
+            placeOrder(input: {{
+                orderId: "{order_id}", restaurantId: "{restaurant_id}", cartId: "{cart_id}",
+                customerId: "{customer_id}",
+                customerContact: {{ displayName: "Jo", phone: "+33612345678" }},
+                serviceType: COLLECTION, paymentMethodId: "pm_123", quote: "{quote}"
+            }}) {{ messageId operationStatus }}
+        }}"#,
+    );
+    let resp = schema.execute(async_graphql::Request::new(mutation).data(acting(RequestRole::Customer))).await;
+    assert!(resp.errors.is_empty(), "placeOrder errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let message_id_str = data["placeOrder"]["messageId"].as_str().unwrap().to_string();
+    let message_id = uuid::Uuid::parse_str(&message_id_str).expect("messageId is a UUID");
+    let op = poll_operation(&schema, &message_id_str).await;
+    assert_eq!(op["status"], "REJECTED", "a cart edited after the paint must refuse: {op:?}");
+    assert_eq!(op["errorCode"], "QuoteNoLongerHonoured", "the cause-neutral business refusal, never a structural one: {op:?}");
+
+    // 4) The browser's OWN persisted pending record for this intent -- seeded directly here,
+    // simulating what `pending::dispatch_persisted` writes BEFORE the mutation is even sent.
+    let store = web::pending::MemoryPendingStore::default();
+    {
+        use web::generated::data_layer::ActionKey;
+        use web::pending::{PendingStore, PendingWrite};
+        let mut input = serde_json::Map::new();
+        input.insert("orderId".into(), json!(order_id));
+        store.save(&[PendingWrite { message_id, action: ActionKey::PlaceOrder, input }]);
+    }
+
+    // 5) Exactly what a browser's post-hydration re-render does: resolve THIS client's own
+    // held intent through `operationStatus.byMessage`, in French, then render the tracking page.
+    // Polled as ADMIN, the SAME `poll_operation` precedent above: `operationStatus` is
+    // ownership-scoped (JWT subject / session match, or ADMIN) and this harness's `acting()`
+    // stamps a non-UUID subject ("test-subject") no real Principal could carry, so it can never
+    // satisfy the JWT-subject branch regardless of role -- ADMIN is the one path the check admits
+    // unconditionally. A real browser carries a real JWT/session and hits the ownership match for
+    // real; this substitution is the test harness's limitation, not production behaviour.
+    let fr_transport = SchemaTransport {
+        schema: &schema,
+        role: RequestRole::Admin,
+        locale: server::graphql_locale::RequestLocale::Fr,
+    };
+    let mut state = web::tracking::TrackingState::new(order_id);
+    state.check_place_order_rejection(&fr_transport, &store).await;
+    let expected_fr_message = domain::generated::errors::message_fr("QuoteNoLongerHonoured", &json!({ "cartId": cart_id }))
+        .expect("QuoteNoLongerHonoured is catalogued in French");
+    assert_eq!(
+        state.refused.as_deref(),
+        Some(expected_fr_message.as_str()),
+        "the tracking state must carry the SERVER's own French message, never a bare code"
+    );
+    let html = web::tracking::render_tracking_html(state, "fr");
+    assert!(
+        html.contains(&expected_fr_message),
+        "the RENDERED order_tracking HTML must carry the FR QuoteNoLongerHonoured message via \
+         operationStatus, never a bare code -- got:\n{html}"
+    );
+    assert!(!html.contains("QuoteNoLongerHonoured"), "the raw error code must never reach the rendered HTML: {html}");
+}
