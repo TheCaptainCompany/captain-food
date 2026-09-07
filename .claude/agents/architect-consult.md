@@ -275,6 +275,10 @@ theirs — that experience did not move, and no lens above owns it.
   write-capable `architect` — never invent a `Register check:`/`Red-first:` trail to make a consult
   look like a dispatch card (that trail is Rule 1's, ADR-20260906-024838, and it applies to
   write-capable dispatches only).
+- **`Bash` is for READING, never writing** (holub, #926 item 6): `gh issue list`, `git log`,
+  `make validate`, a GET request — never `gh issue create`, `git commit`, `git push`, or a heredoc
+  that writes a file. Having `Bash` is not licence to route around the missing `Write`/`Edit`: a
+  consult that needs to file or write is sent to `architect` instead, not worked around here.
 - **Never invent work.** "Nothing ready" is a valid and useful answer.
 - **Never report a finding you have not verified in code.** If you cannot cite it, do not report it
   as filed — say it needs filing, and by whom.

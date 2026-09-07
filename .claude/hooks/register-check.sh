@@ -60,9 +60,9 @@
 #   is the shape this repo has retired twice. So the discriminator is DERIVED FROM THE TARGET
 #   AGENT'S OWN DECLARATION: the gate fires iff `.claude/agents/<subagent_type>.md` grants a WRITE
 #   tool (`Write`/`Edit`, substring, so `MultiEdit`/`NotebookEdit` count) in its frontmatter
-#   `tools:` line. Today that is exactly `architect`, `executor` and `generator`; the other
-#   fourteen agents (including `architect-consult`) declare `Read, Grep, Glob, Bash` and pass
-#   untouched, logged `agent-advisory`. Nothing here enumerates those names -- granting an agent a
+#   `tools:` line. Today that is exactly `architect`, `executor` and `generator`; the other agents,
+#   `architect-consult` included, declare `Read, Grep, Glob, Bash` and pass untouched, logged
+#   `agent-advisory`. Nothing here enumerates those names -- granting an agent a
 #   write tool pulls it into the gate in the same commit, and revoking one drops it, with no list
 #   to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE TRAIL THAT LICENSES IT.
 #
