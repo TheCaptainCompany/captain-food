@@ -552,7 +552,15 @@ screens:
             full_width: true
             action:
               type: place_order
-              variables: { restaurantId: "{{ restaurant.id }}", cartId: "{{ cart.id }}", customerInfo: "{{ contact_form.values }}", deliveryMode: "{{ selected_delivery_mode }}", deliveryAddress: "{{ delivery_address }}", paymentMethodId: "{{ stripe_payment.paymentMethodId }}" }
+              # `quote` is the signed token from the SAME `cart.current` read that painted THIS
+              # screen's recap total above (ADR-20260906-192007 D-A/D-J, checkpoint 2 item (1)) —
+              # never one stashed from an earlier read (e.g. `/cart`'s own `cart.current`). The
+              # binding is structural: `cart.current` is this screen's OWN `data_requirements`
+              # entry (above), so `cart.quote` is always the token this paint minted, by
+              # construction, never a second read. `expectedTotal` is DROPPED (never sent) —
+              # superseded by this token; `errors.yaml#/PriceMismatch`, the error its equality
+              # check fed, is retired.
+              variables: { restaurantId: "{{ restaurant.id }}", cartId: "{{ cart.id }}", customerInfo: "{{ contact_form.values }}", deliveryMode: "{{ selected_delivery_mode }}", deliveryAddress: "{{ delivery_address }}", paymentMethodId: "{{ stripe_payment.paymentMethodId }}", quote: "{{ cart.quote }}" }
               # acceptance-first (ADR-20260720-015500): the mutation returns only the acceptance envelope;
               # orderId is CLIENT-GENERATED (PlaceOrder command input — the client mints it before
               # dispatch), and the confirmation screen resolves paymentStatus.byOrder / subscribes
