@@ -241,13 +241,19 @@ pub fn cart_read(aggregate_id: &str) -> Span {
 /// write-side signed-quote verify guard, landed ahead of its own call site (#933 B'.10,
 /// gate-then-stabilize). DARK today, the SAME posture `catalog.as_of.fold` carried through slice
 /// 2: declared and constructed here so `specs/observability.yaml`'s `quote.verify`/`command.validate`
-/// alternation names a real constructor, but invoked by NO production code yet — the guard this
-/// span will wrap is `application::commands::place_order`'s pre-payment block, licensed only once
-/// the write door (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`) opens
-/// (ADR-20260904-081527 §8's seventh carve-out). Exempted in
-/// `tools/codegen-rs/src/tests.rs`'s `KNOWN_UNINVOKED_REQUIRED_SPANS` until that phase wires the
-/// real call site — the SAME reviewable "deliberately not yet" `cart.read`/`pricing.compute`
-/// already use, never a silent gap.
+/// alternation names a real constructor, but invoked by NO production code yet. P4 (fix round
+/// after presentation pass 1, observability NB14): the guard this span will wrap
+/// (`application::quote::verify_quote`, inside `application::commands::place_order`'s pre-payment
+/// block) is ALREADY wired and runs unconditionally behind the door — CLOSED is a no-op, OPEN does
+/// the work, both today (`tools/codegen-rs/src/tests.rs:2100-2103`). The constructor stays
+/// unwired for a DIFFERENT, structural reason: `crates/application` is SDK-free by design (Cargo
+/// pins the tracing facade, #191) and cannot import `telemetry`, so this span can only be
+/// constructed at an UNFENCED instrumented boundary OUTSIDE `application` (a `crates/server`-side
+/// wrapper around the `verify_quote` call) — that wiring is a FLIP PRECONDITION
+/// (`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` item 19), never a licensing gate on the guard's
+/// own logic. Exempted in `tools/codegen-rs/src/tests.rs`'s `KNOWN_UNINVOKED_REQUIRED_SPANS` until
+/// that boundary wiring lands — the SAME reviewable "deliberately not yet"
+/// `cart.read`/`pricing.compute` already use, never a silent gap.
 pub fn quote_verify(aggregate_id: &str, correlation_id: &str) -> Span {
     tracing::info_span!(
         "quote.verify",
