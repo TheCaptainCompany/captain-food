@@ -89,15 +89,16 @@ struct Driver {
 /// and the boot-time pending resume. Called once from `hydrate()`. `screen` is the matched screen
 /// of THIS page — the bounce decision on a refused Tell reads its `restricted_route`/
 /// `unauthenticated_route`, the same pair the hydrate loop's refused READS already read.
-/// `refresh_used` (#904, ADR-20260905-101349 §13) is the SAME one-shot-refresh flag `hydrate()`'s
-/// read transport shares, so a refresh failure is remembered for the WHOLE page — reads and
-/// mutations alike — not re-attempted the moment a button click follows a failed read.
+/// `refresh_latched` (#904, ADR-20260905-101349 §13; latch design #916 item 1) is the SAME
+/// refresh-failure latch `hydrate()`'s read transport shares, so a refresh failure is remembered
+/// for the WHOLE page — reads and mutations alike — not re-attempted the moment a button click
+/// follows a failed read.
 pub fn install(
     origin: &str,
     role: Role,
     session: SessionId,
     screen: &'static Screen,
-    refresh_used: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    refresh_latched: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let current_path_and_query = web_sys::window()
         .map(|w| {
@@ -109,7 +110,7 @@ pub fn install(
         transport: Rc::new(crate::graphql::RefreshingTransport::new(
             Box::new(HttpTransport::new(origin, role, session)),
             Box::new(crate::graphql::HttpRefresher::new(origin, session)),
-            refresh_used,
+            refresh_latched,
         )),
         store: Rc::new(BrowserPendingStore),
         socket: Rc::new(RefCell::new(None)),
@@ -342,13 +343,15 @@ impl Driver {
                     h
                 }
                 Err(err) => {
-                    // #639 part C step 4-ii (ADR-20260904-124600 §2), extended by #904 D2/D4: a
-                    // refused Tell bounces the SAME way a refused read does — never a toast for a
-                    // rider mid-job who just got restricted — and this 401 has ALREADY been through
-                    // the one-shot refresh-and-reissue inside `d.transport` (a `RefreshingTransport`,
-                    // #904 D1): reaching this branch at all means the refresh either failed or had
-                    // already been spent this page, so the ORIGINAL messageId's mutation is never
-                    // re-dispatched a second time from here — no new id, no toast, no retap.
+                    // #639 part C step 4-ii (ADR-20260904-124600 §2), extended by #904 D2/D4
+                    // (latch design #916 item 1): a refused Tell bounces the SAME way a refused
+                    // read does — never a toast for a rider mid-job who just got restricted — and
+                    // this 401 has ALREADY been through the refresh-and-reissue inside
+                    // `d.transport` (a `RefreshingTransport`, #904 D1): reaching this branch at all
+                    // means the refresh either failed, or its reissue still errored, or the page
+                    // was already latched from an earlier failure, so the ORIGINAL messageId's
+                    // mutation is never re-dispatched a second time from here — no new id, no
+                    // toast, no retap.
                     // `ActionError::Transport` is the ONLY variant that can carry the signal (a
                     // client/auth/gap/unbound refusal never reaches the transport).
                     if let ActionError::Transport(t) = &err {

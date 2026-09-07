@@ -60,6 +60,113 @@ Journal entries for ISO week 2026-W37, newest first, in the order they were writ
 > touched `crates/web/src/checkout.rs` — auto-merged cleanly, `cargo test -p web --features ssr`
 > reconfirmed green (236/236) before continuing.
 
+> **2026-09-07 — [#916 "#904 follow-ups (silent refresh + ?next=): latch the one-shot on failure
+> not use, `:param` routes in safe_next, wasm client timeouts, the same-tab captured `next`,
+> `auth_refresh_total{outcome}` server-side"](https://github.com/TheCaptainCompany/captain-food/issues/916)
+> item 1 only, draft [PR #942](https://github.com/TheCaptainCompany/captain-food/pull/942), Lane B
+> (session_01H3AFBVzhSiGXJcFuwKjiMQ, `916-refresh-re-arms-on-success`).** `RefreshingTransport`'s
+> 401-refresh-and-reissue guard was a once-per-load budget: after ANY bare 401 it stayed spent for
+> the rest of the page, even once a refresh had actually rotated the session and a reissue had
+> succeeded. **Design**: a bare 401 arrives → if the page is already latched, return it untouched →
+> else latch (the `swap(true, ...)` also stops a concurrent mutation-dispatcher 401 from launching a
+> second, overlapping rotation) → call the refresher → on refresh failure, return the ORIGINAL 401,
+> stay latched → on refresh success, reissue the SAME request once → clear the latch STRICTLY AFTER
+> inspecting the reissue's result, and only if it came back `Ok`. Any `Err` on the reissue (401,
+> 403, network, malformed) leaves the page latched. **Lens split it resolved** (ADR-20260904-013834,
+> the team decides): reviewer read "re-arm on any non-401 reissue result"; graphql-architect read
+> "never re-arm on a network or malformed reissue error either" — the TIGHTER option (never re-arm
+> on anything but `Ok`) was taken.
+>
+> **Pin replacement**: `three_401_reads_refresh_exactly_once` is GONE — name and comment, not
+> repurposed (beck) — because its assertion (a per-load refresh count of 1) was true for the wrong
+> reason under the new design (an unconditional one-shot, not "the reissue didn't come back Ok").
+> Its surviving property is pin (a), `a_refresh_whose_reissue_still_401s_latches_the_page`: a
+> refresh whose reissue still 401s leaves the page latched, GREEN at base as a regression pin (not
+> red-first) — script `[Err 401, Err 401, Err 401]`, refresher always `Ok`, exactly three entries so
+> a per-request or always-re-arm mutant over-consumes it and `FakeTransport` panics rather than
+> merely miscounting. A second arm (`query { a_net }` / `query { b_net }`, its own documents so a
+> red names which arm caught it) covers a non-401 reissue error (`Network`), since ANY `Err` must
+> leave the page latched, not just a 401 one. **New red-first test**
+> `a_successful_refresh_re_arms_for_the_next_expiry` failed at base with the verbatim panic:
+> ```text
+> read 2: Err(Status { status: 401 }) is not Ok(...)
+> ```
+> because the old flag never reset after a successful reissue. **Card defect, attribution card**: an
+> earlier architect consult claimed the OLD `three_401_reads_refresh_exactly_once` test would stay
+> GREEN if simply run against the D2 fix; tracing it through shows this is wrong — under the fix, its
+> first read's successful reissue clears the latch, so its SECOND read re-arms a genuine second
+> refresh instead of returning untouched, and its THIRD read (`query { c }`) hits an exhausted
+> four-entry script and panics `FakeTransport: unscripted call: query { c }` before the test's own
+> count assertion is ever reached — the exact outcome the dispatch card's own "beck's correction"
+> section had already predicted, which is why the test is replaced rather than edited, not why it
+> "still passes".
+>
+> **Language change** (evans): the concept is a memory of a failure, not a budget that gets spent.
+> `graphql.rs`: the struct field `used` → `latched` (and the `new` parameter, local uses); the
+> `mod tests` section banner "the one-shot 401-refresh decorator" → "the 401-refresh latch
+> decorator". `renderer.rs`/`interact.rs`: the Arc-carrying identifier `refresh_used` →
+> `refresh_latched` (renderer.rs's two locals and the `interact::install` parameter + its one use),
+> dropping the "not a once-per-load budget" disclaimer the rename makes unnecessary.
+> `handwritten.rs`'s own local `refresh_used` and its stale "one-shot-refresh budget" comment are
+> **left untouched** — locked behind PR #933 (#943 item 5).
+>
+> **Mutants planted on the committed fix, quoted in the tests' own doc comments (not just the
+> hand-back, since a hand-back is not durable), reverted, `git status --short` empty after each**:
+> M1 (never re-arm, restore the unconditional latch) reds the new test with
+> `read 2: Err(Status { status: 401 }) is not Ok(...)`; M2 (re-arm regardless of, or before, the
+> reissue's result) reds pin (a)'s primary arm with
+> `FakeTransport: unscripted call: query { b }`; M3 (re-arm on any `Err` of the reissue, inverted
+> `is_ok`/`is_err`) is ALSO caught by pin (a)'s primary arm, with the same
+> `query { b }` panic — the dispatch card had guessed this would need the second (non-401) arm, but
+> tracing it shows the primary arm's own reissue-still-401 case already exercises "did the latch get
+> wrongly cleared", so M3 never reaches the second arm; M4 (re-arm unless the reissue is
+> specifically a bare 401 — a sneaky mutant that PASSES the primary arm, since a reissue-401
+> correctly stays latched under it too) reds the second arm specifically with
+> `FakeTransport: unscripted call: query { b_net }` — the reason that arm needed its own,
+> distinguishable documents.
+>
+> **OUT OF SCOPE**, named explicitly and filed on
+> [#943 "#942 follow-ups (silent-refresh latch): the push socket credential, /auth/refresh
+> observability, a server pin for 401-before-dispatch, the handwritten.rs comment, a DPIA session
+> row"](https://github.com/TheCaptainCompany/captain-food/issues/943): the push socket re-sends its
+> captured `auth` unchanged through backoff and never through `RefreshingTransport`
+> (`subscriptions.rs` ~:520-523) — an expired credential on that handshake silences the queue while
+> the page looks healthy (item 1); `/auth/refresh` is unobserved — no span, no counter, no
+> correlation id (item 2, pending item 5 of #916 itself); the transient-network latch-until-reload
+> behaviour is correct per pin (a)'s second arm, not a gap, but stays a silent degraded mode until
+> item 2 lands a signal (item 3); young's server pin that a 401 always precedes any dispatch, so a
+> reissue is a first delivery never a duplicate command — pinned by reading only today (item 4); the
+> stale `handwritten.rs` comment behind the #933 lock (item 5); legal's completeness note (never
+> clearance) that after a re-arm the effective unattended back-office session becomes the refresh
+> cookie's full 30 days (`auth_routes.rs` ~:196) — a bounded-session choice to record under #194's
+> DPIA, not this diff (item 6); ux's pre-existing false signifier, a `requires_auth` screen with no
+> `unauthenticated_route` showing a 401 as "Network problem — tap to retry" (item 7); roster note —
+> the loop-budget guard's `start` refused (exit 3, INTEGRITY) at this run's first tool call because
+> the coordinator's own timer for the same run id was already open; resolved per the guard's message
+> (`stop` then `start`), which closed the coordinator's timer and put two ledger files on this
+> branch — **attribution: card**, since the dispatch card never stated the timer was the
+> coordinator's, and the guard's exit-3 text reads identically for "a rival session's timer" and
+> "your own coordinator's still-open one" (item 8); farley's stale incremental `web` test binary
+> reporting the new tests red on this branch after a checkout (cargo's mtime fingerprint judged it
+> fresh; `cargo clean -p web` fixed it, cost: one full rebuild) — one line for
+> `docs/claude/sessions.md` if it recurs a second time (item 9).
+>
+> **UNVERIFIED input, unchanged from the checkpoint**: the access cookie's `Max-Age` is the
+> identity provider's `expiresIn`, 3600 seconds when unreported
+> (`crates/server/src/auth_routes.rs:186`) — the provider's real value is unreadable from here, so
+> any 1h/2h-versus-peak-window timeline stays UNVERIFIED input and is not narrated as fact anywhere
+> in this record.
+>
+> **No `docs/claude/sessions/gates.md` line**: both operational findings this run surfaced (the
+> loop-budget guard's ambiguous exit-3 message, and the stale incremental test binary) are already
+> filed as follow-up items on #943 (items 8 and 9) rather than sessions/gates material — item 9's
+> own text conditions a sessions.md line on the defect recurring a SECOND time, which it has not
+> (yet).
+>
+> Lane B. Links: [#916](https://github.com/TheCaptainCompany/captain-food/issues/916),
+> [#942](https://github.com/TheCaptainCompany/captain-food/pull/942),
+> [#943](https://github.com/TheCaptainCompany/captain-food/issues/943).
+
 > **2026-09-07 — [#834 "Four hard-coded English strings on the checkout pay step, and two declared
 > keys with no runtime consumer"](https://github.com/TheCaptainCompany/captain-food/issues/834),
 > PARTIAL slice, draft [PR #939](https://github.com/TheCaptainCompany/captain-food/pull/939), Lane B
