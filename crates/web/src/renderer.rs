@@ -1708,21 +1708,22 @@ pub fn hydrate() {
     // transports of this page (reads here, writes + push socket in `interact`) are built from the
     // same answer, so a screen can never read as one role and write as another.
     let role = surface.role_for(screen);
-    // #904 (ADR-20260905-101349 §13, the member door's flip precondition): ONE one-shot-refresh
-    // budget for the whole page load, shared between this load's reads below and
-    // `interact::install`'s later mutation dispatches -- a refresh failure is remembered for the
-    // PAGE (`graphql::RefreshingTransport`'s doc comment), not just for the read loop.
-    let refresh_used = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // #904 (ADR-20260905-101349 §13, the member door's flip precondition; latch design #916 item
+    // 1): ONE shared refresh-failure latch for the whole page load, shared between this load's
+    // reads below and `interact::install`'s later mutation dispatches -- so a refresh failure is
+    // remembered for the PAGE (`graphql::RefreshingTransport`'s doc comment), not just for the
+    // read loop.
+    let refresh_latched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let transport = crate::graphql::RefreshingTransport::new(
         Box::new(crate::graphql::HttpTransport::new(&origin, role, session)),
         Box::new(crate::graphql::HttpRefresher::new(&origin, session)),
-        std::sync::Arc::clone(&refresh_used),
+        std::sync::Arc::clone(&refresh_latched),
     );
 
     // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
     // `screen` (#639 4-ii): the bounce decision on a refused Tell needs the SAME screen's declared
     // routes the hydrate loop above reads.
-    crate::interact::install(&origin, role, session, screen, std::sync::Arc::clone(&refresh_used));
+    crate::interact::install(&origin, role, session, screen, std::sync::Arc::clone(&refresh_latched));
 
     let sheets = surface.sheets();
     wasm_bindgen_futures::spawn_local(async move {
