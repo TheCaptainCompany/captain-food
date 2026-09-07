@@ -910,10 +910,13 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
 
     // Arm (c): at_head -- the NATIVE unbounded read this slice adds (D2), the ONE call the mint
     // actually performs in production (never `as_of`, which stays dark). Measured the SAME way,
-    // over `fetch_all_rows`/`decode_rows`/`from_stream`/`at_head` instead of
-    // `fetch_rows`/`decode_rows`/`from_stream`/`as_of` -- the split legs are the SAME cost as arm
-    // (b) by construction (both read every row of the same L-length stream), so this arm exists to
-    // pin the INTEGRATED `at_head` call specifically, not to re-measure the split legs.
+    // over `fetch_all_rows_with_byte_total`/`decode_rows`/`from_stream`/`at_head` instead of
+    // `fetch_rows`/`decode_rows`/`from_stream`/`as_of` -- corrected (checkpoint 2 item N, dba):
+    // the split "sql" leg's query is NOT the same cost as arm (b)'s `fetch_rows` (this one carries
+    // an extra `sum(octet_length(...)) OVER ()` window function, the SAME query
+    // `load_to_head`/`at_head` actually issues in production) -- this arm exists to pin the
+    // INTEGRATED `at_head` call specifically, so its split "sql" leg must time the query `at_head`
+    // truly runs, never a cheaper stand-in.
     async fn measure_at_head(
         repo: &PgAsOfCatalogRepository,
         stream: &str,
@@ -930,12 +933,26 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
         let mut events_applied = 0usize;
 
         for i in 0..iterations {
+            // checkpoint 2 item N (dba): the split "sql" leg now times
+            // `fetch_all_rows_with_byte_total` -- the PRODUCTION query `at_head`/`load_to_head`
+            // actually issues (the `sum(octet_length(payload::text)) OVER ()` window function
+            // included) -- never the plain `fetch_all_rows`, a DIFFERENT, cheaper query. Timing
+            // the wrong query here understated the split "sql" leg relative to what `e2e_median`
+            // (the real `at_head` call) actually executes, biasing the paired-slack invariant
+            // POSITIVE (e2e appears to cost more than its own measured components sum to, purely
+            // because this leg measured a faster query than the one really inside e2e).
+            // `payload_bytes` is taken from Postgres's OWN sum, never re-serialized client-side
+            // (that re-serialization is itself a cost `at_head` never pays in production, per the
+            // `payload_bytes` lever's own history -- module doc, PROP-20260831-134539 §12).
             let sql_start = Instant::now();
-            let rows = repo.fetch_all_rows(stream).await.expect("fetch_all_rows");
+            let (rows, total_bytes) = repo
+                .fetch_all_rows_with_byte_total(stream)
+                .await
+                .expect("fetch_all_rows_with_byte_total");
             sql_samples.push(sql_start.elapsed());
             stream_length = rows.len();
             if i == 0 {
-                payload_bytes = rows.iter().map(|(_, _, payload)| serde_json::to_vec(payload).unwrap().len()).sum();
+                payload_bytes = total_bytes;
             }
             let highest = rows.iter().map(|(v, _, _)| *v).max().expect("non-empty stream");
             let coordinate = CatalogVersion::try_new(highest).unwrap();

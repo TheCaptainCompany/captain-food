@@ -887,6 +887,14 @@ pub async fn router() -> Router {
                 // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
                 tenant_lookup = di.tenant_lookup;
                 auth_sessions = di.auth_sessions;
+                // ADR-20260906-192007 D-K (checkpoint 2, dba item N): the SAME as-of bulkhead-pool
+                // authority the read door already built, cloned BEFORE `di.read` moves below --
+                // the write door's QuoteGuard (built further down) reuses THIS Arc rather than
+                // constructing a SECOND, independent `bulkhead_pool` (a `max_connections(2)` pool
+                // built twice means the monolith actually budgets 4 connections for one bulkhead,
+                // not 2 -- the read and write arms never actually shared the bound they were meant
+                // to share).
+                let as_of_price_authority_for_quote_guard = di.read.as_of_price_authority.clone();
                 read_deps = Some(di.read);
                 write_deps = Some(di.write);
 
@@ -1204,8 +1212,10 @@ pub async fn router() -> Router {
                         run_admin_sign_in_door: config.run_admin_sign_in_door,
                         // ADR-20260906-192007 D-F/D-G/D-H: the write-side quote verify guard,
                         // resolved ONCE here at boot -- the D-B interlock + D-H dev-key refusal
-                        // both fire inside `resolve_at_boot`, never per-request. Its own bulkhead
-                        // pool (D-K), never the shared `pool`.
+                        // both fire inside `resolve_at_boot`, never per-request. Shares the read
+                        // door's OWN bulkhead pool (D-K, checkpoint 2 item N) -- never a SECOND,
+                        // independently-constructed `bulkhead_pool(&pool)`, which built two
+                        // max_connections(2) pools that never actually shared a bound.
                         quote_guard: Arc::new(
                             application::quote::QuoteGuard::resolve_at_boot(
                                 config.run_quote_required_on_place_order,
@@ -1218,9 +1228,7 @@ pub async fn router() -> Router {
                                 config.quote_signing_key_previous_hmac_secret.as_deref().filter(|s| !s.is_empty()).map(
                                     |s| application::quote::SigningKey::from_resolved_secret("previous", s),
                                 ),
-                                Arc::new(infrastructure::PgAsOfCatalogRepository::new(
-                                    infrastructure::PgAsOfCatalogRepository::bulkhead_pool(&pool),
-                                )),
+                                as_of_price_authority_for_quote_guard,
                             )
                             .expect("boot refusal: RUN_QUOTE_REQUIRED_ON_PLACE_ORDER/RUN_FOLD_PRICED_CART_READ interlock or the dev signing key in a live profile (ADR-20260906-192007 D-B/D-H)"),
                         ),
