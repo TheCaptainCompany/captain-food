@@ -52,17 +52,19 @@
 # contact, and both are answered STRUCTURALLY rather than by a list:
 #
 #   THE DISCRIMINATOR: WHICH `Agent` CALLS ARE GATED. Not every Agent call is a dispatch card --
-#   lens consults (`young`, `vernon`, `evans`, `beck`, ...), the `reviewer` pass and read-only
-#   research travel through the SAME tool. Gating all of them makes the gate something to work
-#   around; a hand-maintained exemption list of agent names is the shape this repo has retired
-#   twice. So the discriminator is DERIVED FROM THE TARGET AGENT'S OWN DECLARATION: the gate fires
-#   iff `.claude/agents/<subagent_type>.md` grants a WRITE tool (`Write`/`Edit`, substring, so
-#   `MultiEdit`/`NotebookEdit` count) in its frontmatter `tools:` line. Today that is exactly
-#   `architect`, `executor` and `generator`; the other thirteen agents declare `Read, Grep, Glob,
-#   Bash` and pass untouched, logged `agent-advisory`. Nothing here enumerates those names --
-#   granting an agent a write tool pulls it into the gate in the same commit, and revoking one
-#   drops it, with no list to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE
-#   TRAIL THAT LICENSES IT.
+#   lens consults (`young`, `vernon`, `evans`, `beck`, ...), the `reviewer` pass, read-only
+#   research, and what-next consults routed to `architect-consult` (#926 item 6 / #914 item 10 --
+#   the read-only twin of `architect` for "what next" questions, so a consult never has to carry
+#   the write-capable agent's trail to pass this gate) travel through the SAME tool. Gating all of
+#   them makes the gate something to work around; a hand-maintained exemption list of agent names
+#   is the shape this repo has retired twice. So the discriminator is DERIVED FROM THE TARGET
+#   AGENT'S OWN DECLARATION: the gate fires iff `.claude/agents/<subagent_type>.md` grants a WRITE
+#   tool (`Write`/`Edit`, substring, so `MultiEdit`/`NotebookEdit` count) in its frontmatter
+#   `tools:` line. Today that is exactly `architect`, `executor` and `generator`; the other agents,
+#   `architect-consult` included, declare `Read, Grep, Glob, Bash` and pass untouched, logged
+#   `agent-advisory`. Nothing here enumerates those names -- granting an agent a
+#   write tool pulls it into the gate in the same commit, and revoking one drops it, with no list
+#   to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE TRAIL THAT LICENSES IT.
 #
 #   IT FAILS CLOSED ON EVERY UNREADABLE SHAPE IT CAN DETECT -- and that sentence is deliberately not
 #   the universal "whenever the tool set cannot be read" it replaced, which was asserted three times
@@ -607,9 +609,10 @@ RFEOF
   cat >&2 <<'EOF'
 
 WHY THIS FIRED. A dispatch card is the coordinator's DIFF, and a call that can produce a diff
-carries the trail that licenses it (ADR-20260831-141500). Lens consults, the `reviewer` pass and
-read-only research are NOT gated -- the discriminator is the target agent's own `tools:` line, so
-only write-capable agents reach this message.
+carries the trail that licenses it (ADR-20260831-141500). Lens consults, the `reviewer` pass,
+read-only research, and what-next consults routed to `architect-consult` are NOT gated -- the
+discriminator is the target agent's own `tools:` line, so only write-capable agents reach this
+message.
 
 Do the check, THEN DISPATCH -- never drop the card. Two legitimate shapes, one per claim:
 

@@ -2,6 +2,117 @@
 
 Journal entries for ISO week 2026-W37, newest first, in the order they were written.
 
+> **2026-09-07 — [#926 "#924 follow-ups (the Red-first gate, round 2): the none form is a prefix
+> glob, per-hit is unenforced, the Rust token mirror is unpinned, sharper 0-hit cases, the
+> gate-scripts job growth is unmetered"](https://github.com/TheCaptainCompany/captain-food/issues/926)
+> item 6, resolved together with [#914 "#910 follow-ups (the Red-first gate): word-bounded tokens,
+> RF4 cannot go red for its own reason, an EOF case, an existing-path case, a derived selftest pin,
+> the NEW:: fraction metered"](https://github.com/TheCaptainCompany/captain-food/issues/914) item
+> 10, draft [PR #945](https://github.com/TheCaptainCompany/captain-food/pull/945), Lane B
+> (session_01H3AFBVzhSiGXJcFuwKjiMQ, `926-consults-exempt-from-rule-1`).** **The defect**: Rule 1's
+> red-first card step (ADR-20260906-024838) gates every write-capable `Agent` call by Lane D of
+> `register-check.sh`, and `architect` is write-capable — so a genuine what-next CONSULT sent to
+> `architect` ("read-only" in the prompt, nothing to file or write) still had to carry a resolvable
+> `Register check:`/`Red-first:` trail just to pass the gate: a trail written only to satisfy a
+> mechanism, never because the call needed one — the exact theatre `Register check: none` was
+> refused for being.
+>
+> **Option space**: (a) no hook change, leave the theatre as the cost of a uniform gate; (b) a
+> READ-ONLY TWIN of `architect` for consults, ungated by construction (no `Write`/`Edit`/`Agent`
+> tool, so Lane D's own discriminator reads it advisory); (c) strip `Write`/`Edit` from `architect`
+> itself, moving its issue filing and proposal writing elsewhere. **Consent, unanimous, option
+> (b)** — Consulted: reviewer (persona-text drift between the twin and `architect.md` is accepted
+> and stated, not gated); beck (a derived number needs its antecedent — caught the header comment's
+> bare "fourteen agents", fixed before D3's commit: "the other agents, `architect-consult`
+> included"); farley (workflow.md :1047-1055 REWRITTEN, not appended — the finding kept as one
+> sentence of history); holub (no third what-next voice — copy `architect.md`'s body, change only
+> the sentences that speak of filing or writing; `Bash` on the twin is for READING only — `gh issue
+> list`, `git log`, `make validate`, a GET — never `gh issue create`, `git commit`, `git push` or a
+> heredoc that writes a file, added to the twin's Hard Boundaries in D3's first commit).
+>
+> **Landed**: NEW `.claude/agents/architect-consult.md` (`tools: Read, Grep, Glob, Bash`, no
+> `Agent`), persona body identical to `architect.md`'s except MODE 2 (file/propose) redirected to
+> `architect`, the "operations role" sentence and the Hard Boundaries Priority/filing bullets
+> reworded to "recommend, never write". `architect.md` itself untouched (LD1 still pins it
+> write-capable). NEW selftest case LD4 (live-roster wiring,
+> `.claude/hooks/register-check-selftest.sh`) — a trail-less consult to `architect-consult` must
+> ALLOW as `agent-advisory`. **D1 red** (before the file existed):
+> ```text
+> register-check: this dispatch carries no `Register check:` trail, and it is GATED because no
+> `.claude/agents/architect-consult.md` declares this agent, so its tool set cannot be read (an
+> undeclared agent — `general-purpose` is the live case — holds the full set, including
+> Write/Edit).
+> ```
+> **D2 mutant red** (`, Write` appended to the twin's `tools:` line, reverted immediately after —
+> `diff` against a pre-mutation backup confirmed byte-identical, `git status --short` showed only
+> intended files):
+> ```text
+> register-check: this dispatch carries no `Register check:` trail, and it is GATED because
+> `architect-consult` is write-capable (`tools: Read, Grep, Glob, Bash, Write`, grants `Write`) —
+> this call can produce a diff.
+> ```
+> Both reds are quoted verbatim in LD4's own comment (durable), not only here. Hook header
+> comments (`register-check.sh` :52-70, :609-612) name the variant; no ARM change.
+>
+> **Docs rewritten**: `docs/claude/sessions/workflow.md` :1047-1055 — the 2026-09-04 finding ("put
+> the trail on every card, whoever receives it") kept as one sentence of history; the rule now: a
+> what-next consult routes to `architect-consult`, which Lane D never gates, no trail line needed;
+> the `Register check:`/`Red-first:` trail belongs on write-capable dispatches only
+> (`architect`/`executor`/`generator`); a consult sent to `architect` carrying an invented trail is
+> the theatre this variant ends. The card template (~:860, "Gated at dispatch by Lane D…") gets one
+> line naming the consult target and the exemption.
+>
+> **(c) QUEUED, not decided** — new OPEN row
+> [`docs/decisions/ARCHITECT-WRITE-SCOPE.yaml`](../decisions/ARCHITECT-WRITE-SCOPE.yaml), owner
+> `team`: should `architect` itself lose `Write`/`Edit` too? Antecedents:
+> [PROP-20260726-193000](../proposals/PROP-20260726-193000-continuous-development-loop.md) ("Two
+> agents") originally landed `architect` as a READ-ONLY dispatcher before Write/Edit were later
+> granted; [ADR-20260810-011500](../adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+> §1 assigns every phase of the diff to the executor, never the coordinator or the architect — the
+> same shape option (c) would extend to filing/proposal-writing;
+> [ADR-20260831-141500](../adr/ADR-20260831-141500-the-coordinator-gets-the-register-check-gate-on-its-committing-surface.md)
+> :200-205 states, as an open unknown, whether Lane D even fires on `architect`'s own NESTED
+> `Agent` calls. Tracked as item 3 of [#946 "#945 follow-ups (architect-consult): an automated LD4
+> mutant case, the twin drift gate, option (c) for the architect tool
+> line"](https://github.com/TheCaptainCompany/captain-food/issues/946).
+>
+> **Checkpoint non-blocking notes, both filed on #946**: an automated LD4b mutant case driven via
+> `REGISTER_CHECK_AGENTS` on a temp copy of the agents dir (rather than the manual
+> mutate-run-revert this run did by hand) is a follow-up for the coordinator to file (item 1); the
+> twin's ~260 shared lines with `architect.md` carry no drift gate today — revisit when
+> `architect.md` changes twice without the twin following (item 2).
+>
+> **Waste named**: nine consult cards this lane carried a negative trail only to pass the gate
+> before this variant existed — the coordinator's own count, UNVERIFIED input (not independently
+> re-counted here).
+>
+> **No card defects** beyond the one caught and fixed inside this same run: the bare "fourteen
+> agents" derived number in the header comment (no antecedent stated), caught by beck at the
+> checkpoint per ADR-20260817-105845 and rewritten in D3's first commit before it reached `main`.
+>
+> **Architect's dated re-ranking** (ADR-20260810-215503): [#943 "#942 follow-ups (silent-refresh
+> latch): the push socket credential, /auth/refresh observability, a server pin for
+> 401-before-dispatch, the handwritten.rs comment, a DPIA session
+> row"](https://github.com/TheCaptainCompany/captain-food/issues/943) item 1 re-bucketed `Urgent`
+> → `Medium` after the `ux` lens corrected its own finding: the restaurant queue never receives new
+> orders over the push socket at all (no `refetch`, no restaurant-scoped push), so item 1 is not
+> the socket-credential gap it first read as; the actual first user-visible chunk is filed as
+> [#944 "Restaurant queue: no restaurant-scoped new-order push and no refetch —
+> orders.byRestaurant is read once at
+> mount"](https://github.com/TheCaptainCompany/captain-food/issues/944), sequenced to land after
+> [PR #933](https://github.com/TheCaptainCompany/captain-food/pull/933) merges. This reverses the
+> previously stated order and is recorded here per the method clause. **This #926/#914 chunk is
+> DARK** (no user-visible change): every user-visible candidate in the current queue needs a
+> screens/api/observability edit that sits behind the #933 lock, so the lane worked gate tooling
+> instead.
+>
+> Lane B. Links: [#926](https://github.com/TheCaptainCompany/captain-food/issues/926),
+> [#914](https://github.com/TheCaptainCompany/captain-food/issues/914),
+> [#945](https://github.com/TheCaptainCompany/captain-food/pull/945),
+> [#946](https://github.com/TheCaptainCompany/captain-food/issues/946),
+> [#943](https://github.com/TheCaptainCompany/captain-food/issues/943),
+> [#944](https://github.com/TheCaptainCompany/captain-food/issues/944).
+
 > **2026-09-07 — [#916 "#904 follow-ups (silent refresh + ?next=): latch the one-shot on failure
 > not use, `:param` routes in safe_next, wasm client timeouts, the same-tab captured `next`,
 > `auth_refresh_total{outcome}` server-side"](https://github.com/TheCaptainCompany/captain-food/issues/916)
