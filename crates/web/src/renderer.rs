@@ -1708,10 +1708,12 @@ pub fn hydrate() {
     // transports of this page (reads here, writes + push socket in `interact`) are built from the
     // same answer, so a screen can never read as one role and write as another.
     let role = surface.role_for(screen);
-    // #904 (ADR-20260905-101349 §13, the member door's flip precondition): ONE one-shot-refresh
-    // budget for the whole page load, shared between this load's reads below and
-    // `interact::install`'s later mutation dispatches -- a refresh failure is remembered for the
-    // PAGE (`graphql::RefreshingTransport`'s doc comment), not just for the read loop.
+    // #904 (ADR-20260905-101349 §13, the member door's flip precondition; latch design #916 item
+    // 1): ONE shared refresh-failure latch for the whole page load -- a memory of the last refresh
+    // NOT having fixed things, re-armed on a successful reissue, shared between this load's reads
+    // below and `interact::install`'s later mutation dispatches -- so a refresh failure is
+    // remembered for the PAGE (`graphql::RefreshingTransport`'s doc comment), not just for the
+    // read loop.
     let refresh_used = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let transport = crate::graphql::RefreshingTransport::new(
         Box::new(crate::graphql::HttpTransport::new(&origin, role, session)),
