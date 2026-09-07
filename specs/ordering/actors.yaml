@@ -380,7 +380,12 @@ PlaceOrderProcess:
         - { $ref: 'errors.yaml#/OutsideServiceHours' }
         - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
         - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
-        - { $ref: 'errors.yaml#/PriceMismatch' }
+        # ADR-20260904-081527 §8 seventh carve-out (D-F/D-G, ADR-20260906-192007): replaces
+        # `PriceMismatch` (deleted). `QuoteNoLongerHonoured` is declared but DSL-unwired (see its
+        # own errors.yaml description) -- code-reachable, pinned by named Rust unit tests, not
+        # listed here (a `throws:` reference the validator's `test-uncovered-error` gate would then
+        # demand real tests.yaml coverage for, which no static fixture can supply).
+        - { $ref: 'errors.yaml#/QuoteVerificationFailed' }
         - { $ref: 'errors.yaml#/PriceUnresolvable' }
         - { $ref: 'errors.yaml#/PaymentDeclined' }
     - message: { $ref: 'events.yaml#/PaymentAuthorized' }

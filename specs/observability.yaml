@@ -178,6 +178,29 @@ place-order:
       attributes:
         - { key: "business.service_fee", type: int, required: true }
         - { key: "business.split_ok", type: string, required: true }
+    # PROP-20260831-134539 slice 3b (D-F, ADR-20260906-192007): the write-side signed-quote verify
+    # guard, inside `application::commands::place_order`'s pre-payment guard block, strictly
+    # before the Stripe PaymentIntent creation call -- the same placement reasoning as
+    # `ENFORCE_SERVICE_HOURS_GUARD`. `required: false`: it exists only once the write door
+    # (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`) is OPEN; the door defaults CLOSED
+    # everywhere, so this span is silent in production today, exactly like `cart-price`'s
+    # `catalog.as_of.fold` above. CORRECTED (checkpoint 2 item O, observability;
+    # docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml item 18): phase C already wired and ships the
+    # GUARD's own Rust behind the door for real (`application::quote::verify_quote`) -- what still
+    # does not exist is the SPAN CONSTRUCTOR CALL, because `crates/application` is SDK-free by
+    # design (Cargo pins the tracing facade, #191) and cannot import `telemetry` at all; the
+    # constructor can only be invoked at an unfenced instrumented boundary outside `application`.
+    # The late-bound outcome/token-field attributes (incl. the negative case) and that boundary
+    # wiring are a FLIP PRECONDITION, and — contrary to what this comment used to claim — the flip
+    # DOES need an observability.yaml change of its own: at minimum `business.quote_outcome`,
+    # `business.failure_reason` and `otel.status_code` need declaring here once the wiring lands,
+    # so this row's current shape is a placeholder, not the wiring's final one.
+    - name: "quote.verify"
+      kind: INTERNAL
+      required: false
+      attributes:
+        - { key: "business.aggregate_id", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
     - name: "payment.intent.create"
       kind: CLIENT
       required: true
@@ -431,6 +454,16 @@ place-order:
       required_spans:
         - "command.receive"
         - "command.journal"
+        # A SECOND alternation (B'.10, landed ahead of the runtime -- gate-then-stabilize): the
+        # write-side guard chain must show ONE of the two legal shapes. CLOSED (today, everywhere):
+        # `command.validate` alone runs the guard chain and `quote.verify` never constructs, so the
+        # second branch is what satisfies this today. OPEN (once
+        # `configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER` flips): `quote.verify` ALSO
+        # constructs (D-F), independently satisfying the alternation from the first branch --
+        # `command.validate` keeps firing in both arms (it is `required: true` on its own, D-A
+        # changes no behaviour there), so this rule needs no observability.yaml edit when that
+        # phase lands.
+        - { any_of: ["quote.verify", "command.validate"] }
         - "pricing.compute"
         - "payment.intent.create"
         - { any_of: ["event.store.append", "order.lane.enqueue"] }
@@ -500,10 +533,13 @@ cart-price:
         - { key: "business.aggregate_id", type: string, required: true }
         - { key: "business.correlation_id", type: string, required: true }
     # PROP-20260831-134539 slice 3a (D5, ADR-20260906-154419): the as-of price-fold read the OPEN
-    # arm of `cart.current`/`cart`/`carts` performs behind `RUN_FOLD_PRICED_CART_READ` — joined
-    # HERE, inside `cart-price`, never as a sibling contract (the gap-between-two-contracts
-    # hazard). `required: false`: only the door-OPEN arm ever opens it; the door defaults CLOSED
-    # everywhere, so this span is silent in production today.
+    # arm of `cart.current`/`cart` performs behind `RUN_FOLD_PRICED_CART_READ` — joined HERE,
+    # inside `cart-price`, never as a sibling contract (the gap-between-two-contracts hazard).
+    # `carts` (the multi-restaurant LIST) is STRUCTURALLY INCAPABLE of reaching this span
+    # (ADR-20260906-192007 D-L): its own entry point (`priced_list`) carries no witness parameter
+    # at all, so it always calls `price_cart`, never `price_cart_at`, regardless of the door's
+    # runtime position. `required: false`: only the door-OPEN single-cart arm ever opens it; the
+    # door defaults CLOSED everywhere, so this span is silent in production today.
     - name: "catalog.as_of.fold"
       kind: INTERNAL
       required: false

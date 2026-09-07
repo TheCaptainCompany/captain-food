@@ -2091,15 +2091,32 @@ keys:
             };
         // Declared-required spans whose constructor is KNOWN to have no production call site yet
         // -- the explicit, reviewable "deliberately not yet" (the UNWIRED_MUTATIONS pattern).
-        // Both predate this check and were surfaced BY it: the place-order prepare phase runs
-        // `require_cart` and `price_cart` inside the SDK-free application handler, so their spans
-        // need a framework-boundary seam that does not exist yet (follow-up owed from the #180
-        // Phase 4 report; the write path's cart/pricing steps are currently visible only through
-        // the read-side `cart.price` twin). An entry that GAINS a call site fails below until the
-        // exemption is removed -- a stale exemption is a gate failure, never a quiet allowance
-        // (the warning-ratchet discipline).
-        const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] =
-            &[("place-order", "cart.read"), ("place-order", "pricing.compute")];
+        // `cart.read`/`pricing.compute` predate this check and were surfaced BY it: the
+        // place-order prepare phase runs `require_cart` and `price_cart` inside the SDK-free
+        // application handler, so their spans need a framework-boundary seam that does not exist
+        // yet (follow-up owed from the #180 Phase 4 report; the write path's cart/pricing steps
+        // are currently visible only through the read-side `cart.price` twin). `quote.verify`
+        // (#933 B'.10, PROP-20260831-134539 slice 3b, ADR-20260906-192007 D-F) joins them for the
+        // SAME structural reason as its two siblings above (corrected, checkpoint 2 item O,
+        // observability -- this used to say the guard it wraps "is licensed only once the write
+        // door opens", which is FALSE as of phase C: `application::quote::verify_quote` is wired
+        // and ships behind the door for real, CLOSED a no-op and OPEN doing the work, both today).
+        // The constructor is DECLARED; `crates/application` is SDK-free by design (Cargo pins the
+        // tracing facade, #191) and cannot import `telemetry`, so the span can only be constructed
+        // at an UNFENCED instrumented boundary OUTSIDE `application` (a `crates/server`-side
+        // wrapper around the `verify_quote` call) -- that wiring is a FLIP PRECONDITION
+        // (`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` item 18), never a licensing gate on the
+        // guard's own logic, which already runs unconditionally. It is also named in place-order's
+        // success-rule alternation (`{ any_of: ["quote.verify", "command.validate"] }`), which is a
+        // TAUTOLOGY until this wiring lands (`command.validate` is independently `required: true`
+        // on this same contract). An entry that GAINS a call site fails below until the exemption
+        // is removed -- a stale exemption is a gate failure, never a quiet allowance (the
+        // warning-ratchet discipline).
+        const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] = &[
+            ("place-order", "cart.read"),
+            ("place-order", "pricing.compute"),
+            ("place-order", "quote.verify"),
+        ];
 
         let mut missing: Vec<String> = Vec::new();
         // `read-authorization` joined the list with #469: its counters are now demonstrably emitted
@@ -8573,8 +8590,17 @@ fn the_deployed_monolith_has_a_generated_manifest() {
 /// []` on a `secret: true` key, never from an ABSENT `required:` folding into the same empty
 /// `Vec` (ADR-20260815-015422 -- a declared posture, never a constructor fallback). Before the
 /// fix, `k.required.is_empty()` could not tell the two apart and every secret that simply never
-/// mentions `required:` silently became optional too. On the real spec catalog exactly ONE
-/// production secret key writes `required: []`: `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT`.
+/// mentions `required:` silently became optional too. On the real spec catalog exactly THREE
+/// production secret keys write `required: []`: `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` (a genuinely
+/// optional dark-feature secret), and the two quote-signing keys added by #816's B'.4 --
+/// `QUOTE_SIGNING_KEY_HMAC_SECRET` (TEMPORARILY optional: a brief promotion to
+/// `required: [staging, production]`, D-H, was found at checkpoint 2 (item J) to add zero safety
+/// with the write door still closed -- `QuoteGuard::resolve_at_boot`'s own dev-key boot refusal
+/// already catches an unprovisioned key whenever the door is OPEN in a live profile, so the
+/// manifest-level requirement only wedged every deploy on a secret nothing consumes with the door
+/// off; reverted, the promotion moves to the flip card, landing with the door actually opening)
+/// and `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET` (PERMANENTLY optional -- absent whenever no
+/// rotation is in flight).
 #[test]
 fn only_the_explicitly_declared_optional_secret_is_optional() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -8586,14 +8612,18 @@ fn only_the_explicitly_declared_optional_secret_is_optional() {
         .collect();
     assert_eq!(
         optional_keys,
-        vec!["PLATFORM_BOOTSTRAP_ADMIN_SUBJECT".to_string()],
-        "exactly one production secret key may be optional at deploy -- an absent `required:` \
+        vec![
+            "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT".to_string(),
+            "QUOTE_SIGNING_KEY_HMAC_SECRET".to_string(),
+            "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET".to_string(),
+        ],
+        "exactly three production secret keys may be optional at deploy -- an absent `required:` \
          must stay fatal, only an EXPLICIT `required: []` on a `secret: true` key may declare \
          `missing-optional`; got {optional_keys:?}"
     );
 
-    // The generated contract must agree: `secret-keys.json` carries `optional: true` on that one
-    // key alone.
+    // The generated contract must agree: `secret-keys.json` carries `optional: true` on exactly
+    // those three keys.
     let pins = read_image_pins(&root).expect("pins parse");
     let tree = emit_deploy_tree(&model, &pins);
     let secret_keys_json = tree
@@ -8603,15 +8633,20 @@ fn only_the_explicitly_declared_optional_secret_is_optional() {
         .expect("secret-keys.json emitted");
     let parsed: serde_json::Value = serde_json::from_str(secret_keys_json).expect("valid JSON");
     let keys = parsed["keys"].as_object().expect("keys object");
-    let optional_in_json: Vec<&String> = keys
+    let mut optional_in_json: Vec<&String> = keys
         .iter()
         .filter(|(_, v)| v["optional"].as_bool() == Some(true))
         .map(|(k, _)| k)
         .collect();
+    optional_in_json.sort();
     assert_eq!(
         optional_in_json,
-        vec!["PLATFORM_BOOTSTRAP_ADMIN_SUBJECT"],
-        "secret-keys.json must carry `optional: true` on PLATFORM_BOOTSTRAP_ADMIN_SUBJECT alone"
+        vec![
+            "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT",
+            "QUOTE_SIGNING_KEY_HMAC_SECRET",
+            "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET",
+        ],
+        "secret-keys.json must carry `optional: true` on exactly these three keys"
     );
 }
 

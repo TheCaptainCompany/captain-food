@@ -237,6 +237,26 @@ pub fn cart_read(aggregate_id: &str) -> Span {
     )
 }
 
+/// `quote.verify` (INTERNAL) — PROP-20260831-134539 slice 3b (D-F, ADR-20260906-192007): the
+/// write-side signed-quote verify guard, landed ahead of its own call site (#933 B'.10,
+/// gate-then-stabilize). DARK today, the SAME posture `catalog.as_of.fold` carried through slice
+/// 2: declared and constructed here so `specs/observability.yaml`'s `quote.verify`/`command.validate`
+/// alternation names a real constructor, but invoked by NO production code yet — the guard this
+/// span will wrap is `application::commands::place_order`'s pre-payment block, licensed only once
+/// the write door (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`) opens
+/// (ADR-20260904-081527 §8's seventh carve-out). Exempted in
+/// `tools/codegen-rs/src/tests.rs`'s `KNOWN_UNINVOKED_REQUIRED_SPANS` until that phase wires the
+/// real call site — the SAME reviewable "deliberately not yet" `cart.read`/`pricing.compute`
+/// already use, never a silent gap.
+pub fn quote_verify(aggregate_id: &str, correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "quote.verify",
+        otel.kind = "internal",
+        business.aggregate_id = aggregate_id,
+        business.correlation_id = correlation_id,
+    )
+}
+
 /// `cart.price` (INTERNAL) — ONE priced cart READ at the GraphQL resolver seam (`cart-price`
 /// contract, #451): the money-free Cart row priced fresh from the live catalog via `price_cart`.
 /// `business.aggregate_id` = the cartId being priced. `business.correlation_id` is the

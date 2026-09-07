@@ -1,0 +1,7 @@
+{
+  "week": "2026-W37",
+  "seconds": 7800,
+  "recordedAt": "2026-09-07T00:31:48.026Z",
+  "branch": "816-s3b-signed-quote-and-command",
+  "note": "816-s3b4 phase C: signed-quote verify guard wired end to end (minter/verifier round trip, priced mint, the walk, refusals, PM guard swap + PriceMismatch deletion, interlock, dev-key boot refusal, bulkhead pool wiring); start was never called at run outset, elapsed is an estimate from first observed CI timestamp (~22:26Z 2026-09-06) to stop (~00:31Z 2026-09-07)"
+}

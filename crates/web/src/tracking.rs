@@ -92,11 +92,23 @@ pub struct TrackingState {
     /// which would tell a customer whose money just moved that their order does not exist.
     /// A stranger's URL has no pending record, so the not-found pin is unchanged.
     pub birth_pending: bool,
+    /// The `PlaceOrder` mutation's OWN observed terminal REJECTION (#816 follow-up, ux, "a live
+    /// customer-facing lie today") — fed by `operationStatus`, never by `order.byId`: a rejected
+    /// checkout typically produces NO `Order` at all (`QuoteVerificationFailed`/
+    /// `QuoteNoLongerHonoured`/`PriceUnresolvable`/etc.
+    /// reject strictly BEFORE any `OrderCreated`), so `order.byId` legitimately stays
+    /// Unresolved/Absent FOREVER and `birth_pending` alone has no correcting signal — without this,
+    /// the acceptance reassurance ("Reçu ✓ — confirmation en cours…") would render forever over an
+    /// order that will never arrive. `None` = no rejection observed (the ordinary case). `Some(text)`
+    /// = REJECTED, `text` being the server's own cause-neutral business message when the terminal
+    /// read carried one, the stable `errors.yaml` code otherwise — the SAME fallback
+    /// `interact::outcome_toast` already uses, never a fabricated client string.
+    pub refused: Option<String>,
 }
 
 impl TrackingState {
     pub fn new(order_id: Uuid) -> Self {
-        Self { order_id, order: OrderRead::Unresolved, birth_pending: false }
+        Self { order_id, order: OrderRead::Unresolved, birth_pending: false, refused: None }
     }
 
     /// The customer tracking banner's own flag (#639 part C step 3-ii, review round 2 on #870):
@@ -117,6 +129,14 @@ impl TrackingState {
         self
     }
 
+    /// Mark the observed terminal REJECTION — see [`Self::refused`]. Builder-shaped like
+    /// [`Self::with_birth_pending`]: only a call site that actually resolved the PlaceOrder
+    /// intent's own outcome may claim it.
+    pub fn with_refused(mut self, text: impl Into<String>) -> Self {
+        self.refused = Some(text.into());
+        self
+    }
+
     /// Build from an already-RESOLVED render context — the screen's own declared `order.byId`
     /// requirement, resolved by whichever entry is rendering (SSR's `render_path_with`, or
     /// `hydrate`'s fetch loop). Before #420 the only production call site built
@@ -132,7 +152,7 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v.clone()),
         };
-        Self { order_id, order, birth_pending: false }
+        Self { order_id, order, birth_pending: false, refused: None }
     }
 
     /// Build from a full [`RenderContext`] (#472) — the [`from_resolved`](Self::from_resolved)
@@ -148,7 +168,7 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v),
         };
-        Self { order_id, order, birth_pending: false }
+        Self { order_id, order, birth_pending: false, refused: None }
     }
 
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.
@@ -413,12 +433,19 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
     // Order lane). Failed keeps its own staleness+retry state; Present renders the order.
     let confirming =
         state.birth_pending && matches!(state.order, OrderRead::Unresolved | OrderRead::Absent);
+    let refused = state.refused.clone();
 
     let not_found = crate::i18n::resolve("order.not_found", &locale);
     let tracking_stale = crate::i18n::resolve("order.error.tracking_stale", &locale);
     let retry = crate::i18n::resolve("common.error.retry", &locale);
     let confirming_copy = crate::i18n::resolve("order.confirming", &locale);
     let delivery_reassigning_copy = crate::i18n::resolve("order.delivery_reassigning", &locale);
+    // #816 follow-up (ux): no new string — the CTA reuses checkout's own
+    // `checkout.payment_failed.back_to_cart` (the cart stays OPEN on a rejected PlaceOrder, exactly
+    // as it does on a failed payment) and the title reuses the REJECTED status hero's own key, the
+    // same copy an actually-Present REJECTED order would show.
+    let refused_title = crate::i18n::resolve("order.status.rejected.title", &locale);
+    let back_to_cart = crate::i18n::resolve("checkout.payment_failed.back_to_cart", &locale);
     view! {
         <main id="app" data-hydrate="order_tracking">
             {match hero {
@@ -431,6 +458,28 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
                         </section>
                     }.into_any()
                 }
+                // #816 follow-up (ux, "a live customer-facing lie today"): the PlaceOrder mutation's
+                // OWN observed REJECTED terminal outcome, checked BEFORE `confirming` -- a rejected
+                // checkout typically never produces an Order at all, so without this the acceptance
+                // reassurance below would render FOREVER over a paid intent that will never arrive.
+                // Cause-neutral (mirrors QuoteNoLongerHonoured's own posture): the server's own
+                // message, never a client-fabricated cause; the CTA and cart-is-intact framing are
+                // checkout's existing payment_failed_state, reused verbatim (no new string).
+                None if refused.is_some() => view! {
+                    <section data-c="order_status_hero" data-icon="x_circle" data-status="REJECTED">
+                        <h1 data-i18n="order.status.rejected.title">{refused_title.clone()}</h1>
+                        <p data-c="text">{refused.clone().unwrap_or_default()}</p>
+                        <button
+                            data-c="button"
+                            id="back_to_cart_btn"
+                            data-variant="outline"
+                            data-action="navigate"
+                            data-route="/cart"
+                        >
+                            {back_to_cart.clone()}
+                        </button>
+                    </section>
+                }.into_any(),
                 // #758 (ADR-20260829-230418, C1a): the PAID handoff window. The client still holds
                 // its fresh PlaceOrder intent for this very order, so "Reçu" is a claim the page is
                 // entitled to make — and once ROUTE_ORDER_BIRTH_THROUGH_LANE flips, an ANSWERED
@@ -781,6 +830,40 @@ mod tests {
         assert!(!html.contains("Reçu ✓"), "a read order shows the order, not the wait copy: {html}");
     }
 
+    /// #816 follow-up (ux, "a live customer-facing lie today"): the observed terminal REJECTED
+    /// outcome, mirror of [`a_paid_answered_null_renders_the_acceptance_reassurance_not_not_found`].
+    /// A rejected checkout produces NO `Order` at all, so `birth_pending` alone (still `true`: the
+    /// pending record is only cleared by the resolve leg, and this test constructs the state
+    /// directly, the same way the mirror test does) would show the acceptance reassurance FOREVER
+    /// over an intent that will never arrive — `refused` must win instead, cause-neutral, with the
+    /// checkout's own `back_to_cart` CTA and NO new string.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_rejected_place_order_never_renders_the_acceptance_reassurance() {
+        let id = Uuid::now_v7();
+        for (locale, refusal_title, confirming_copy, cta) in [
+            ("fr", "Commande refusée", "Reçu ✓ — confirmation en cours…", "Revenir au panier"),
+            ("en", "Order rejected", "Received ✓ — confirmation in progress…", "Back to cart"),
+        ] {
+            let refused = TrackingState::new(id)
+                .with_birth_pending(true)
+                .with_refused("We could not confirm your total. Your card was not charged.");
+            let html = render_tracking_html(refused, locale);
+            assert!(html.contains(refusal_title), "{locale}: the refusal title renders: {html}");
+            assert!(
+                html.contains("We could not confirm your total. Your card was not charged."),
+                "{locale}: the server's own cause-neutral message renders verbatim: {html}"
+            );
+            assert!(
+                !html.contains(confirming_copy),
+                "{locale}: a REJECTED order must never show the acceptance reassurance, even with \
+                 birth_pending still true: {html}"
+            );
+            assert!(html.contains(cta), "{locale}: the existing back_to_cart CTA is reused: {html}");
+            assert!(html.contains(r#"data-status="REJECTED""#), "{locale}: {html}");
+        }
+    }
+
     /// #758: the bounded re-check — an answered null in the paid context re-pulls until the birth
     /// lands or the bound is spent, and NEVER loops beyond it (the `await_payment_intent_with`
     /// precedent; the subscription stays the push path).
@@ -838,7 +921,7 @@ mod tests {
             // was never read renders no claim at all; that is
             // `an_unanswered_read_never_tells_a_customer_their_order_was_not_found`.
             let answered_null =
-                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false };
+                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false, refused: None };
             let html = render_tracking_html(answered_null, locale);
             assert!(html.contains(not_found), "{locale}: {html}");
             assert!(!html.contains("[order.not_found]"), "{html}");
@@ -873,7 +956,7 @@ mod tests {
         // The two empty states are DIFFERENT (#427): a read that answered null is UNKNOWN; a read
         // that never answered makes no claim.
         let html = render_tracking_html(
-            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false },
+            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false, refused: None },
             "fr",
         );
         assert!(html.contains("data-status=\"UNKNOWN\""));

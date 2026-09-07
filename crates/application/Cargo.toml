@@ -31,6 +31,13 @@ hex = "0.4"
 # Art. 5(1)(e) storage limitation): `crates/infrastructure` already depends on the same RustCrypto
 # family for AUTH_SESSION_KEY, so this adds no new build weight to the workspace.
 hmac = "0.12"
+# Constant-time signature comparison for the signed cart quote's verify guard
+# (PROP-20260831-134539 slice 3b, D-I's spy-binary concern): `hmac::Mac`'s own `verify_slice` would
+# do, but `quote.rs` decodes the signature as a separate hex field (the envelope carries payload +
+# signature, not a MAC-verified stream), so the constant-time compare is spelled out directly —
+# already a transitive dependency of `hmac`/`ed25519` elsewhere in the lockfile, so this adds no new
+# build weight.
+subtle = "2.6"
 # base64url for behaviour_support's FakeIdentity (#437): the double mints an unsigned but DECODABLE
 # JWT whose payload reflects what was stamped, so tests assert the PARKED token's claims by
 # behaviour (decode) rather than by call log. A pure encoding utility, same class as `hex`.

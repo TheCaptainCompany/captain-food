@@ -167,7 +167,7 @@ impl application::ports::AsOfPriceAuthority for Empty {
         &self,
         _catalog_id: ds::CatalogId,
         _correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         Err(DomainError::Repository("Empty never folds".into()))
     }
 }
@@ -344,7 +344,7 @@ impl application::ports::AsOfPriceAuthority for FakeAsOf {
         &self,
         catalog_id: ds::CatalogId,
         correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.last_correlation_id.lock().expect("lock") = Some(correlation_id);
         if catalog_id != self.catalog_id {
@@ -361,7 +361,7 @@ impl application::ports::AsOfPriceAuthority for FakeAsOf {
             .map(|(i, e)| (domain::catalog_as_of::CatalogVersion::try_new(i as i64 + 1).unwrap(), e.clone()))
             .collect();
         self.last_coordinate.store(head.get(), std::sync::atomic::Ordering::SeqCst);
-        Ok((domain::catalog_as_of::AsOfCatalog::from_stream(&versioned, head), head))
+        Ok(domain::catalog_as_of::AsOfCatalog::from_stream(&versioned, head))
     }
 }
 
@@ -381,7 +381,7 @@ impl application::ports::AsOfPriceAuthority for FailingAsOf {
         &self,
         _catalog_id: ds::CatalogId,
         _correlation_id: uuid::Uuid,
-    ) -> Result<(domain::catalog_as_of::AsOfCatalog, domain::catalog_as_of::CatalogVersion), DomainError> {
+    ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
         Err(DomainError::Repository("catalog not created".into()))
     }
 }
@@ -756,6 +756,15 @@ impl actor_client::supervision::MailboxLaneRepository for Empty {
 
 // --- harness -----------------------------------------------------------------------------------
 
+/// A fixed test key -- beck (ii): every schema this file builds mints under it, so a test that
+/// wants to VERIFY a minted quote (rather than merely assert its presence) builds a
+/// `QuoteVerifier` over the SAME key.
+fn test_minter() -> Arc<application::quote::QuoteMinter> {
+    Arc::new(application::quote::QuoteMinter::new(
+        application::quote::SigningKey::from_resolved_secret("test-key", "test-signing-secret"),
+    ))
+}
+
 fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSchema {
     build_schema(
         Some(ReadDeps {
@@ -787,6 +796,7 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         as_of_price_authority: Arc::new(Empty),
         run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
+        quote_minter: test_minter(),
         }),
         None,
         None,
@@ -831,6 +841,7 @@ fn schema_over_with_door(
             run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
             as_of_price_authority: authority,
             run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(door_open),
+            quote_minter: test_minter(),
         }),
         None,
         None,
@@ -840,7 +851,10 @@ fn schema_over_with_door(
 const CURRENT_Q: &str = "query { current { id restaurantId status totalAmount { amountCents currency } \
                          breakdown { total { amountCents } } \
                          lines { quantity lineTotal { amountCents } } } }";
+const CURRENT_WITH_QUOTE_Q: &str = "query { current { id totalAmount { amountCents } quote } }";
+const CARTS_WITH_QUOTE_Q: &str = "query($customerId: CustomerId!) { carts(input: { customerId: $customerId }) { id quote } }";
 const CART_Q: &str = "query($id: CartId!) { cart(input: { id: $id }) { id totalAmount { amountCents } } }";
+const CARTS_Q: &str = "query($customerId: CustomerId!) { carts(input: { customerId: $customerId }) { id lines { lineTotal { amountCents } } } }";
 
 /// The tenant the HTTP edge resolves from the `Host` (#469). The schema-level tests below supply
 /// it directly because they execute the SCHEMA; the PATH-level tests at the end of this file supply
@@ -1300,6 +1314,153 @@ async fn with_the_door_closed_the_priced_read_is_the_projection_read_and_carries
     );
 }
 
+/// beck (ii): `priced` actually MINTS -- the OPEN arm's `quote` field is non-null, decodes and
+/// signature-verifies under a `QuoteVerifier` holding the SAME key `test_minter()` mints under,
+/// and binds the coordinate `at_head` actually returned. Mutant: `cart_read::priced`'s `quote:`
+/// field stays hardcoded `None` on the OPEN arm -- expected red: `quote` is `null`.
+#[tokio::test]
+async fn priced_mints_a_verifiable_quote_on_the_open_arm() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        true, // OPEN
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_WITH_QUOTE_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    let quote = data["current"]["quote"].as_str().expect("a non-null quote on the OPEN arm").to_string();
+    let verifier = application::quote::QuoteVerifier::new(
+        application::quote::SigningKey::from_resolved_secret("test-key", "test-signing-secret"),
+        None,
+    );
+    let verified = verifier
+        .decode_and_check_signature(&domain::generated::scalars::CartQuote(quote))
+        .expect("the minted quote verifies cleanly under the SAME key");
+    assert_eq!(verified.cart_id, uid(1), "quote binds the cart it was minted for");
+    assert_eq!(verified.catalog_version, fake.last_returned_coordinate(), "quote binds the coordinate the fold actually returned");
+}
+
+/// beck (ii): the CLOSED arm mints nothing -- `quote` is `null` (one of `CartQuote`'s three
+/// documented null causes, scalars.yaml#/CartQuote). Mutant: `priced` mints unconditionally
+/// (ignoring `door`) -- expected red: `quote` is non-null with the door closed.
+#[tokio::test]
+async fn priced_mints_nothing_on_the_closed_arm() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        false, // CLOSED
+    );
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_WITH_QUOTE_Q)
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    assert!(data["current"]["quote"].is_null(), "the closed arm must mint no quote");
+}
+
+/// D-L, RED-FIRST (ADR-20260906-192007:34): the `carts` LIST resolver must never open the
+/// fold-priced door, even when `RUN_FOLD_PRICED_CART_READ` is ON -- structurally, via
+/// `priced_list`'s witness-less signature, never by convention. Two carts, same customer, same
+/// restaurant, door TRUE, fold seeded to answer 19,00 EUR if it were EVER consulted (a decoy
+/// unreachable from the projection). Mutant (per the coordinator's addition): pass the door witness
+/// from the `carts` arm in the emitter literal, i.e. make `carts` call `priced` with `Some(door)`
+/// instead of `priced_list`'s hard `None` -- expected red: either lineTotal 1900 where 1500 is
+/// expected, or `fake.reads` 2 where 0 is expected (both carts would fold).
+#[tokio::test]
+async fn the_carts_list_never_opens_the_fold_even_with_the_door_on() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    // If the fan-out ever fell through to the fold, THIS price (1900) would leak into the reply
+    // instead of the projection's 1500 -- a decoy, not merely an unread value (same idiom as
+    // `with_the_door_closed_...` above, but here the DOOR IS ON).
+    fake.append_price_update(1900);
+    let schema = schema_over_with_door(
+        vec![
+            cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100),
+            cart_row(2, restaurant, 11, Some(5), vec![line_1500()], 200),
+        ],
+        restaurant,
+        fake.clone(),
+        true, // ON -- the carts fan-out must ignore it structurally (D-L), not by convention
+    );
+    let resp = schema
+        .execute(
+            Request::new(CARTS_Q)
+                .variables(Variables::from_json(json!({ "customerId": uid(5) })))
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    let carts = data["carts"].as_array().expect("carts array");
+    assert_eq!(carts.len(), 2, "both carts belong to customer 5: {carts:?}");
+    for c in carts {
+        assert_eq!(
+            c["lines"][0]["lineTotal"]["amountCents"],
+            json!(1500),
+            "the carts list must price from the live catalog PROJECTION, never the fold's decoy: {c:?}"
+        );
+    }
+    assert_eq!(
+        fake.reads.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the carts fan-out must NEVER call AsOfPriceAuthority::at_head, door open or not (D-L)"
+    );
+}
+
+/// beck (ii): `priced_list` mints NOTHING, door open or not -- structurally, since its own
+/// signature carries no witness (D-L). Mutant: `priced_list` passes `Some(door)` into `priced`
+/// instead of its hard `None` -- expected red: `quote` is non-null on a `carts` row.
+#[tokio::test]
+async fn the_carts_list_mints_no_quote_even_with_the_door_on() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let catalog_id = ds::CatalogId(uid(50));
+    let fake = std::sync::Arc::new(FakeAsOf::seeded(catalog_id, restaurant));
+    let schema = schema_over_with_door(
+        vec![cart_row(1, restaurant, 10, Some(5), vec![line_1500()], 100)],
+        restaurant,
+        fake.clone(),
+        true, // ON
+    );
+    let resp = schema
+        .execute(
+            Request::new(CARTS_WITH_QUOTE_Q)
+                .variables(Variables::from_json(json!({ "customerId": uid(5) })))
+                .data(acting(RequestRole::Customer))
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    let data = resp.data.into_json().unwrap();
+    let carts = data["carts"].as_array().expect("carts array");
+    assert_eq!(carts.len(), 1);
+    assert!(carts[0]["quote"].is_null(), "the carts fan-out must mint no quote, structurally");
+}
+
 /// D2: the mixed-authority mutant this whole slice exists to forbid — `at_head` called (so the fold
 /// IS read) but priced from the PROJECTION anyway (beck mutant C: `price_cart(&snapshot, ..)`
 /// instead of `price_cart_at(&snapshot, &as_of, ..)`). Every OTHER door-OPEN test seeds `FakeAsOf`
@@ -1527,6 +1688,7 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
         run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         as_of_price_authority: Arc::new(Empty),
         run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
+        quote_minter: test_minter(),
         }),
         None,
         None,

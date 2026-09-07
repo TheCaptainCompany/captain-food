@@ -1179,9 +1179,13 @@ pub struct PlaceOrderInput {
     /// Stripe PaymentMethod / client secret reference for the payment step. The wallet behind it (card, Apple Pay, Google Pay) is a client-side/Stripe concern and does not change the domain: every method yields a standard Stripe PaymentMethod and the same saga.
     #[graphql(name = "paymentMethodId")]
     pub payment_method_id: String,
-    /// OPTIONAL confirmation of the total the client displayed at checkout. NEVER used to price anything — the server recomputes the total from the live catalog (the only price authority) and rejects with errors.yaml#/PriceMismatch when the two diverge, so a customer is never charged an amount other than the one they were shown.
+    /// DEPRECATED (ADR-20260906-192007 D-A), superseded by `quote` below and IGNORED BY THE SERVER: the equality check this field once fed (`errors.yaml#/PriceMismatch`) is deleted. No shipped client sets this field (`crates/web/src/checkout.rs:610` is a test fixture, not a call site). Kept nullable for the expand/contract discipline; its OWN deletion is a separate, later recorded change, gated on a client cache-drain condition.
     #[graphql(name = "expectedTotal")]
+    #[graphql(deprecation = "Retired by the quote (PROP-20260831-134539 slice 3b); ignored by the server. No shipped client sends it.")]
     pub expected_total: Option<MoneyInput>,
+    /// The signed quote (ADR-20260906-192007 D-A/D-J) from the read that painted the checkout recap total the customer confirmed — never one stashed from an earlier read. CLOSED (`configuration.yaml#/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`, default everywhere): accepted structurally and NEVER READ — every order still prices and charges AT HEAD from the live catalog projection, exactly as before this field existed. OPEN: an ABSENT quote refuses at the HANDLER with `errors.yaml#/QuoteVerificationFailed` (typed, never a GraphQL non-null violation, so requiredness can flip without a same-change SDL edit); a PRESENT quote is verified (`rules.yaml#/ServerPriceAuthority`, D-F) and a mismatch produces exactly one of the enumerated refusals (D-D). The requiredness flip is its own separate, later recorded step — not this deliverable's.
+    #[graphql(name = "quote")]
+    pub quote: Option<CartQuote>,
 }
 
 /// Restaurant accepts an order and commits to preparing it.

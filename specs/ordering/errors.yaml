@@ -247,19 +247,69 @@ PaymentDeclined:
     fr: "Le paiement a été refusé."
 
 
-PriceMismatch:
+QuoteNoLongerHonoured:
   description: >
-    The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the
-    server recomputed from the live catalog. The server is the only price authority: the checkout is
-    rejected so the customer is never charged an amount other than the one they were shown.
+    WIRED IN CODE (ADR-20260906-192007 D-D/D-F/D-G, PROP-20260831-134539 slice 3b): the write-side
+    verify guard (`application::quote::verify_quote`, `application::commands::place_order`'s
+    pre-payment block) throws this for the ONE business cause in the refusal set, in exactly two
+    forms, both collapsed to the SAME structural fact the signed quote's own binding makes
+    checkable: the cart was edited after the quote was minted (the token binds a digest of the
+    cart's own repricing inputs, so an edit is a content mismatch the moment the two differ — see
+    `application::quote`'s module doc for why this is a content digest rather than the cart's raw
+    stream version), and expiry (QUOTE-STALENESS, 30 min). Replaces `errors.yaml#/PriceMismatch`
+    (deleted in the same change): repurposing it instead was refused (evans) — its copy ("Prices
+    have changed…") is false for the structural refusal causes the new refusal set enumerates.
+    Quiet in telemetry (`DomainError::Rejected`, never loud like the structural refusals, which
+    reject with `errors.yaml#/QuoteVerificationFailed` instead and never reach this error at all).
+    `context: { cartId }` ONLY — no amount, no delta, no currency, no cause. MUST NOT: an amount,
+    an old→new pair, a delta, a currency figure, a countdown, refund/bank-date language, or the
+    word "price" in a way that implies one changed for causes that never were a price change. The
+    CTA reuses `checkout.payment_failed.back_to_cart` — no new CTA, no retry control. Messages
+    below are ux's DRAFT for counsel review (CQ-7, never clearance) — not yet legally cleared copy.
+
+    DECLARED but DSL-UNWIRED (no `throws:` reference in actors.yaml/processmanager.yaml, a KNOWN
+    GAP, not an oversight): both causes need a REAL, signature-valid token minted against a
+    specific cart/catalog state to reach at all, which `tests.yaml`'s static fixtures cannot
+    express, and `noTestFixturePossible: true`'s justification is hard-restricted to the
+    `readOnlyCatchAll` class (`error-exemption-unjustified`, #639 part C step 4-i round 3 item 1)
+    — a class this error does not belong to. Pinned instead by NAMED Rust unit tests
+    (`application::commands::tests::a_cart_edited_after_the_mint_is_refused_with_quote_no_longer_honoured`
+    and its `_expired` sibling) that call `place_order` directly with a real, minted-then-mutated
+    quote. Closing this gap needs either a validator extension (a second, equally-justified
+    exemption class for signature-bearing fixtures) or a `tests.yaml` mechanism that can mint a
+    token at test-generation time — flagged for the architect, not resolved here.
   context:
     cartId: { $ref: 'scalars.yaml#/CartId' }
-    expectedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
-    submittedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
-    currency: { $ref: 'scalars.yaml#/CurrencyCode' }
   messages:
-    en: "Prices have changed since you loaded the menu. Please review your cart and try again."
-    fr: "Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer."
+    en: "We couldn't confirm your total. Your card was not charged and no authorization was taken. Your basket is intact — open it to see current prices and order again."
+    fr: "Nous n'avons pas pu confirmer votre total. Votre carte n'a pas été débitée et aucune autorisation n'a été prise. Votre panier est intact — ouvrez-le pour voir les prix actuels et commander à nouveau."
+
+
+QuoteVerificationFailed:
+  description: >
+    WIRED (ADR-20260906-192007 D-D i/iii, D-F/D-G): the ONE structural/technical error for every
+    verify-guard refusal cause OTHER than `QuoteNoLongerHonoured`'s two — an ABSENT `quote` when
+    the write door is open (D-A; genuinely tests.yaml-coverable, no signature needed, see
+    `tests.yaml#/TestPlaceOrderRejectsQuoteVerificationFailed`), a forged signature, an
+    unknown/retired `keyId`, a quote naming a different cart/restaurant/catalog than the command's
+    live state, a coordinate absent or beyond the live stream head, or a fold read failure. Rejects
+    on the ADR-20260810-112836 §6 technical path (LOUD in telemetry — the `quote.verify` span
+    marked ERROR with `business.failure_reason` recording which of these fired; never on the
+    customer-facing copy, which is identical to `QuoteNoLongerHonoured`'s — the customer sees ONE
+    cause-neutral screen for the whole refusal set). `context: { cartId }` only — no signature, no
+    key material, no token bytes anywhere in the context (D-I's spy-binary concern). The
+    signature/keyId/foreign-cart/coordinate-beyond-head causes share this SAME code with the
+    absent-quote cause but are pinned by NAMED Rust unit tests, not `tests.yaml`, for the same
+    reason `QuoteNoLongerHonoured` names above (`application::commands::tests::
+    a_forged_signature_refuses_with_quote_verification_failed` and its siblings). Messages below
+    are ux's DRAFT for counsel review (CQ-7, never clearance) — not yet legally cleared copy, the
+    SAME posture `QuoteNoLongerHonoured`'s copy states (checkpoint 2, legal item D: this
+    description previously omitted the marker its sibling error already carried).
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+  messages:
+    en: "We couldn't confirm your total. Your card was not charged and no authorization was taken. Your basket is intact — open it to see current prices and order again."
+    fr: "Nous n'avons pas pu confirmer votre total. Votre carte n'a pas été débitée et aucune autorisation n'a été prise. Votre panier est intact — ouvrez-le pour voir les prix actuels et commander à nouveau."
 
 
 PriceUnresolvable:

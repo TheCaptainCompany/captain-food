@@ -7,6 +7,7 @@ pub(crate) mod api_operation_keys; // §27 api operation keys are a closed set p
 pub(crate) mod api_while_restricted; // §29 whileRestricted: is the standing carve-out grammar (#639 part C step 4-i, ADR-20260904-081527 §4)
 pub(crate) mod bins; // §15 bin topology ↔ c4-l2 containers (#382)
 pub(crate) mod business_metrics; // §19 business-metric catalog (ADR-20260811-014129, #484)
+pub(crate) mod catalog_version_wire_shape; // CatalogVersion never in an input block or field argument of the generated SDL (ADR-20260906-192007 D-L, #816)
 pub(crate) mod citations; // §23 record-citation ratchet (docs/** + CLAUDE.md, #658 slice 1)
 pub(crate) mod core; // §1 validate() orchestrator + resolver-args checks
 pub(crate) mod databases; // §18 database catalog + per-kind placement (#494 slice 1)
@@ -38,6 +39,7 @@ pub(crate) use api_operation_keys::*;
 pub(crate) use api_while_restricted::*;
 pub(crate) use bins::*;
 pub(crate) use business_metrics::*;
+pub(crate) use catalog_version_wire_shape::*;
 pub(crate) use citations::*;
 pub(crate) use core::*;
 pub(crate) use databases::*;

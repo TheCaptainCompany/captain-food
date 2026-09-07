@@ -211,6 +211,94 @@ fn catalog_imported_payload(
     })
 }
 
+/// The benchmark's own honesty check (#930 item 10, discharged HERE): does the SPLIT-leg
+/// measurement (three separate un-integrated calls) disagree with the INTEGRATED end-to-end call
+/// over what the read costs? The WRONG way to ask this sums three INDEPENDENT per-iteration
+/// MEDIANS and compares the sum to the e2e MEDIAN — but `median(a) + median(b) + median(c)` is NOT
+/// `median(a+b+c)` in general (medians of different distributions do not compose by addition), so
+/// with the true slack near zero, sub-millisecond scheduling noise across the three SEPARATE
+/// medians is enough to flip the comparison on an otherwise-healthy run (the CI flake beck
+/// diagnosed at the #922 confirmation pass, #930 item 10 — phase B touched no benchmark code and
+/// still saw this fire).
+///
+/// The fix keeps the PAIRED per-iteration samples (`sql[i]`, `decode[i]`, `fold[i]`, `e2e[i]` all
+/// measured within the SAME loop iteration `i`) and computes a SIGNED slack per iteration —
+/// `slack_i = e2e_i − (sql_i + decode_i + fold_i)`, which may legitimately be negative for a few
+/// iterations under scheduler jitter — then asserts the MEDIAN OF THAT SLACK SERIES is `>= 0`. A
+/// genuine leg/e2e disagreement (the split legs really do cost more than the integrated call
+/// claims) shifts the WHOLE paired distribution negative; independent per-iteration noise on a
+/// near-zero true slack does not, because it is exactly as likely to push `slack_i` up as down —
+/// unlike three medians taken separately, which have no such symmetry against each other.
+fn median_slack_ns(sql: &[Duration], decode: &[Duration], fold: &[Duration], e2e: &[Duration]) -> i128 {
+    assert_eq!(sql.len(), decode.len(), "paired sample vectors must be the same length");
+    assert_eq!(sql.len(), fold.len(), "paired sample vectors must be the same length");
+    assert_eq!(sql.len(), e2e.len(), "paired sample vectors must be the same length");
+    assert!(!sql.is_empty(), "at least one paired sample is required");
+    let mut slacks: Vec<i128> = (0..sql.len())
+        .map(|i| {
+            let legs = sql[i].as_nanos() as i128 + decode[i].as_nanos() as i128 + fold[i].as_nanos() as i128;
+            e2e[i].as_nanos() as i128 - legs
+        })
+        .collect();
+    slacks.sort();
+    slacks[slacks.len() / 2]
+}
+
+/// RED-FIRST (#930 item 10): a synthetic paired sample set where the OLD comparison (sum of three
+/// INDEPENDENT per-iteration MEDIANS vs. the e2e MEDIAN) reports a FALSE disagreement, purely
+/// because summing medians discards which sample paired with which — while the actual PAIRED data
+/// is fine (only one of five iterations has all three legs coincide; the paired-slack MEDIAN stays
+/// comfortably non-negative). `sql`/`decode`/`fold` each equal 40ns at 3-of-5 iterations
+/// (STAGGERED so only iteration 2 has all three "on" at once), `e2e` is flat 100ns:
+///   iter:        0    1    2    3    4
+///   sql:        40   40   40    0    0
+///   decode:      0   40   40   40    0
+///   fold:        0    0   40   40   40
+///   legs sum:   40   80  120   80   40
+///   e2e:       100  100  100  100  100
+///   slack_i:    60   20  -20   20   60   -> sorted [-20,20,20,60,60], median = 20 (>= 0, correct)
+/// median(sql)=median(decode)=median(fold)=40 (sorted [0,0,40,40,40], idx2=40) -> the OLD
+/// comparison sums to 120ns and finds it EXCEEDS e2e's own median of 100ns: a false positive the
+/// mutant below reproduces exactly.
+#[test]
+fn median_slack_is_not_fooled_by_a_sum_of_medians_false_disagreement() {
+    let ns = |v: u64| Duration::from_nanos(v);
+    let sql = vec![ns(40), ns(40), ns(40), ns(0), ns(0)];
+    let decode = vec![ns(0), ns(40), ns(40), ns(40), ns(0)];
+    let fold = vec![ns(0), ns(0), ns(40), ns(40), ns(40)];
+    let e2e = vec![ns(100); 5];
+
+    // The paired-slack fix: correctly non-negative.
+    let median_slack = median_slack_ns(&sql, &decode, &fold, &e2e);
+    assert!(median_slack >= 0, "expected a non-negative paired slack median: {median_slack}ns");
+    assert_eq!(median_slack, 20, "the worked example's own arithmetic: sorted slacks [-20,20,20,60,60]");
+
+    // MUTANT: the OLD sum-of-medians comparison this test discharges (#930 item 10) -- restoring
+    // it is exactly what a regression here would look like. `median_of` mirrors the benchmark's
+    // own convention (sort, take index len()/2 -- an upper median, never averaging the two middle
+    // values, so a 5-length series is unambiguous).
+    fn median_of(mut s: Vec<Duration>) -> Duration {
+        s.sort();
+        s[s.len() / 2]
+    }
+    let legs_sum_of_medians = median_of(sql.clone()) + median_of(decode.clone()) + median_of(fold.clone());
+    let e2e_median = median_of(e2e.clone());
+    assert!(
+        legs_sum_of_medians > e2e_median,
+        "the OLD comparison must find this fixture a (false) disagreement -- legs_sum_of_medians={legs_sum_of_medians:?} e2e_median={e2e_median:?}"
+    );
+
+    // A GENUINE disagreement (every iteration's legs really do exceed e2e) DOES flip the
+    // paired-slack median negative -- the fix does not merely widen a tolerance band to hide a
+    // real problem.
+    let sql_over = vec![ns(120); 5];
+    let median_slack_over = median_slack_ns(&sql_over, &decode, &fold, &e2e);
+    assert!(
+        median_slack_over < 0,
+        "a genuine leg/e2e disagreement must shift the median negative: {median_slack_over}ns"
+    );
+}
+
 /// PROP-20260831-134539:547 — the adapter reads ONLY events up to (and including) `version`, never
 /// the live head. Mutant: drop the `version <= $2` predicate.
 #[tokio::test]
@@ -315,9 +403,10 @@ async fn at_head_prices_the_live_head_and_returns_its_coordinate() {
     append_event(&pool, &stream, 3, "ProductUpdated", product(1900)).await;
 
     let repo = PgAsOfCatalogRepository::new(pool.clone());
-    let (as_of, coordinate) = repo.at_head(CatalogId(catalog_id), uuid::Uuid::nil()).await.expect("at_head reads the live head");
-    assert_eq!(coordinate, CatalogVersion::try_new(3).unwrap(), "at_head must return version 3, the live head");
-    assert_eq!(as_of.coordinate(), coordinate, "AsOfCatalog::coordinate must equal the returned coordinate");
+    // The tuple collapse (ADR-20260906-192007 D-L): `at_head` returns `AsOfCatalog` alone now --
+    // its own `.coordinate()` IS the coordinate, not a second value that could disagree.
+    let as_of = repo.at_head(CatalogId(catalog_id), uuid::Uuid::nil()).await.expect("at_head reads the live head");
+    assert_eq!(as_of.coordinate(), CatalogVersion::try_new(3).unwrap(), "at_head must return version 3, the live head");
     let price = as_of.price_of(OfferId(offer_id), &[]).expect("offer exists at head");
     assert_eq!(price.unit_price.amount_cents.0, 1900, "at_head must price the LATEST update, not a stale one");
 }
@@ -617,6 +706,10 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
         fold_max: Duration,
         e2e_median: Duration,
         e2e_max: Duration,
+        // #930 item 10: the PAIRED per-iteration slack median (nanoseconds, signed) --
+        // `median_slack_ns` above -- replacing a sum-of-three-independent-medians comparison
+        // against the e2e median, which is not the same question and can disagree on noise alone.
+        slack_median_ns: i128,
         payload_bytes: usize,
         stream_length: usize,
         events_applied: usize,
@@ -668,6 +761,9 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
             std::hint::black_box(&as_of);
         }
 
+        // #930 item 10: computed over the PAIRED samples BEFORE `median_of` consumes them by value.
+        let slack_median_ns = median_slack_ns(&sql_samples, &decode_samples, &fold_samples, &e2e_samples);
+
         let median_of = |mut s: Vec<Duration>| -> (Duration, Duration) {
             s.sort();
             let median = s[s.len() / 2];
@@ -688,6 +784,7 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
             fold_max,
             e2e_median,
             e2e_max,
+            slack_median_ns,
             payload_bytes,
             stream_length,
             events_applied,
@@ -696,19 +793,29 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
 
     const ITERATIONS: u32 = 10;
 
-    // Benchmark honesty (#921 item 13(b), beck): the SPLIT legs (three separate un-integrated
-    // calls: fetch_rows, decode_rows, from_stream) and the INTEGRATED end-to-end call (`as_of`,
-    // one round trip doing strictly the SAME work plus the coordinate check and the span) are two
-    // different measurement approaches over the same stream at the same coordinate. If the split
-    // legs summed to MORE than e2e, the two approaches would disagree about what the read costs --
-    // a phantom the executor would have to explain away by hand every time this benchmark runs.
+    // Benchmark honesty (#921 item 13(b), beck; CORRECTED #930 item 10 -- see `median_slack_ns`
+    // above for the full account). The SPLIT legs (three separate un-integrated calls: fetch_rows,
+    // decode_rows, from_stream) and the INTEGRATED end-to-end call (`as_of`, one round trip doing
+    // strictly the SAME work plus the coordinate check and the span) are two different measurement
+    // approaches over the same stream at the same coordinate. If the split legs cost MORE than
+    // e2e, the two approaches disagree about what the read costs -- a phantom the executor would
+    // have to explain away by hand every time this benchmark runs.
+    //
+    // ORIGINALLY (#921) this summed three INDEPENDENT per-iteration MEDIANS and compared the sum
+    // to the e2e MEDIAN -- mathematically wrong (`median(a)+median(b)+median(c)` is not
+    // `median(a+b+c)`), so with the true slack near zero, sub-millisecond scheduling noise across
+    // three SEPARATE medians was enough to flip the comparison on an otherwise-healthy run (the CI
+    // flake beck diagnosed at the #922 confirmation pass, #930 item 10 -- phase B touched no
+    // benchmark code and still saw this fire). The fix asserts on `stats.slack_median_ns`, the
+    // MEDIAN OF THE PAIRED per-iteration signed slack (`e2e_i - (sql_i+decode_i+fold_i)`,
+    // `median_slack_ns` above) -- a genuine leg/e2e disagreement shifts the WHOLE paired
+    // distribution negative; independent per-iteration noise on a near-zero true slack does not.
     fn assert_legs_do_not_exceed_e2e(stats: &Stats, l: i32, v: i64) {
-        let legs_sum = stats.sql_median + stats.decode_median + stats.fold_median;
         assert!(
-            legs_sum <= stats.e2e_median,
-            "sql+decode+fold median ({legs_sum:?}) exceeds the end-to-end median ({:?}) at L={l} \
-             V={v} -- the split-leg measurement and the integrated read disagree about the cost",
-            stats.e2e_median
+            stats.slack_median_ns >= 0,
+            "the paired sql+decode+fold slack median ({}ns) is negative at L={l} V={v} -- the \
+             split-leg measurement and the integrated read disagree about the cost",
+            stats.slack_median_ns
         );
     }
 
@@ -803,10 +910,13 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
 
     // Arm (c): at_head -- the NATIVE unbounded read this slice adds (D2), the ONE call the mint
     // actually performs in production (never `as_of`, which stays dark). Measured the SAME way,
-    // over `fetch_all_rows`/`decode_rows`/`from_stream`/`at_head` instead of
-    // `fetch_rows`/`decode_rows`/`from_stream`/`as_of` -- the split legs are the SAME cost as arm
-    // (b) by construction (both read every row of the same L-length stream), so this arm exists to
-    // pin the INTEGRATED `at_head` call specifically, not to re-measure the split legs.
+    // over `fetch_all_rows_with_byte_total`/`decode_rows`/`from_stream`/`at_head` instead of
+    // `fetch_rows`/`decode_rows`/`from_stream`/`as_of` -- corrected (checkpoint 2 item N, dba):
+    // the split "sql" leg's query is NOT the same cost as arm (b)'s `fetch_rows` (this one carries
+    // an extra `sum(octet_length(...)) OVER ()` window function, the SAME query
+    // `load_to_head`/`at_head` actually issues in production) -- this arm exists to pin the
+    // INTEGRATED `at_head` call specifically, so its split "sql" leg must time the query `at_head`
+    // truly runs, never a cheaper stand-in.
     async fn measure_at_head(
         repo: &PgAsOfCatalogRepository,
         stream: &str,
@@ -823,12 +933,26 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
         let mut events_applied = 0usize;
 
         for i in 0..iterations {
+            // checkpoint 2 item N (dba): the split "sql" leg now times
+            // `fetch_all_rows_with_byte_total` -- the PRODUCTION query `at_head`/`load_to_head`
+            // actually issues (the `sum(octet_length(payload::text)) OVER ()` window function
+            // included) -- never the plain `fetch_all_rows`, a DIFFERENT, cheaper query. Timing
+            // the wrong query here understated the split "sql" leg relative to what `e2e_median`
+            // (the real `at_head` call) actually executes, biasing the paired-slack invariant
+            // POSITIVE (e2e appears to cost more than its own measured components sum to, purely
+            // because this leg measured a faster query than the one really inside e2e).
+            // `payload_bytes` is taken from Postgres's OWN sum, never re-serialized client-side
+            // (that re-serialization is itself a cost `at_head` never pays in production, per the
+            // `payload_bytes` lever's own history -- module doc, PROP-20260831-134539 §12).
             let sql_start = Instant::now();
-            let rows = repo.fetch_all_rows(stream).await.expect("fetch_all_rows");
+            let (rows, total_bytes) = repo
+                .fetch_all_rows_with_byte_total(stream)
+                .await
+                .expect("fetch_all_rows_with_byte_total");
             sql_samples.push(sql_start.elapsed());
             stream_length = rows.len();
             if i == 0 {
-                payload_bytes = rows.iter().map(|(_, _, payload)| serde_json::to_vec(payload).unwrap().len()).sum();
+                payload_bytes = total_bytes;
             }
             let highest = rows.iter().map(|(v, _, _)| *v).max().expect("non-empty stream");
             let coordinate = CatalogVersion::try_new(highest).unwrap();
@@ -849,6 +973,9 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
             std::hint::black_box(&native);
         }
 
+        // #930 item 10: computed over the PAIRED samples BEFORE `median_of` consumes them by value.
+        let slack_median_ns = median_slack_ns(&sql_samples, &decode_samples, &fold_samples, &e2e_samples);
+
         let median_of = |mut s: Vec<Duration>| -> (Duration, Duration) {
             s.sort();
             (s[s.len() / 2], *s.iter().max().unwrap())
@@ -866,6 +993,7 @@ async fn fold_to_v_stays_under_ceiling_at_l_events() {
             fold_max,
             e2e_median,
             e2e_max,
+            slack_median_ns,
             payload_bytes,
             stream_length,
             events_applied,

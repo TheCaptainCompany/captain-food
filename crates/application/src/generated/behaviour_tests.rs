@@ -2934,10 +2934,12 @@ async fn test_place_order_creates_payment_intent() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::DELIVERY, delivery_address: Some(ent::Address { line1: sc::AddressLine("9 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }), note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::DELIVERY, delivery_address: Some(ent::Address { line1: sc::AddressLine("9 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }), note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let _ = result.expect("TestPlaceOrderCreatesPaymentIntent: the spec expects acceptance");
     bed.assert_appended("TestPlaceOrderCreatesPaymentIntent", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_intent_created()),
@@ -2954,33 +2956,37 @@ async fn test_place_order_recomputes_price_server_side() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: Some(ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }) };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: Some(ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }), quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let _ = result.expect("TestPlaceOrderRecomputesPriceServerSide: the spec expects acceptance");
     bed.assert_appended("TestPlaceOrderRecomputesPriceServerSide", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_intent_created_collection()),
     ]);
 }
 
-/// tests.yaml#/tests/TestPlaceOrderRejectsPriceMismatch — "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority; the displayed total the consumer agreed to is the only total that can be charged — L112-1/L221-5 posture)"
+/// tests.yaml#/tests/TestPlaceOrderRejectsQuoteVerificationFailed — "The write door OPEN and no signed quote submitted rejects the checkout before any payment authorization (ADR-20260906-192007 D-A/D-F/D-G)"
 /// rules: ServerPriceAuthority
 #[tokio::test]
-async fn test_place_order_rejects_price_mismatch() {
+async fn test_place_order_rejects_quote_verification_failed() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: Some(ent::Money { amount_cents: sc::MoneyCents(100), currency: sc::CurrencyCode("EUR".into()) }) };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
-    let err = result.expect_err("TestPlaceOrderRejectsPriceMismatch: the spec expects a typed rejection");
-    support::assert_thrown("TestPlaceOrderRejectsPriceMismatch", &err, &["PriceMismatch"]);
-    bed.assert_appended("TestPlaceOrderRejectsPriceMismatch", &before, &[]);
+    let run_quote_required_on_place_order: bool = true;
+    let run_fold_priced_cart_read_for_quote_guard: bool = true;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
+    let err = result.expect_err("TestPlaceOrderRejectsQuoteVerificationFailed: the spec expects a typed rejection");
+    support::assert_thrown("TestPlaceOrderRejectsQuoteVerificationFailed", &err, &["QuoteVerificationFailed"]);
+    bed.assert_appended("TestPlaceOrderRejectsQuoteVerificationFailed", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPlaceOrderRejectsUnresolvablePrice — "A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)"
@@ -2993,10 +2999,12 @@ async fn test_place_order_rejects_unresolvable_price() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added_unknown_offer()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let err = result.expect_err("TestPlaceOrderRejectsUnresolvablePrice: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderRejectsUnresolvablePrice", &err, &["PriceUnresolvable"]);
     bed.assert_appended("TestPlaceOrderRejectsUnresolvablePrice", &before, &[]);
@@ -3013,10 +3021,12 @@ async fn test_place_order_rejects_offer_unavailable_since_the_line_was_added() {
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_product_updated_offer_unavailable()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let err = result.expect_err("TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded", &err, &["OfferUnavailable"]);
     bed.assert_appended("TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded", &before, &[]);
@@ -3033,10 +3043,12 @@ async fn test_place_order_rejects_stock_fallen_below_the_cart_line_quantity() {
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_offer_stock_dropped_below_cart_line()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let err = result.expect_err("TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity", &err, &["InsufficientStock"]);
     bed.assert_appended("TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity", &before, &[]);
@@ -3052,10 +3064,12 @@ async fn test_place_order_accepts_an_offer_that_tracks_no_stock() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let _ = result.expect("TestPlaceOrderAcceptsAnOfferThatTracksNoStock: the spec expects acceptance");
     bed.assert_appended("TestPlaceOrderAcceptsAnOfferThatTracksNoStock", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_intent_created_collection()),
@@ -3071,10 +3085,12 @@ async fn test_place_order_is_rejected() {
     bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::DELIVERY, delivery_address: None, note: None, payment_method_id: "pm_declined".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::DELIVERY, delivery_address: None, note: None, payment_method_id: "pm_declined".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let err = result.expect_err("TestPlaceOrderIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderIsRejected", &err, &["RestaurantPaused", "CartEmpty", "DeliveryAddressRequired", "OutsideDeliveryArea", "PaymentDeclined"]);
     bed.assert_appended("TestPlaceOrderIsRejected", &before, &[]);
@@ -3089,10 +3105,12 @@ async fn test_place_order_rejects_test_restaurant_for_live_order() {
     bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered_test(), fx_restaurant_activated()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: Some(sc::Mode::LIVE), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::DELIVERY, delivery_address: Some(ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }), note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: Some(sc::Mode::LIVE), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::DELIVERY, delivery_address: Some(ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }), note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let err = result.expect_err("TestPlaceOrderRejectsTestRestaurantForLiveOrder: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderRejectsTestRestaurantForLiveOrder", &err, &["CannotOrderTestRestaurant"]);
     bed.assert_appended("TestPlaceOrderRejectsTestRestaurantForLiveOrder", &before, &[]);
@@ -3126,10 +3144,12 @@ async fn test_place_order_rejects_outside_service_hours() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-08-14T02:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = true;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let err = result.expect_err("TestPlaceOrderRejectsOutsideServiceHours: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderRejectsOutsideServiceHours", &err, &["OutsideServiceHours"]);
     bed.assert_appended("TestPlaceOrderRejectsOutsideServiceHours", &before, &[]);
@@ -3145,10 +3165,12 @@ async fn test_place_order_shadow_mode_accepts_outside_hours_and_records_the_verd
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-08-14T02:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let _ = result.expect("TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict: the spec expects acceptance");
     bed.assert_appended("TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_intent_created_outside_hours_shadow()),
@@ -3165,10 +3187,12 @@ async fn test_place_order_accepts_when_hours_undeclared() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let _ = result.expect("TestPlaceOrderAcceptsWhenHoursUndeclared: the spec expects acceptance");
     bed.assert_appended("TestPlaceOrderAcceptsWhenHoursUndeclared", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_intent_created_collection()),
@@ -3185,10 +3209,12 @@ async fn test_place_order_accepts_inside_service_window_freezes_evidence() {
     bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None, quote: None };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-08-14T18:00:00Z".parse().expect("when.at: RFC3339 instant");
     let enforce_service_hours_guard: bool = false;
-    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let run_quote_required_on_place_order: bool = false;
+    let run_fold_priced_cart_read_for_quote_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard, &support::quote_guard_for(run_quote_required_on_place_order, run_fold_priced_cart_read_for_quote_guard)).await;
     let _ = result.expect("TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence: the spec expects acceptance");
     bed.assert_appended("TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_intent_created_open_window()),

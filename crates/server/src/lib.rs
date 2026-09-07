@@ -515,6 +515,10 @@ pub fn build_graphql_di(
     // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D4): `RUN_FOLD_PRICED_CART_READ`,
     // resolved ONCE by the caller — the SAME parameter shape as `run_rider_restriction_door`.
     run_fold_priced_cart_read: bool,
+    // ADR-20260906-192007 D-H: `QUOTE_SIGNING_KEY_HMAC_SECRET`, resolved ONCE by the caller
+    // (`Config::resolve`) — the minter needs only the CURRENT key (never the verifier's plural
+    // set), so this is the one new parameter the read side needs.
+    quote_signing_key_hmac_secret: String,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -570,11 +574,24 @@ pub fn build_graphql_di(
         ),
     );
     // PROP-20260831-134539 slice 3a (ADR-20260906-154419, D2): the fold-priced read authority --
-    // the SAME `pool` as `catalogs` above, a DIFFERENT read (the `Catalog-<id>` event-stream range
-    // read to head, never the `catalog` projection). Injected unconditionally, like `catalogs`
-    // itself; the door decides whether the OPEN arm ever calls it.
-    let as_of_price_authority: Arc<dyn application::ports::AsOfPriceAuthority> =
-        Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone()));
+    // its OWN bulkhead pool (D-K), never the shared `pool` `catalogs` above uses -- a DIFFERENT
+    // read (the `Catalog-<id>` event-stream range read to head, never the `catalog` projection).
+    // Injected unconditionally, like `catalogs` itself; the door decides whether the OPEN arm
+    // ever calls it.
+    let as_of_price_authority: Arc<dyn application::ports::AsOfPriceAuthority> = Arc::new(
+        infrastructure::PgAsOfCatalogRepository::new(
+            infrastructure::PgAsOfCatalogRepository::bulkhead_pool(&pool),
+        ),
+    );
+    // ADR-20260906-192007 D-H: the minter's ONE current key -- `SigningKey::from_resolved_secret`
+    // falls back to the DEV-ONLY literal when unset, exactly `EmailSendPolicy::from_config`'s own
+    // precedent (the write door's verifier applies the SAME resolution, plus the boot refusal,
+    // where `CommandDeps` is built below).
+    let quote_minter: Arc<application::quote::QuoteMinter> =
+        Arc::new(application::quote::QuoteMinter::new(application::quote::SigningKey::from_resolved_secret(
+            "current",
+            &quote_signing_key_hmac_secret,
+        )));
     let read = ReadDeps {
         restaurants: restaurants.clone(),
         prospection,
@@ -603,6 +620,7 @@ pub fn build_graphql_di(
         run_rider_restriction_door: graphql::schema::RunRiderRestrictionDoor(run_rider_restriction_door),
         as_of_price_authority,
         run_fold_priced_cart_read: graphql::schema::RunFoldPricedCartRead(run_fold_priced_cart_read),
+        quote_minter,
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -824,6 +842,7 @@ pub async fn router() -> Router {
                     support_contact.clone(),
                     config.run_rider_restriction_door,
                     config.run_fold_priced_cart_read,
+                    config.quote_signing_key_hmac_secret.clone().unwrap_or_default(),
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already
@@ -868,6 +887,14 @@ pub async fn router() -> Router {
                 // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
                 tenant_lookup = di.tenant_lookup;
                 auth_sessions = di.auth_sessions;
+                // ADR-20260906-192007 D-K (checkpoint 2, dba item N): the SAME as-of bulkhead-pool
+                // authority the read door already built, cloned BEFORE `di.read` moves below --
+                // the write door's QuoteGuard (built further down) reuses THIS Arc rather than
+                // constructing a SECOND, independent `bulkhead_pool` (a `max_connections(2)` pool
+                // built twice means the monolith actually budgets 4 connections for one bulkhead,
+                // not 2 -- the read and write arms never actually shared the bound they were meant
+                // to share).
+                let as_of_price_authority_for_quote_guard = di.read.as_of_price_authority.clone();
                 read_deps = Some(di.read);
                 write_deps = Some(di.write);
 
@@ -1183,6 +1210,28 @@ pub async fn router() -> Router {
                         // #639 part C step 6-iii (ADR-20260906-023825): the ADMIN sign-in door,
                         // the SAME resolved-once-here shape.
                         run_admin_sign_in_door: config.run_admin_sign_in_door,
+                        // ADR-20260906-192007 D-F/D-G/D-H: the write-side quote verify guard,
+                        // resolved ONCE here at boot -- the D-B interlock + D-H dev-key refusal
+                        // both fire inside `resolve_at_boot`, never per-request. Shares the read
+                        // door's OWN bulkhead pool (D-K, checkpoint 2 item N) -- never a SECOND,
+                        // independently-constructed `bulkhead_pool(&pool)`, which built two
+                        // max_connections(2) pools that never actually shared a bound.
+                        quote_guard: Arc::new(
+                            application::quote::QuoteGuard::resolve_at_boot(
+                                config.run_quote_required_on_place_order,
+                                config.run_fold_priced_cart_read,
+                                matches!(config.profile, crate::generated::config::Profile::Staging | crate::generated::config::Profile::Production),
+                                application::quote::SigningKey::from_resolved_secret(
+                                    "current",
+                                    config.quote_signing_key_hmac_secret.as_deref().unwrap_or(""),
+                                ),
+                                config.quote_signing_key_previous_hmac_secret.as_deref().filter(|s| !s.is_empty()).map(
+                                    |s| application::quote::SigningKey::from_resolved_secret("previous", s),
+                                ),
+                                as_of_price_authority_for_quote_guard,
+                            )
+                            .expect("boot refusal: RUN_QUOTE_REQUIRED_ON_PLACE_ORDER/RUN_FOLD_PRICED_CART_READ interlock or the dev signing key in a live profile (ADR-20260906-192007 D-B/D-H)"),
+                        ),
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1712,6 +1761,27 @@ pub async fn router() -> Router {
     telemetry::meters::runtime::declare_flag(
         "RUN_FOLD_PRICED_CART_READ",
         config.run_fold_priced_cart_read,
+    );
+    // PROP-20260831-134539 slice 3b + the command change (ADR-20260906-192007 D-B/D-H), NOT the
+    // seventh carve-out (that still licenses the processmanager.yaml/mailbox hunks -- pm_delivery.rs
+    // stays a fenced, threaded-argument-only site, a LATER phase of the same PR): a fleet-parity
+    // declaration for the `runKind: door` key. Corrected (checkpoint 2, vernon item E): this
+    // used to say "no verify logic reads this yet" -- FALSE as of phase C, which wired
+    // `application::quote::verify_quote` into `commands::place_order`'s pre-payment block for
+    // real, reading `quote_guard` (constructed above, inside the `Ok(pool)` arm). Fed by
+    // `application::quote::QuoteGuard::would_be_open` (checkpoint 2, farley item K), never the raw
+    // `config.run_quote_required_on_place_order` bool: this call site sits OUTSIDE the
+    // `Ok(pool)` arm that alone constructs a live `quote_guard` (a DB-less monolith boot never
+    // builds one at all), so `would_be_open` recomputes the SAME interlock resolution
+    // (`WriteDoorOpen::resolve`) a live guard's own `is_open()` would answer, from the two raw
+    // config values alone -- closing the DB-less-monolith hole where this flag, declared
+    // unconditionally, previously reported the single raw bool with no interlock applied.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
+        application::quote::QuoteGuard::would_be_open(
+            config.run_quote_required_on_place_order,
+            config.run_fold_priced_cart_read,
+        ),
     );
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever

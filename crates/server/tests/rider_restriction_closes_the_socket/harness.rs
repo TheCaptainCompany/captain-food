@@ -209,7 +209,8 @@ pub fn spawn_mailbox_workers(
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    };
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+};
     // THE actual bus wiring for a "Handled" delivery (mailbox/handler.rs's own doc comment):
     // `deps.store` backs a per-delivery `StagingEventStore`, and the REAL Postgres write +
     // publish happen in `flush_staged_in_tx` + `fanout_delivery`, gated on THIS handler's OWN
@@ -401,7 +402,8 @@ pub fn schema_over(
             run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(true),
             as_of_price_authority: Arc::new(infrastructure::PgAsOfCatalogRepository::new(pool.clone())),
             run_fold_priced_cart_read: server::graphql_schema::RunFoldPricedCartRead(false),
-        }),
+                    quote_minter: std::sync::Arc::new(application::quote::QuoteMinter::new(application::quote::SigningKey::dev_only("test"))),
+}),
         Some(server::graphql_schema::WriteDeps {
             event_store,
             ownership,

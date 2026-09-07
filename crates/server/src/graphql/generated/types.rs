@@ -1023,6 +1023,8 @@ pub struct Cart {
     pub breakdown: Option<PaymentBreakdown>,
     #[graphql(name = "uberComparison")]
     pub uber_comparison: Option<UberComparison>,
+    #[graphql(name = "quote")]
+    pub quote: Option<CartQuote>,
     #[graphql(name = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     #[graphql(name = "restaurant")]

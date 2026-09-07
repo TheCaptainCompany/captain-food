@@ -435,6 +435,14 @@ pub mod mount {
             &crate::pending::BrowserPendingStore,
             order_id,
         );
+        // #816 follow-up (ux, "a live customer-facing lie today"): the message_id of the SAME
+        // pending intent, so the resolve leg below can learn the PlaceOrder mutation's OWN
+        // terminal outcome directly — a REJECTED checkout may never produce an Order at all, so
+        // `order.byId` alone has no way to ever correct the acceptance reassurance.
+        let place_order_message_id = crate::pending::place_order_message_id(
+            &crate::pending::BrowserPendingStore,
+            order_id,
+        );
         let state = RwSignal::new(
             TrackingState::from_context(order_id, &ctx).with_birth_pending(birth_pending),
         );
@@ -487,6 +495,34 @@ pub mod mount {
                     )
                 {
                     state.set(pulled);
+                }
+            });
+        }
+
+        // #816 follow-up (ux, "a live customer-facing lie today"): resolve the PlaceOrder intent's
+        // OWN terminal outcome, independently of the birth re-check above (the `mount_sign_in_return`
+        // precedent — dispatch/resolve/branch-on-outcome). A REJECTED verdict must win over the
+        // acceptance reassurance even though `order.byId` may legitimately never answer at all;
+        // Succeeded needs no action here (the birth re-check / subscription above already converge
+        // on the order once it exists), and a transport/poll-exhaustion error degrades gracefully —
+        // the reassurance simply stays on screen, exactly as it does today.
+        if let Some(message_id) = place_order_message_id {
+            let transport = Rc::clone(&transport);
+            wasm_bindgen_futures::spawn_local(async move {
+                let handle = crate::actions::DispatchHandle {
+                    message_id,
+                    duplicate: false,
+                    status_at_acceptance: crate::actions::OperationStatus::Pending,
+                };
+                if let Ok(crate::actions::ActionOutcome::Rejected { error_code, message, .. }) =
+                    handle.resolve(transport.as_ref()).await
+                {
+                    let current = state.get_untracked();
+                    if !matches!(current.order, crate::tracking::OrderRead::Present(_))
+                        && current.refused.is_none()
+                    {
+                        state.set(current.with_refused(message.unwrap_or(error_code)));
+                    }
                 }
             });
         }

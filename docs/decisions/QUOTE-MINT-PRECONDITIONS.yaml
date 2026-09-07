@@ -86,7 +86,22 @@ question: 'What must exist before `RUN_FOLD_PRICED_CART_READ` is flipped in prod
   sentence (`restaurant_frontoffice.yaml:72`) ties `place_order`''s quote to the read that painted
   the `/checkout` recap total, never a quote stashed at `/cart`, but the seam itself -- whether one
   mint could or should serve both screens -- stays OPEN, not decided by 3b+4, and is not a
-  precondition of the write door''s flip.'
+  precondition of the write door''s flip; (18) the `quote.verify` span (checkpoint 2 item O,
+  observability) -- CORRECTED: `KNOWN_UNINVOKED_REQUIRED_SPANS`''s prose used to say the guard it
+  wraps "is licensed only once the write door opens" -- FALSE as of phase C, which wired and ships
+  `application::quote::verify_quote` behind the door for real (CLOSED is a no-op, OPEN does the
+  work, both today). The constructor is DECLARED; it stays unwired for a DIFFERENT, structural
+  reason: `crates/application` is SDK-free by design (Cargo pins the tracing facade, #191) and
+  cannot import `telemetry`, so the span can only be constructed at an UNFENCED instrumented
+  boundary outside `application` (a `crates/server`-side wrapper around the `verify_quote` call) --
+  that wiring is itself a flip precondition, not a licensing gate on the guard''s own logic. Also
+  noted: `place-order`''s success-rule alternation `{ any_of: [quote.verify, command.validate] }`
+  is a TAUTOLOGY today -- `command.validate` is independently `required: true` on this same
+  contract, so the alternation is satisfied by `command.validate` alone on every run regardless of
+  whether `quote.verify` ever fires; it carries no discriminating observability power until
+  `quote.verify` is actually wired, which is why the flip is NOT "no observability.yaml change"
+  (a prior comment''s claim, also corrected) -- wiring the span is exactly what turns the
+  alternation from a tautology into a real either/or.'
 owner: team
 opened: '2026-09-06'
 capacity: team
