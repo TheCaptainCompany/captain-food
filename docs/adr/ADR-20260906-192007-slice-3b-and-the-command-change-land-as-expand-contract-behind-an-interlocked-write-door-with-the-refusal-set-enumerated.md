@@ -176,6 +176,17 @@ structural total compare), business (the same compare, independently), architect
 framing and its recommendation), reviewer (the same recommendation and the rejection of option B),
 dba (the shared-pool confirmation).
 
+**Amended 2026-09-07** (PR #933, presentation pass 1 fix round, item P6 — living record, this
+sentence adds to the paragraph above rather than replacing it): bullet 2 above, and D-J's binding
+context, both say the token binds "the cart's own stream version" — it does not. The cart read
+projection (`application::generated::rows::CartRow`) carries no stream-version column, and adding
+one would be a `View_cart` schema change this deliverable does not make; the token instead binds a
+SHA-256 digest of the cart's repricing inputs
+(`application::quote::QuotePayload::lines_digest`, `crates/application/src/quote.rs:10-18,520`),
+which proves the same fact ("has this cart's priceable content changed since mint") without a new
+stored column. `errors.yaml#/QuoteNoLongerHonoured`'s description already recorded this
+substitution; this ADR did not, until now (reviewer NB20).
+
 ### D-E — `totalCents` scope: the token signs the catalog-lines total, never the delta
 
 The token signs the catalog-lines total (D1's `totalCents`), not the full CTA number the customer
@@ -185,6 +196,19 @@ delta. This is the temporal-coherence half of legal's finding: the guarantee (Co
 consommation L112-1/L221-5 posture) binds the **total** shown before the consumer is bound, and this
 deliverable's card must state the sentence above **before** any test is written against it
 (legal's red-first: `the_charge_never_exceeds_the_total_the_customer_was_shown`).
+
+**Amended 2026-09-07** (PR #933, presentation pass 1 fix round, item R2 — living record, this
+paragraph adds to the decision above rather than replacing it): the "displayed CTA total does not
+equal lines-total plus live fees" compare above is **vacuously true today** — every fee leg is
+currently zero (`application::pricing`), so no code path ever exercises a fee-aware compare;
+`specs/ordering/rules.yaml`'s own qualifier states this precisely — fees are **UNBOUND by any
+token**, and the guarantee is **inert**, not yet exercised. A non-zero fee leg (ADR-0016/0017,
+delivery fee / service fee) is therefore a **precondition of the guarantee actually holding**, not
+an afterthought: it requires either binding the fee into the signed token (a token schema change)
+or a live CTA-total compare at verify time (fold lines-total + recomputed fees vs. the CTA the
+customer was shown) — recorded as a flip-card precondition
+(`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml`), not decided here.
+Consulted: legal (the vacuous-truth finding, NB2).
 
 ### D-F — Where verify runs
 
