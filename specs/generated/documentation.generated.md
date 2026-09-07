@@ -14302,6 +14302,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 ┌──────────────────────────────────────────┐
 │ Order tracking                           │
 ├──────────────────────────────────────────┤
+│ conditional_section                      │
 │ order_status_hero                        │
 │ eta_bar — Estimated arrival              │
 │ text                                     │
@@ -14314,6 +14315,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | Kind | UI need | GraphQL operation |
 | --- | --- | --- |
 | read | `order.byId` | [🔎 `order`](#query-order) |
+| read | `operationStatus.byMessage` | [🔎 `operationStatus`](#query-operationstatus) |
 | write | `reorder` | ⚠️ _gap: No reorder op — client re-adds past order lines via add_to_cart._ |
 | write | `rate_order` | [✏️ `rateOrder`](#mutation-rateorder) |
 | write | `record_delivery_satisfaction` | [✏️ `recordDeliverySatisfaction`](#mutation-recorddeliverysatisfaction) |

@@ -137,6 +137,39 @@ impl TrackingState {
         self
     }
 
+    /// Checkpoint 2 item (1) bullet 2 (D-J client minimum): the ACTUAL wiring [`Self::refused`]'s
+    /// own doc comment describes but nothing called until this — resolves this client's OWN
+    /// `PlaceOrder` intent for THIS order (if it holds one at all, `pending::place_order_message_id`)
+    /// through `operationStatus.byMessage` and, on an observed REJECTED, marks [`Self::refused`]
+    /// with the SAME cause-neutral fallback `interact::outcome_toast` uses (the server's own
+    /// `message` when present, the stable `errors.yaml` code otherwise — never a fabricated client
+    /// string) and settles/clears the pending record via [`crate::pending::settle_with`] (the
+    /// terminal verdict is now OBSERVED, so the record's one job — surviving a reload before a
+    /// verdict exists — is done). ONE read, no polling (`max_attempts: 1`): this runs alongside
+    /// [`Self::load`] on the SAME paint/reconnect cadence, not as its own poll loop. A client
+    /// holding no PlaceOrder record for this order (a stranger's URL, or an order it did not
+    /// place) is a no-op; so is a still-PENDING or transport-failed read — nothing was observed
+    /// yet, state and the pending record are both left untouched.
+    pub async fn check_place_order_rejection(
+        &mut self,
+        transport: &dyn Transport,
+        store: &dyn crate::pending::PendingStore,
+    ) {
+        let Some(message_id) = crate::pending::place_order_message_id(store, self.order_id) else {
+            return;
+        };
+        let handle = crate::actions::DispatchHandle {
+            message_id,
+            duplicate: true, // by construction: this client already dispatched this intent
+            status_at_acceptance: crate::actions::OperationStatus::Pending,
+        };
+        if let Ok(crate::actions::ActionOutcome::Rejected { message, error_code, .. }) =
+            crate::pending::settle_with(transport, store, &handle, 1, std::time::Duration::ZERO).await
+        {
+            self.refused = Some(message.unwrap_or(error_code));
+        }
+    }
+
     /// Build from an already-RESOLVED render context — the screen's own declared `order.byId`
     /// requirement, resolved by whichever entry is rendering (SSR's `render_path_with`, or
     /// `hydrate`'s fetch loop). Before #420 the only production call site built
@@ -568,6 +601,74 @@ mod tests {
             "estimatedReadyAt": "2026-07-23T12:45:00Z",
             "items": [{ "offerId": "o1" }, { "offerId": "o2" }],
         })
+    }
+
+    fn rejected_operation(message_id: Uuid, message: &str, error_code: &str) -> Value {
+        json!({ "operationStatus": {
+            "messageId": message_id, "correlationId": message_id, "causeId": null,
+            "sessionId": null, "traceId": null,
+            "status": "REJECTED", "errorCode": error_code, "message": message,
+            "occurredAt": "2026-09-07T12:00:00Z",
+        }})
+    }
+
+    fn seed_pending_place_order(store: &crate::pending::MemoryPendingStore, order_id: Uuid, message_id: Uuid) {
+        use crate::generated::data_layer::ActionKey;
+        use crate::pending::{PendingStore, PendingWrite};
+        let mut input = Map::new();
+        input.insert("orderId".into(), json!(order_id));
+        store.save(&[PendingWrite { message_id, action: ActionKey::PlaceOrder, input }]);
+    }
+
+    /// checkpoint 2 item (1) bullet 2 (D-J): a REJECTED verdict observed for this client's OWN
+    /// PlaceOrder intent marks `refused` with the SERVER's own cause-neutral message and settles
+    /// (clears) the pending record -- the terminal verdict is now observed, so the record's job
+    /// is done.
+    #[tokio::test]
+    async fn check_place_order_rejection_marks_refused_and_settles_the_pending_record() {
+        use crate::pending::{MemoryPendingStore, PendingStore};
+        let order_id = Uuid::now_v7();
+        let message_id = Uuid::now_v7();
+        let store = MemoryPendingStore::default();
+        seed_pending_place_order(&store, order_id, message_id);
+        let fake = FakeTransport::scripted(vec![Ok(rejected_operation(
+            message_id,
+            "We couldn't confirm your total",
+            "QuoteVerificationFailed",
+        ))]);
+        let mut state = TrackingState::new(order_id);
+        state.check_place_order_rejection(&fake, &store).await;
+        assert_eq!(state.refused.as_deref(), Some("We couldn't confirm your total"));
+        assert!(store.load().is_empty(), "the pending record must be cleared once the terminal verdict is observed");
+    }
+
+    /// A client holding NO PlaceOrder record for this order (a stranger's URL, or an order it
+    /// never placed) is a no-op: no transport call, no state change.
+    #[tokio::test]
+    async fn check_place_order_rejection_is_a_no_op_with_no_held_intent() {
+        use crate::pending::MemoryPendingStore;
+        let order_id = Uuid::now_v7();
+        let store = MemoryPendingStore::default();
+        let fake = FakeTransport::scripted(vec![]);
+        let mut state = TrackingState::new(order_id);
+        state.check_place_order_rejection(&fake, &store).await;
+        assert_eq!(state.refused, None);
+        assert_eq!(fake.call_count(), 0, "no PlaceOrder record held -- no read should ever be attempted");
+    }
+
+    /// Still PENDING (no verdict yet): state and the pending record are both left untouched.
+    #[tokio::test]
+    async fn check_place_order_rejection_leaves_state_and_the_record_alone_while_still_pending() {
+        use crate::pending::{MemoryPendingStore, PendingStore};
+        let order_id = Uuid::now_v7();
+        let message_id = Uuid::now_v7();
+        let store = MemoryPendingStore::default();
+        seed_pending_place_order(&store, order_id, message_id);
+        let fake = FakeTransport::scripted(vec![Ok(json!({ "operationStatus": null }))]);
+        let mut state = TrackingState::new(order_id);
+        state.check_place_order_rejection(&fake, &store).await;
+        assert_eq!(state.refused, None);
+        assert_eq!(store.load().len(), 1, "still-PENDING must keep the pending record -- nothing was observed yet");
     }
 
     #[tokio::test]
