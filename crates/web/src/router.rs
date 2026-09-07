@@ -168,12 +168,6 @@ impl AsRef<str> for ReturnTarget {
     }
 }
 
-impl std::fmt::Display for ReturnTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// The closed set [`safe_next`] can refuse a candidate for (#916 item 2 first half): a `None`
 /// collapse would hide which of these fired, and a future `auth_refresh_total`-shaped `{outcome}`
 /// observability attribute needs a bounded set to report against, not a bare boolean — a dozen
@@ -212,9 +206,12 @@ pub enum NextRejection {
 /// A captured value that is itself the template placeholder text is refused
 /// ([`NextRejection::Placeholder`]) rather than rebuilt into a broken destination. `next` targets a
 /// screen INSTANCE, never a deep-linked resource this function checks the existence of — the
-/// destination screen resolves the id at the point of need, same as any other navigation — and
-/// `next` never confers access on its own: the screen's own authorization decides that, exactly as
-/// it would for a visitor who typed the URL directly.
+/// destination screen resolves the id at the point of need, same as any other navigation (ux,
+/// [#947](https://github.com/TheCaptainCompany/captain-food/issues/947): the staff chat and rider
+/// job screens have no not-found state of their OWN yet, so a stale `next` today renders their
+/// ordinary empty state rather than a "this no longer exists" one — a rendering gap this function
+/// does not own) — and `next` never confers access on its own: the screen's own authorization
+/// decides that, exactly as it would for a visitor who typed the URL directly.
 ///
 /// Reserved, not yet emitted (observability, the `rider_restricted_denied_total` RESERVED-leg
 /// phrasing this file's `specs/observability.yaml` sibling already uses): a future
@@ -622,9 +619,12 @@ mod tests {
     // ---- D2 (#904, ADR-20260905-101349 §13): `safe_next`'s router-only allowlist ----
     // ---- extended #916 item 2 first half: `:param` routes as valid `?next=` return targets ----
 
-    /// Test-only shorthand: the `Ok` a valid `safe_next` call produces, built through the SAME
-    /// private constructor production code uses (so a test can never construct a `ReturnTarget`
-    /// production could not have minted).
+    /// Test-only shorthand for the `Ok` a valid `safe_next` call produces. `ReturnTarget::new` is
+    /// module-private, not `safe_next`-private: this child test module can call it directly, same
+    /// as any code inside `router.rs` — the guarantee the type actually proves is narrower than
+    /// "only `safe_next` can construct one", it is "no code OUTSIDE this module can" (every other
+    /// crate module, and every other crate, only ever sees a `ReturnTarget` `safe_next`/`root`
+    /// handed it).
     fn ok(path: &str) -> Result<ReturnTarget, NextRejection> {
         Ok(ReturnTarget::new(path.to_string()))
     }
@@ -681,12 +681,12 @@ mod tests {
         assert_eq!(safe_next(host, "/jobs/abc"), ok("/jobs/abc"));
     }
 
-    /// Every captured `:param` segment is RE-ENCODED, never returned raw (reviewer's security
-    /// point): a decoded-bypass value — a `\` or a CRLF pair hidden behind percent-encoding, which
-    /// the raw-shape check at the top of `safe_next` cannot see because it only inspects the
-    /// UNDECODED candidate — must come back encoded, never as a raw byte in the rebuilt path. A
-    /// mutant that returns the caller's decoded string whole, or that skips re-encoding the
-    /// captured segment, must go red on THESE two cases specifically, not only on the space case.
+    /// Pins re-encoding on three ORDINARY (non-security) cases: a space, a fragment marker, and a
+    /// malformed `%zz` escape that survives the lossy single decode as a literal `%`+`zz` and must
+    /// itself come back encoded. M1 (return the decoded string whole) and M2 (skip re-encoding)
+    /// both fail HERE too, but the case that matters for those two mutants — the decoded-bypass
+    /// security value — is pinned separately, in
+    /// [`safe_next_re_encodes_the_decoded_bypass_bytes`] below.
     #[test]
     fn safe_next_re_encodes_every_captured_segment() {
         let host = "riders.captain.food";
@@ -697,13 +697,13 @@ mod tests {
         assert_eq!(safe_next(host, "/jobs/a%25zz"), ok("/jobs/a%25zz"), "a malformed escape survives decode and is re-encoded");
     }
 
-    /// The decoded-bypass security case, kept SEPARATE from the general re-encoding test above so
-    /// its failure is never masked by an earlier `assert_eq!` in the same test aborting first
-    /// (reviewer's point): `\` and CRLF are refused RAW by the SHAPE check at the top of
-    /// `safe_next`, but hidden behind percent-encoding they decode successfully, and a mutant that
-    /// returns the caller's decoded string whole, or skips re-encoding the captured segment, must
-    /// be red on THESE two specifically — the security-relevant ones — not only on the space case
-    /// above.
+    /// Pins re-encoding on the SECURITY-relevant cases, kept in its OWN test (not appended after
+    /// the ordinary cases above) because `assert_eq!` aborts a test at its first failing line — a
+    /// mutant defeated only here would otherwise be reported against whichever assertion happened
+    /// to come first, hiding which case actually caught it (reviewer's point): `\` and CRLF are
+    /// refused RAW by the SHAPE check at the top of `safe_next`, but hidden behind percent-encoding
+    /// they decode successfully, and a mutant that returns the caller's decoded string whole (M1)
+    /// or skips re-encoding the captured segment (M2) is red on THESE two specifically.
     #[test]
     fn safe_next_re_encodes_the_decoded_bypass_bytes() {
         let host = "riders.captain.food";
@@ -744,7 +744,9 @@ mod tests {
 
     /// A captured value that is itself the unresolved template placeholder text (only reachable by
     /// percent-encoding the literal `:` — a raw one would already fail the SHAPE check) is refused
-    /// rather than rebuilt into a broken destination.
+    /// rather than rebuilt into a broken destination. M6 (delete the `value.starts_with(':')`
+    /// guard in `rebuild_from_template`) is red here:
+    /// `left: Ok(ReturnTarget("/jobs/%3AorderId")) right: Err(Placeholder)`.
     #[test]
     fn safe_next_rejects_the_template_placeholder() {
         let host = "riders.captain.food";
