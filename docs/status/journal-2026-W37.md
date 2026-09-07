@@ -2,6 +2,152 @@
 
 Journal entries for ISO week 2026-W37, newest first, in the order they were written.
 
+> **2026-09-07 — [#916 "#904 follow-ups (silent refresh + ?next=): latch the one-shot on failure
+> not use, `:param` routes in safe_next, wasm client timeouts, the same-tab captured `next`,
+> `auth_refresh_total{outcome}` server-side"](https://github.com/TheCaptainCompany/captain-food/issues/916)
+> item 2, first half only, draft [PR #948](https://github.com/TheCaptainCompany/captain-food/pull/948),
+> Lane B (session_01H3AFBVzhSiGXJcFuwKjiMQ, `916-safe-next-param-routes`).** `safe_next` no longer
+> refuses a `?next=` candidate that resolves to a `:param` route: it walks the SCREEN'S ROUTE
+> TEMPLATE segment by segment — a literal segment copied verbatim, a `:name` segment looked up BY
+> NAME among the resolved route's captured params (never iterated in capture order, since
+> `resolve()` injects a storefront `slug` that has no place in a template lacking its own `:slug`
+> segment) and percent-encoded per segment for the rebuilt path. A new `ReturnTarget` newtype,
+> minted only by `safe_next` and `ReturnTarget::root`, carries the "came from the router" guarantee
+> `'static` used to (a rebuilt param path is no longer a slice of the screen's own route). `safe_next`
+> now returns `Result<ReturnTarget, NextRejection>`; `NextRejection` is a closed set
+> (`Shape | Unresolved | OpenScreen | Placeholder`). A captured value that is itself the unresolved
+> template placeholder text (only reachable percent-encoded, e.g. `%3AorderId`) is rejected
+> (`Placeholder`) rather than rebuilt into a broken destination. No existence check of the
+> destination resource is ever performed — the destination screen resolves the id at the point of
+> need, same as any other navigation.
+>
+> **Lens splits and how resolved** (ADR-20260904-013834, the team decides): the placeholder question
+> split reviewer and holub (reject any candidate touching the placeholder text at all, the more
+> defensive read) against evans and graphql-architect (reject only when the CAPTURED value equals
+> the placeholder — a real value can legitimately equal arbitrary bytes) — the SAFER side was taken:
+> `Placeholder` fires whenever a captured value starts with `:`, since the router's own SHAPE check
+> already refuses a raw `:` before decoding, so the only way a captured value can start with `:`
+> post-decode is the placeholder-bypass case this guard exists for. holub's separate objection —
+> that `NextRejection`'s four-variant closed set grows the type surface for a `{outcome}` attribute
+> nothing consumes yet — is recorded, not overridden: the set stays because the alternative (a bare
+> `Option`, then a rewrite when the counter lands) costs more than the dozen lines now. holub also
+> banked, at the checkpoint, that `ReturnTarget` itself is a FORCED compiler-first consequence, not
+> a design point the consent text enumerated as decided: once a `:param` rebuild is no longer a
+> `&'static str` slice of the screen's own route, SOME owned-string wrapper is unavoidable, and the
+> newtype-with-private-constructor shape was the compiler-first floor (PROP-20260802-130500 §1)
+> applied to that forced fact, not an independently chosen design point.
+>
+> **D1 — six base reds** (captured against a temporary stub that ported the OLD collapsed
+> `Option`-returning behaviour into the NEW `Result`/newtype shape, so the failures were
+> behavioural, not type errors — beck: "the honest form of make-it-compile-then-watch-it-fail"; a
+> stricter reading held that every guard should be seen red under its OWN mutant too, which is why
+> M6 exists separately below):
+> ```text
+> every_generated_route_is_reachable_and_unknown_paths_are_none: order_tracking (/orders/:orderId/confirmation)
+>   left: Err(OpenScreen)
+>  right: Ok(ReturnTarget("/orders/x/confirmation"))
+>
+> safe_next_boundaries_after_decode: the query split after decode is lossy but safe -- unchanged pre-existing behaviour
+>   left: Err(OpenScreen)
+>  right: Ok(ReturnTarget("/jobs/a"))
+>
+> safe_next_re_encodes_every_captured_segment: a space round-trips encoded
+>   left: Err(OpenScreen)
+>  right: Ok(ReturnTarget("/jobs/a%20b"))
+>
+> safe_next_rebuilds_a_param_route_from_its_captured_segments:
+>   left: Err(OpenScreen)
+>  right: Ok(ReturnTarget("/jobs/abc"))
+>
+> safe_next_rejects_the_template_placeholder:
+>   left: Err(OpenScreen)
+>  right: Err(Placeholder)
+>
+> safe_next_walks_the_template_not_the_params:
+>   left: Err(OpenScreen)
+>  right: Ok(ReturnTarget("/orders/o1/chat"))
+> ```
+>
+> **Mutants M1-M6, planted on the committed fix, quoted, reverted with scoped edits,
+> `git status --short` clean after each**: M1 (return the caller's decoded string whole instead of
+> the rebuilt template) and M2 (skip re-encoding the captured segment) are BOTH caught by the SAME
+> assertion, `safe_next_re_encodes_the_decoded_bypass_bytes` (kept separate from the ordinary
+> re-encoding cases so `assert_eq!`'s abort-on-first-failure never masks which case caught it):
+> ```text
+> an encoded backslash round-trips encoded, never raw
+>   left: Ok(ReturnTarget("/jobs/a\\b"))
+>  right: Ok(ReturnTarget("/jobs/a%5Cb"))
+> ```
+> M3 (return the template literal instead of the rebuilt path) reds
+> `safe_next_rebuilds_a_param_route_from_its_captured_segments`:
+> ```text
+>   left: Ok(ReturnTarget("/jobs/:orderId"))
+>  right: Ok(ReturnTarget("/jobs/abc"))
+> ```
+> M4 (walk `params` by ORDER instead of the template — `.last()` instead of by-name lookup) reds
+> `safe_next_walks_the_template_not_the_params` — the injected `slug` bleeds into the `:orderId`
+> slot:
+> ```text
+>   left: Ok(ReturnTarget("/orders/chez-test/chat"))
+>  right: Ok(ReturnTarget("/orders/o1/chat"))
+> ```
+> M5 (drop the `requires_auth` check) reds both `safe_next_rejects_an_open_screen` and the
+> route/screen property test:
+> ```text
+>   left: Ok(ReturnTarget("/sign-in"))
+>  right: Err(OpenScreen)
+> ```
+> M6 (beck: delete the `value.starts_with(':')` guard in `rebuild_from_template` — the placeholder
+> guard had never been seen red under its own mutant before this run) reds
+> `safe_next_rejects_the_template_placeholder`:
+> ```text
+>   left: Ok(ReturnTarget("/jobs/%3AorderId"))
+>  right: Err(Placeholder)
+> ```
+>
+> **Pre-existing, documented not fixed** (ux): a decoded `?` inside a `?next=` candidate still
+> silently splits the query off (`safe_next`'s single decode+split, unchanged by this card) —
+> `/jobs/a%3Fb` resolves to `/jobs/a`, quietly dropping whatever followed the `%3F`. This is a
+> lossy SUBSTITUTION of the destination, not a rejection — pre-existing behaviour this card
+> inherited and pinned (`safe_next_boundaries_after_decode`), not introduced by it.
+>
+> **Two consumption boundaries discard the rejection reason** (observability — where a future
+> beacon hooks): `sign_in_return.rs::resolve_return_target` collapses `safe_next(...).ok()` to
+> `ReturnTarget::root()`, and `next_param.rs::same_tab_next_override` collapses it to `None` — both
+> call sites already had this `.ok()`-shaped seam before this card (the OLD `Option`-returning
+> `safe_next` offered nothing else), so the closed `NextRejection` set exists at the ONE place
+> (`safe_next` itself) that can distinguish outcomes; wiring a counter at either consumption point
+> is future work, not this card's.
+>
+> **OUT OF SCOPE**, named explicitly: the SSR 302 leg composes no `?next=` at all
+> (`crates/server/src/hosts.rs:199-205`, graphql-architect) — filed as
+> [#916](https://github.com/TheCaptainCompany/captain-food/issues/916) item 7; the staff chat
+> (`order_conversation`) and rider job (`job_detail`) screens have no not-found state of their own,
+> so a stale `next` today renders their ordinary empty state with a live compose box (ux) —
+> [#947](https://github.com/TheCaptainCompany/captain-food/issues/947); the query half of item 2
+> (parsing a `?next=` that itself targets a route WITH a query component) stays a V0 gap; the
+> RESERVED `?next=` outcome row for `specs/observability.yaml`, the producer→consumer round-trip pin
+> (`bounce.rs`'s `percent_encode_next` against `safe_next`'s rebuild), the vocabulary notes, and the
+> third `navigate_away` definition — filed as
+> [#949](https://github.com/TheCaptainCompany/captain-food/issues/949) items 1-5.
+>
+> **Process note** (self-caught, no card defect): implementation began on the branch before it was
+> pushed and before the draft PR was opened — the protocol's interlock (push + draft PR BEFORE the
+> first line of code) was skipped this run. No shared ref was touched before the branch+PR existed
+> together (one commit, `97f15bb7`, still draft, auto-merge never armed), but recorded so the next
+> executor treats "branch pushed, draft PR open" as the gate before writing code, not just before
+> the first commit.
+>
+> **No card defects** beyond the process note above (which is a process observation, not a defect
+> in the dispatch card's own text) — the design section's exact byte sequences for the re-encoding
+> tests (`%20`, `%23`, `%25zz`, `%5C`, `%0D%0A`) all matched what the implementation needed, with no
+> correction required.
+>
+> Lane B. Links: [#916](https://github.com/TheCaptainCompany/captain-food/issues/916),
+> [PR #948](https://github.com/TheCaptainCompany/captain-food/pull/948),
+> [#947](https://github.com/TheCaptainCompany/captain-food/issues/947),
+> [#949](https://github.com/TheCaptainCompany/captain-food/issues/949).
+
 > **2026-09-07 — [#926 "#924 follow-ups (the Red-first gate, round 2): the none form is a prefix
 > glob, per-hit is unenforced, the Rust token mirror is unpinned, sharper 0-hit cases, the
 > gate-scripts job growth is unmetered"](https://github.com/TheCaptainCompany/captain-food/issues/926)

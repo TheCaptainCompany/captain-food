@@ -73,12 +73,12 @@ pub fn take_next() -> Option<String> {
 /// (`None`, meaning: the caller keeps `route` as-is). `None` is also the answer when the query
 /// carries no `next=`, or one that `router::safe_next` rejects (foreign host, `//`, a scheme, an
 /// unmatched path, the sign-in door itself) — the caller then falls back to `route` itself.
-pub fn same_tab_next_override(host: &str, route: &str, search: &str) -> Option<String> {
+pub fn same_tab_next_override(host: &str, route: &str, search: &str) -> Option<crate::router::ReturnTarget> {
     if route != "/" {
         return None;
     }
     let raw = extract_next(search)?;
-    crate::router::safe_next(host, &raw).map(str::to_string)
+    crate::router::safe_next(host, &raw).ok()
 }
 
 #[cfg(test)]
@@ -125,7 +125,7 @@ mod tests {
     fn same_tab_next_decision_honours_a_valid_next_and_rejects_a_foreign_one() {
         let host = "restos.captain.food";
         assert_eq!(
-            same_tab_next_override(host, "/", "?next=/%64eliveries"),
+            same_tab_next_override(host, "/", "?next=/%64eliveries").map(|t| t.as_str().to_string()),
             Some("/deliveries".to_string()),
             "a valid next on the generic home route is honoured"
         );

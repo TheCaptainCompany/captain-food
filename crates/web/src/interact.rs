@@ -598,7 +598,7 @@ fn navigate_home_or_next(route: &str) {
     let host = location.host().unwrap_or_default();
     let search = location.search().unwrap_or_default();
     match crate::next_param::same_tab_next_override(&host, route, &search) {
-        Some(target) => navigate_to(&target),
+        Some(target) => navigate_to(target.as_str()),
         None => navigate_to(route),
     }
 }

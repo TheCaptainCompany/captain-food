@@ -138,8 +138,10 @@ fn percent_decode(input: &str) -> String {
 /// to `/sign-in`: this landing runs AFTER the sign-in confirm already succeeded, so falling back to
 /// sign-in would be a loop, not a safe default.
 #[cfg(any(test, all(target_arch = "wasm32", feature = "hydrate")))]
-fn resolve_return_target(host: &str, raw_next: Option<&str>) -> &'static str {
-    raw_next.and_then(|raw| crate::router::safe_next(host, raw)).unwrap_or("/")
+fn resolve_return_target(host: &str, raw_next: Option<&str>) -> crate::router::ReturnTarget {
+    raw_next
+        .and_then(|raw| crate::router::safe_next(host, raw).ok())
+        .unwrap_or_else(crate::router::ReturnTarget::root)
 }
 
 /// The validated return-to-screen target after a SUCCESSFUL sign-in (#904 D3, ADR-20260905-101349
@@ -147,8 +149,10 @@ fn resolve_return_target(host: &str, raw_next: Option<&str>) -> &'static str {
 /// reload of THIS page never replays a stale target) and validates it through [`resolve_return_target`]
 /// at THIS moment, the ONE consumption point — never earlier (storage never validates), never twice.
 #[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
-pub fn return_target() -> &'static str {
-    let Some(host) = web_sys::window().and_then(|w| w.location().host().ok()) else { return "/" };
+pub fn return_target() -> crate::router::ReturnTarget {
+    let Some(host) = web_sys::window().and_then(|w| w.location().host().ok()) else {
+        return crate::router::ReturnTarget::root();
+    };
     resolve_return_target(&host, crate::next_param::take_next().as_deref())
 }
 
@@ -157,11 +161,11 @@ pub fn return_target() -> &'static str {
 /// way (the orders queue needs a signed-in read; the not-linked screen is `graphql_role: PUBLIC`
 /// but still a distinct route).
 #[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
-pub fn navigate_away(origin: &str, path: &str) {
+pub fn navigate_away(origin: &str, path: impl AsRef<str>) {
     if let Some(window) = web_sys::window() {
         let _ = window
             .location()
-            .set_href(&format!("{}{}", origin.trim_end_matches('/'), path));
+            .set_href(&format!("{}{}", origin.trim_end_matches('/'), path.as_ref()));
     }
 }
 
@@ -205,14 +209,14 @@ mod tests {
     #[test]
     fn next_absent_or_invalid_navigates_to_root() {
         let host = "riders.captain.food";
-        assert_eq!(resolve_return_target(host, None), "/", "nothing captured -> root");
+        assert_eq!(resolve_return_target(host, None).as_str(), "/", "nothing captured -> root");
         assert_eq!(
-            resolve_return_target(host, Some("/sign-in")),
+            resolve_return_target(host, Some("/sign-in")).as_str(),
             "/",
             "the sign-in door itself must never be a return target (would loop)"
         );
-        assert_eq!(resolve_return_target(host, Some("//evil.com")), "/", "an open redirect must never pass");
-        assert_eq!(resolve_return_target(host, Some("/route/does/not/exist")), "/");
+        assert_eq!(resolve_return_target(host, Some("//evil.com")).as_str(), "/", "an open redirect must never pass");
+        assert_eq!(resolve_return_target(host, Some("/route/does/not/exist")).as_str(), "/");
     }
 
     /// A valid captured `next` (a `requires_auth` screen of the SAME surface) is honored — asserted
@@ -222,6 +226,6 @@ mod tests {
     /// fallback case above (ADR-20260906-024838 rule 1 / R2-1).
     #[test]
     fn a_valid_captured_next_is_honored() {
-        assert_eq!(resolve_return_target("restos.captain.food", Some("/%64eliveries")), "/deliveries");
+        assert_eq!(resolve_return_target("restos.captain.food", Some("/%64eliveries")).as_str(), "/deliveries");
     }
 }
