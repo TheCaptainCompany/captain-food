@@ -246,8 +246,13 @@ keys:
       (`application::quote::WriteDoorOpen`) is CONSTRUCTED FROM both bools together
       (compiler-first, ADR-20260803-234035 level 4), so the mixed state (verify against a
       coordinate the read side never mints) is unrepresentable rather than merely checked; a boot
-      refusal at BOTH composition roots (`QuoteGuard::resolve_at_boot`), pinned by
-      `application::quote::tests::the_write_door_cannot_open_while_the_read_door_is_closed`.
+      refusal at BOTH composition roots (`QuoteGuard::resolve_at_boot`), the CONSTRUCTOR pinned by
+      `application::quote::tests::the_write_door_cannot_open_while_the_read_door_is_closed` -- R5
+      (fix round after presentation pass 1, beck NB6 / farley NB10): that pin covers
+      `WriteDoorOpen`'s own interlock, never the two `declare_flag` call sites themselves
+      (`crates/server/src/lib.rs`, `crates/infrastructure/src/mailbox/standalone.rs`) -- a
+      root-level wiring test per composition root is a flip precondition
+      (`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` item 33), not yet written.
       `decisionRow` binds this key to `docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml` (open):
       the door opens ONCE, after every item on that row discharges. `declare_flag` at BOTH
       composition roots (`crates/server/src/lib.rs`,

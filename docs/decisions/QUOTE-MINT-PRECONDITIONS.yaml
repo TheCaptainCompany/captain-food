@@ -135,7 +135,31 @@ question: 'What must exist before `RUN_FOLD_PRICED_CART_READ` is flipped in prod
   `errors.yaml#/X` must resolve, or a served SDL description can promise a refusal no code produces
   (the `QuoteRequired` defect this same row''s items already close) -- a validator rule belongs next
   to `catalog_version_wire_shape.rs` (graphql); the `QUOTE_SIGNING_KEY_HMAC_SECRET` promotion to
-  `required: [staging, production]` lands WITH the flip (item (14) amended above).'
+  `required: [staging, production]` lands WITH the flip (item (14) amended above). ADDED 2026-09-07
+  (PR #933, presentation pass 1 fix round, items R1-R5): (29) CQ-7a/b (legal, NB1) answered by
+  counsel, OR the copy consciously shipped as DRAFT by a recorded decision -- opening the door is
+  the event that puts counsel-draft copy in front of a Tours consumer, and this row is what opens
+  it; (30) a non-zero fee leg (ADR-0016/0017, legal NB2) requires binding the fee into the signed
+  token or a live CTA-total compare at verify time before the D-E CTA-total guarantee holds for
+  real -- vacuously true today only because every fee leg is zero (ADR-20260906-192007 D-E
+  amendment, 2026-09-07); (31) with the door OPEN nothing goes quiet today (observability, NB16):
+  `PgAsOfCatalogRepository::as_of` (verify''s only instrumented leg) emits no
+  `catalog_as_of_reads_total` / `fold_duration` and constructs `catalog.as_of.fold` with
+  `correlation_id` Empty while the contract marks it required -- preconditions: `as_of` records
+  `reads_total`/`fold_duration`; `as_of` takes and records the correlation id; item (21)''s
+  `surface` dimension presupposes this; (32) `deploy-bins.yml` has NO secret gate (farley, NB12) --
+  after item (14)''s promotion an unprovisioned key wedges the 13 bins at container-config time and
+  the D-H refusal never runs -- preconditions: the provisioning act itself (founder, admin-gated),
+  a bins-path gate or drill, and ONE pain-forward boot drill on staging (live profile, door OPEN,
+  key absent -> the refusal observed) before the promotion; (33) a root-level interlock wiring test
+  per composition root (beck NB6 / farley NB10) -- swapping the two bool args at
+  `crates/server/src/lib.rs:1221-1222` / `crates/infrastructure/src/mailbox/standalone.rs:263-264`
+  survives every test today (door silently CLOSED under a flag saying open) -- pinned BEFORE the
+  flip; the existing pin
+  (`application::quote::tests::the_write_door_cannot_open_while_the_read_door_is_closed`) covers
+  only `WriteDoorOpen`''s own constructor, never the two `declare_flag` call sites themselves
+  (`configuration.yaml`''s `gates:` wording tightened in the same change to stop overclaiming root
+  coverage).'
 owner: team
 opened: '2026-09-06'
 capacity: team
