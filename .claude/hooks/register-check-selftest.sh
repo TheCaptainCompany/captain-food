@@ -824,6 +824,34 @@ else
   fi
 fi
 
+# LD4 (#926 item 6 / #914 item 10, consent option (b)): a trail-less what-next CONSULT routed to
+# the LIVE `.claude/agents/architect-consult.md` -- the read-only twin of `architect` -- must ALLOW
+# as `agent-advisory`, same shape as LD2. Rule 1's red-first card step forces a write-capable
+# dispatch to carry a resolvable `Register check:`/`Red-first:` trail; a genuine "what next?"
+# consult commits nothing, so forcing it through `architect` (write-capable) meant fabricating a
+# trail just to pass Lane D -- the defect this variant exists to close.
+#
+# D1's red, captured BEFORE this file existed (quoted verbatim in the PR body and hand-back):
+#   register-check: this dispatch carries no `Register check:` trail, and it is GATED because no
+#   `.claude/agents/architect-consult.md` declares this agent, so its tool set cannot be read (an
+#   undeclared agent — `general-purpose` is the live case — holds the full set, including
+#   Write/Edit).
+#
+# D2's mutant red, captured by appending `, Write` to the variant's `tools:` line and reverting
+# straight after (quoted verbatim in the PR body and hand-back):
+#   register-check: this dispatch carries no `Register check:` trail, and it is GATED because
+#   `architect-consult` is write-capable (`tools: Read, Grep, Glob, Bash, Write`, grants `Write`)
+#   — this call can produce a diff.
+#
+# This case only proves the CURRENT (non-mutated, committed) file passes; the mutant is a one-shot
+# manual check during the D2 phase, never landed, because a permanently mutated fixture would not
+# reflect the committed agent file.
+printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"architect-consult","prompt":"CONSULT: what next?"}}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "register-check selftest: case LD4 FAILED -- the LIVE .claude/agents/architect-consult.md did not pass Lane D as agent-advisory (a trail-less what-next consult must ALLOW)" >&2
+  fail=1
+fi
+
 # ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────
 # L1: the live dir parses and gates -- REG-2 is decided forever (a reversal opens a NEW row).
 printf '%s' "{\"questions\":[{\"question\":\"Reopen REG-2? $TRAIL\"}]}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
