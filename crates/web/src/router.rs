@@ -136,32 +136,153 @@ pub fn unauthenticated_redirect(host: &str, path: &str) -> Option<&'static str> 
     screen.unauthenticated_route
 }
 
-/// The `?next=` allowlist for the RETURN-to-screen leg (#904 D2/D3, ADR-20260905-101349 §13 — the
-/// member door's flip precondition). The ROUTER is the ONLY authority — never a hand-typed list of
-/// "safe" prefixes (the STOP condition this function exists to satisfy): a candidate is rejected on
-/// its raw SHAPE before any decoding if it could ever leave this origin — not EXACTLY one leading
-/// `/` (so `//evil.com`, a protocol-relative URL, and `https://e`, an absolute one, both fail
-/// already), or containing `\` (a separator some user-agents normalize like `/`) or `:` (a scheme).
-/// Decodes ONCE, then requires [`resolve`] to land on a screen of THIS host's surface that is BOTH
-/// `requires_auth` (an open screen — which includes every `/sign-in*` door, all `requires_auth:
-/// false` — has no "come back here" story, so this ALONE is what keeps a next from ever pointing
-/// back at sign-in) and not itself a `:param` route (returning the literal template text would be
-/// a broken destination — a named V0 gap: `next` targets a SCREEN, never a deep-linked resource).
-/// Returns that screen's own static `.route`, never the caller's decoded string: a query VALUE is
-/// exactly the stranger-controlled data this allowlist exists to keep out of a navigation target,
-/// and it cannot be `'static` regardless.
-pub fn safe_next(host: &str, next: &str) -> Option<&'static str> {
+/// A validated `?next=` return target (#916 item 2 first half, ADR-20260905-101349 §13): minted
+/// ONLY by [`safe_next`] and [`ReturnTarget::root`], through a private constructor — proof by
+/// construction that a value of this type came from the router's own allowlist, never a
+/// hand-assembled string. Since a `:param` route's rebuilt path is no longer a slice of the
+/// screen's own `&'static str` route, this type is what now carries the guarantee `'static` used
+/// to: not WHERE the bytes live, but that they can only have been minted here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnTarget(String);
+
+impl ReturnTarget {
+    fn new(path: String) -> Self {
+        ReturnTarget(path)
+    }
+
+    /// The default target when nothing was captured, or what was captured did not validate — `/`,
+    /// never `/sign-in` (looping back to the door a visitor just signed in through is the
+    /// caller's concern to avoid, not this type's — see `sign_in_return::resolve_return_target`).
+    pub fn root() -> Self {
+        ReturnTarget("/".to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for ReturnTarget {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ReturnTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The closed set [`safe_next`] can refuse a candidate for (#916 item 2 first half): a `None`
+/// collapse would hide which of these fired, and a future `auth_refresh_total`-shaped `{outcome}`
+/// observability attribute needs a bounded set to report against, not a bare boolean — a dozen
+/// lines now against a rewrite later. (Growth of this set beyond the four legs below was raised
+/// and rejected at review: nothing else safe_next currently distinguishes needs its own variant.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NextRejection {
+    /// The raw candidate fails the SHAPE check before any decoding: not EXACTLY one leading `/`
+    /// (so `//evil.com`, a protocol-relative URL, and `https://e`, an absolute one, both fail
+    /// already), or it contains a raw `\` (a separator some user-agents normalize like `/`) or a
+    /// raw `:` (a scheme) — unchanged from before this card.
+    Shape,
+    /// The decoded path does not resolve to any screen of this host's surface at all.
+    Unresolved,
+    /// The resolved screen is not `requires_auth` — an open screen, which includes every
+    /// `/sign-in*` door, has no "come back here" story, so this ALONE is what keeps a next from
+    /// ever pointing back at sign-in.
+    OpenScreen,
+    /// A captured `:param` segment is itself the literal route-template placeholder text (only
+    /// reachable percent-encoded, e.g. `%3AorderId` decoding to `:orderId`) — never a real
+    /// destination, so it is refused rather than rebuilt into a broken one.
+    Placeholder,
+}
+
+/// The `?next=` allowlist for the RETURN-to-screen leg (#904 D2/D3, ADR-20260905-101349 §13; `
+/// :param` routes since #916 item 2 first half — the query half of that item stays a V0 gap). The
+/// ROUTER is the ONLY authority — never a hand-typed list of "safe" prefixes (the STOP condition
+/// this function exists to satisfy): a candidate is rejected on its raw SHAPE before any decoding
+/// if it could ever leave this origin (see [`NextRejection::Shape`]). Decodes ONCE, then requires
+/// [`resolve`] to land on a screen of THIS host's surface that `requires_auth`
+/// ([`NextRejection::OpenScreen`] otherwise). The router's route TEMPLATE is the frame: a literal
+/// segment is copied as-is, and a `:name` segment is looked up BY NAME among the resolved route's
+/// captured params and re-encoded for a path segment — never the caller's decoded string returned
+/// whole, and never the captured params walked in capture order (a storefront host's `resolve`
+/// injects a `slug` param that has no place in a template lacking its own `:slug` segment, #745).
+/// A captured value that is itself the template placeholder text is refused
+/// ([`NextRejection::Placeholder`]) rather than rebuilt into a broken destination. `next` targets a
+/// screen INSTANCE, never a deep-linked resource this function checks the existence of — the
+/// destination screen resolves the id at the point of need, same as any other navigation — and
+/// `next` never confers access on its own: the screen's own authorization decides that, exactly as
+/// it would for a visitor who typed the URL directly.
+///
+/// Reserved, not yet emitted (observability, the `rider_restricted_denied_total` RESERVED-leg
+/// phrasing this file's `specs/observability.yaml` sibling already uses): a future
+/// `auth_refresh_total{outcome}`-adjacent counter on this allowlist's own outcome, bounded to
+/// `static | param | rejected:<reason> | absent` — `static` for a literal-route destination,
+/// `param` for a `:param` one, `rejected:<reason>` keyed on [`NextRejection`]'s variant, `absent`
+/// when no candidate was offered at all — and NEVER carrying the candidate path value itself (a
+/// stranger-controlled string has no place as a metric label). Documented here, not wired: no
+/// OTel in `web` (WASM).
+pub fn safe_next(host: &str, next: &str) -> Result<ReturnTarget, NextRejection> {
     if !next.starts_with('/') || next.starts_with("//") || next.contains('\\') || next.contains(':') {
-        return None;
+        return Err(NextRejection::Shape);
     }
     let decoded = percent_decode_once(next);
     let path = decoded.split('?').next().unwrap_or(&decoded);
     let (_, matched) = resolve(host, path);
-    let screen = matched?.screen;
-    if !screen.requires_auth || screen.route.contains(':') {
-        return None;
+    let matched = matched.ok_or(NextRejection::Unresolved)?;
+    let screen = matched.screen;
+    if !screen.requires_auth {
+        return Err(NextRejection::OpenScreen);
     }
-    Some(screen.route)
+    rebuild_from_template(screen.route, &matched.params).map(ReturnTarget::new)
+}
+
+/// Walk `template`'s (a screen's `.route`) segments in order: a literal segment is copied
+/// verbatim, a `:name` segment is looked up BY NAME in `params` (never iterated in capture order —
+/// see [`safe_next`]'s doc) and percent-encoded for a path segment. `Err(Placeholder)` when a
+/// captured value is itself the unresolved template text (starts with `:`) — the decoded-bypass
+/// case where a stranger URL-encoded the literal placeholder rather than a real value.
+fn rebuild_from_template(
+    template: &'static str,
+    params: &[(String, String)],
+) -> Result<String, NextRejection> {
+    let mut out = String::new();
+    for segment in template.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        out.push('/');
+        if let Some(name) = segment.strip_prefix(':') {
+            let value = params.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str()).unwrap_or("");
+            if value.starts_with(':') {
+                return Err(NextRejection::Placeholder);
+            }
+            out.push_str(&percent_encode_segment(value));
+        } else {
+            out.push_str(segment);
+        }
+    }
+    if out.is_empty() {
+        out.push('/');
+    }
+    Ok(out)
+}
+
+/// Percent-encode ONE path segment: everything outside `A-Za-z0-9-._~` becomes `%XX` — the same
+/// unreserved set `bounce.rs`'s `percent_encode_next` keeps bare, minus its extra allowance for a
+/// literal `/` (that function encodes a whole path+query as ONE query value; a segment here must
+/// never itself carry a bare `/`, or two segments could be forged into one).
+fn percent_encode_segment(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for b in input.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// A minimal percent-decoder (`%XX` -> byte), lossy on malformed input — a stranger-controlled URL
@@ -499,6 +620,14 @@ mod tests {
     use super::*;
 
     // ---- D2 (#904, ADR-20260905-101349 §13): `safe_next`'s router-only allowlist ----
+    // ---- extended #916 item 2 first half: `:param` routes as valid `?next=` return targets ----
+
+    /// Test-only shorthand: the `Ok` a valid `safe_next` call produces, built through the SAME
+    /// private constructor production code uses (so a test can never construct a `ReturnTarget`
+    /// production could not have minted).
+    fn ok(path: &str) -> Result<ReturnTarget, NextRejection> {
+        Ok(ReturnTarget::new(path.to_string()))
+    }
 
     /// Red-first (ADR-20260905-101349:171): a mutant that accepts anything `/`-prefixed (never
     /// checking `//`, scheme, backslash, or resolving through the router) accepts `//evil.com` —
@@ -508,16 +637,16 @@ mod tests {
         let host = "riders.captain.food";
         // Protocol-relative / absolute / backslash / scheme -- rejected on SHAPE alone, before any
         // resolve.
-        assert_eq!(safe_next(host, "//evil.com"), None, "protocol-relative must never pass");
-        assert_eq!(safe_next(host, "https://evil.com"), None, "absolute URL must never pass");
-        assert_eq!(safe_next(host, "\\\\evil.com"), None, "backslash must never pass");
-        assert_eq!(safe_next(host, "javascript:alert(1)"), None, "a scheme colon must never pass");
-        assert_eq!(safe_next(host, "not-even-a-slash"), None, "must start with exactly one /");
+        assert_eq!(safe_next(host, "//evil.com"), Err(NextRejection::Shape), "protocol-relative must never pass");
+        assert_eq!(safe_next(host, "https://evil.com"), Err(NextRejection::Shape), "absolute URL must never pass");
+        assert_eq!(safe_next(host, "\\\\evil.com"), Err(NextRejection::Shape), "backslash must never pass");
+        assert_eq!(safe_next(host, "javascript:alert(1)"), Err(NextRejection::Shape), "a scheme colon must never pass");
+        assert_eq!(safe_next(host, "not-even-a-slash"), Err(NextRejection::Shape), "must start with exactly one /");
         // A path the router does not resolve to any screen at all.
-        assert_eq!(safe_next(host, "/this/route/does/not/exist"), None);
+        assert_eq!(safe_next(host, "/this/route/does/not/exist"), Err(NextRejection::Unresolved));
         // The sign-in door itself resolves but is `requires_auth: false` -- never a valid target
         // (this is what keeps `next` from ever looping back to sign-in, structurally).
-        assert_eq!(safe_next(host, "/sign-in"), None, "the sign-in door itself is never a target");
+        assert_eq!(safe_next(host, "/sign-in"), Err(NextRejection::OpenScreen), "the sign-in door itself is never a target");
     }
 
     /// A valid requires_auth screen of THIS surface, decoded once, resolves to its own route.
@@ -525,13 +654,13 @@ mod tests {
     fn safe_next_accepts_a_requires_auth_screen_of_the_same_surface() {
         let host = "riders.captain.food";
         assert!(match_route(Surface::Rider, "/").unwrap().screen.requires_auth, "fixture assumption");
-        assert_eq!(safe_next(host, "/"), Some("/"));
+        assert_eq!(safe_next(host, "/"), ok("/"));
         // The leading `/` is always literal (our own composer never encodes it, `bounce.rs`'s
         // `percent_encode_next` keeps `/` bare) -- everything AFTER it may still be encoded, and
         // decodes once before resolving: "/%64eliveries" decodes to "/deliveries", a real
         // requires_auth screen of the restaurant backoffice surface.
         assert!(match_route(Surface::RestaurantBackoffice, "/deliveries").unwrap().screen.requires_auth);
-        assert_eq!(safe_next("restos.captain.food", "/%64eliveries"), Some("/deliveries"));
+        assert_eq!(safe_next("restos.captain.food", "/%64eliveries"), ok("/deliveries"));
     }
 
     /// A screen that does not `requires_auth` is never a valid `next` target either.
@@ -539,16 +668,87 @@ mod tests {
     fn safe_next_rejects_an_open_screen() {
         let host = "riders.captain.food";
         assert!(!match_route(Surface::Rider, "/sign-in").unwrap().screen.requires_auth);
-        assert_eq!(safe_next(host, "/sign-in"), None);
+        assert_eq!(safe_next(host, "/sign-in"), Err(NextRejection::OpenScreen));
     }
 
-    /// A `:param` route is a known V0 gap (§ `safe_next`'s doc): returning the literal template
-    /// text would be a broken destination, so it is rejected rather than shipped half-right.
+    /// #916 item 2 first half: a `:param` route is no longer refused — the router walks the
+    /// screen's own route TEMPLATE and rebuilds the concrete path from the captured segment, so
+    /// `/jobs/abc` (the rider job detail screen) round-trips to itself.
     #[test]
-    fn safe_next_rejects_a_dynamic_param_route() {
+    fn safe_next_rebuilds_a_param_route_from_its_captured_segments() {
         let host = "riders.captain.food";
         assert!(match_route(Surface::Rider, "/jobs/abc").unwrap().screen.requires_auth);
-        assert_eq!(safe_next(host, "/jobs/abc"), None, "a :param route is not a valid next target");
+        assert_eq!(safe_next(host, "/jobs/abc"), ok("/jobs/abc"));
+    }
+
+    /// Every captured `:param` segment is RE-ENCODED, never returned raw (reviewer's security
+    /// point): a decoded-bypass value — a `\` or a CRLF pair hidden behind percent-encoding, which
+    /// the raw-shape check at the top of `safe_next` cannot see because it only inspects the
+    /// UNDECODED candidate — must come back encoded, never as a raw byte in the rebuilt path. A
+    /// mutant that returns the caller's decoded string whole, or that skips re-encoding the
+    /// captured segment, must go red on THESE two cases specifically, not only on the space case.
+    #[test]
+    fn safe_next_re_encodes_every_captured_segment() {
+        let host = "riders.captain.food";
+        assert_eq!(safe_next(host, "/jobs/a%20b"), ok("/jobs/a%20b"), "a space round-trips encoded");
+        assert_eq!(safe_next(host, "/jobs/a%23b"), ok("/jobs/a%23b"), "a fragment marker round-trips encoded");
+        // A malformed escape (`%zz` is not valid hex) survives the lossy single decode as a LITERAL
+        // `%zz` and must itself be re-encoded on rebuild, never emitted raw.
+        assert_eq!(safe_next(host, "/jobs/a%25zz"), ok("/jobs/a%25zz"), "a malformed escape survives decode and is re-encoded");
+    }
+
+    /// The decoded-bypass security case, kept SEPARATE from the general re-encoding test above so
+    /// its failure is never masked by an earlier `assert_eq!` in the same test aborting first
+    /// (reviewer's point): `\` and CRLF are refused RAW by the SHAPE check at the top of
+    /// `safe_next`, but hidden behind percent-encoding they decode successfully, and a mutant that
+    /// returns the caller's decoded string whole, or skips re-encoding the captured segment, must
+    /// be red on THESE two specifically — the security-relevant ones — not only on the space case
+    /// above.
+    #[test]
+    fn safe_next_re_encodes_the_decoded_bypass_bytes() {
+        let host = "riders.captain.food";
+        assert_eq!(safe_next(host, "/jobs/a%5Cb"), ok("/jobs/a%5Cb"), "an encoded backslash round-trips encoded, never raw");
+        assert_eq!(safe_next(host, "/jobs/a%0D%0Ab"), ok("/jobs/a%0D%0Ab"), "an encoded CRLF round-trips encoded, never raw");
+    }
+
+    /// Boundaries of the ONE decode + lossy split that already existed at `safe_next`'s :158 (this
+    /// card changes nothing there): a decoded `/` inside the candidate reshapes the segment count
+    /// (three segments where the template wants two) and the match fails; a decoded `?` still
+    /// splits the query off exactly as before, safely dropping whatever followed it.
+    #[test]
+    fn safe_next_boundaries_after_decode() {
+        let host = "riders.captain.food";
+        assert_eq!(
+            safe_next(host, "/jobs/a%2Fb"),
+            Err(NextRejection::Unresolved),
+            "a decoded slash makes three segments -- no route has that shape"
+        );
+        assert_eq!(
+            safe_next(host, "/jobs/a%3Fb"),
+            ok("/jobs/a"),
+            "the query split after decode is lossy but safe -- unchanged pre-existing behaviour"
+        );
+    }
+
+    /// The rebuild walks the TEMPLATE, never the captured params in order: on a storefront host
+    /// `resolve` injects a `slug` param (#745) even for a route with no `:slug` segment of its own,
+    /// so an implementation that iterated `params` instead of the template would append a bogus
+    /// extra segment here.
+    #[test]
+    fn safe_next_walks_the_template_not_the_params() {
+        let host = "chez-test.captain.food";
+        let m = match_route(Surface::RestaurantFrontoffice, "/orders/o1/chat").expect("chat route");
+        assert!(m.screen.requires_auth, "fixture assumption");
+        assert_eq!(safe_next(host, "/orders/o1/chat"), ok("/orders/o1/chat"));
+    }
+
+    /// A captured value that is itself the unresolved template placeholder text (only reachable by
+    /// percent-encoding the literal `:` — a raw one would already fail the SHAPE check) is refused
+    /// rather than rebuilt into a broken destination.
+    #[test]
+    fn safe_next_rejects_the_template_placeholder() {
+        let host = "riders.captain.food";
+        assert_eq!(safe_next(host, "/jobs/%3AorderId"), Err(NextRejection::Placeholder));
     }
 
     #[cfg(feature = "ssr")]
@@ -776,6 +976,17 @@ mod tests {
 
     #[test]
     fn every_generated_route_is_reachable_and_unknown_paths_are_none() {
+        // #916 item 2 first half: one fixture host per surface, so the SAME loop can also drive
+        // `safe_next` (never `match_route` alone) through every screen's concrete path.
+        fn host_for(surface: Surface) -> &'static str {
+            match surface {
+                Surface::CaptainFrontoffice => "captain.food",
+                Surface::RestaurantFrontoffice => "chez-test.captain.food",
+                Surface::RestaurantBackoffice => "restos.captain.food",
+                Surface::Rider => "riders.captain.food",
+                Surface::System => "system.captain.food",
+            }
+        }
         for surface in [
             Surface::CaptainFrontoffice,
             Surface::RestaurantFrontoffice,
@@ -794,6 +1005,22 @@ mod tests {
                 let m = match_route(surface, &concrete)
                     .unwrap_or_else(|| panic!("route {} unreachable", screen.route));
                 assert_eq!(m.screen.id, screen.id);
+                // The bidirectional property: `safe_next` on the SAME concrete path round-trips to
+                // the EXACT SAME string iff the screen requires auth, else it is an open screen --
+                // asserted against the exact string, never `is_ok()` alone, so a mutant returning
+                // SOME other valid-looking path cannot pass.
+                let outcome = safe_next(host_for(surface), &concrete);
+                if screen.requires_auth {
+                    assert_eq!(outcome, ok(&concrete), "{} ({})", screen.id, screen.route);
+                } else {
+                    assert_eq!(
+                        outcome,
+                        Err(NextRejection::OpenScreen),
+                        "{} ({})",
+                        screen.id,
+                        screen.route
+                    );
+                }
             }
             assert!(match_route(surface, "/definitely/not/a/route").is_none());
         }
