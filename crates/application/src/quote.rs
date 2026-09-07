@@ -614,4 +614,72 @@ mod tests {
         }
     }
     impl Eq for WriteDoorOpen {}
+
+    struct NeverCalled;
+    #[async_trait::async_trait]
+    impl AsOfPriceAuthority for NeverCalled {
+        async fn as_of(
+            &self,
+            _catalog_id: CatalogId,
+            _version: CatalogVersion,
+        ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+            unreachable!("a boot refusal never reaches a read")
+        }
+        async fn at_head(
+            &self,
+            _catalog_id: CatalogId,
+            _correlation_id: uuid::Uuid,
+        ) -> Result<domain::catalog_as_of::AsOfCatalog, DomainError> {
+            unreachable!("a boot refusal never reaches a read")
+        }
+    }
+
+    /// D-H: the write door refuses to open AT BOOT when the resolved key is the DEV-ONLY
+    /// fallback and the profile is LIVE (staging/production) -- never a per-request check.
+    #[test]
+    fn the_dev_signing_key_refuses_to_boot_in_a_live_profile_with_the_door_open() {
+        let result = QuoteGuard::resolve_at_boot(
+            true,
+            true,
+            true, // profile_is_live
+            SigningKey::from_resolved_secret("current", ""), // unset -> DEV_ONLY fallback
+            None,
+            Arc::new(NeverCalled),
+        );
+        match result {
+            Ok(_) => panic!("a live profile with the door open and the dev key must refuse to boot"),
+            Err(err) => assert!(err.contains("DEV-ONLY"), "the refusal must name the dev key, got: {err}"),
+        }
+    }
+
+    /// The SAME dev key never refuses in development/test (`profile_is_live: false`) -- the
+    /// DEV-ONLY fallback exists precisely so a database-less run still exercises the signed
+    /// path.
+    #[test]
+    fn the_dev_signing_key_boots_fine_outside_a_live_profile() {
+        assert!(QuoteGuard::resolve_at_boot(
+            true,
+            true,
+            false, // profile_is_live
+            SigningKey::from_resolved_secret("current", ""),
+            None,
+            Arc::new(NeverCalled),
+        )
+        .is_ok());
+    }
+
+    /// A REAL (non-dev) key never refuses, live profile or not -- the refusal is specific to the
+    /// dev-only literal, never a blanket "door open in a live profile" ban.
+    #[test]
+    fn a_real_signing_key_boots_fine_in_a_live_profile_with_the_door_open() {
+        assert!(QuoteGuard::resolve_at_boot(
+            true,
+            true,
+            true,
+            SigningKey::from_resolved_secret("current", "a-real-provisioned-secret"),
+            None,
+            Arc::new(NeverCalled),
+        )
+        .is_ok());
+    }
 }
