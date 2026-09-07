@@ -2875,8 +2875,13 @@ pub async fn place_order(
     // ONE of the enumerated causes (D-D); on success the charge becomes the FRESH
     // `price_cart_at` recompute at the token's own coordinate — never `priced.total_amount`,
     // which is the HEAD-projection value the fold may disagree with (young's red-first:
-    // `the_charged_total_comes_from_the_fold_when_the_projection_disagrees`).
-    let verified_total = crate::quote::verify_quote(
+    // `the_charged_total_comes_from_the_fold_when_the_projection_disagrees`). `verify_quote`
+    // returns the fold's WHOLE `PricedCart` (items, breakdown, total — one value at one
+    // coordinate, checkpoint 2 item G, evans BLOCKING): the checkout snapshot below freezes items/
+    // breakdown from THIS same value on the OPEN success arm, never from `priced` (the HEAD
+    // projection) — freezing HEAD's items while charging the fold's total would leave
+    // `OrderPlaced`'s lines summing to a different number than what was actually charged.
+    let verified_priced = crate::quote::verify_quote(
         quote_guard,
         cmd.quote.as_ref(),
         cmd.cart_id,
@@ -2886,7 +2891,7 @@ pub async fn place_order(
         when_at,
     )
     .await?;
-    let gross = verified_total.unwrap_or_else(|| priced.total_amount.clone());
+    let gross = verified_priced.as_ref().map(|p| p.total_amount.clone()).unwrap_or_else(|| priced.total_amount.clone());
     // Store credit (goodwill) is SPENT at checkout (#158, Part B of #207): the available balance reduces
     // the CASH the buyer pays, up to the order total (currency-matched, never negative), keyed by the
     // order for exactly-once spend. The PaymentIntent is created for the REDUCED buyer total; the order's
@@ -2949,11 +2954,15 @@ pub async fn place_order(
         customer_contact: cmd.customer_contact.clone(),
         service_type: cmd.service_type,
         delivery_address: cmd.delivery_address.clone(),
-        items: priced.items.clone(),
+        // OPEN success: the fold's OWN items (`verified_priced`), the SAME value `gross` came from
+        // above -- never `priced.items` (the HEAD projection), which can name different lines/
+        // quantities than the coordinate that produced the charge (item G). CLOSED, or no quote:
+        // `priced.items`, exactly today's behaviour.
+        items: verified_priced.as_ref().map(|p| p.items.clone()).unwrap_or_else(|| priced.items.clone()),
         // The order's OWN value is the GROSS server-priced total; applied store credit reduces only the
         // Stripe charge (buyer_total above), not what the order is worth (rules.yaml#/CreditReducesCheckoutTotal).
         total_amount: gross.clone(),
-        breakdown: priced.breakdown.clone(),
+        breakdown: verified_priced.as_ref().map(|p| p.breakdown.clone()).unwrap_or_else(|| priced.breakdown.clone()),
         note: cmd.note.clone(),
         // RSO-1 acceptance EVIDENCE: the verdict this checkout was evaluated at, with the
         // window's own instants and timezone — a disputed acceptance is proved from these, not
@@ -5847,7 +5856,12 @@ mod quote_guard_tests {
     /// young's red-first (ADR-20260906-192007:452): the fold at V=1900 and the read-side
     /// projection at 1500 DISAGREE -- the charge must be the FOLD's 1900, never the projection's
     /// 1500. Mutant: verify recomputes via `price_cart` (the projection) instead of `price_cart_at`
-    /// (the fold) -- expected red: charged 1500 where 1900 was quoted.
+    /// (the fold) -- expected red: charged 1500 where 1900 was quoted. Extended (checkpoint 2 item
+    /// G, evans BLOCKING): the FROZEN `checkout.items` must sum to the SAME 1900 -- previously
+    /// `place_order` froze `priced.items` (the projection, 1500-priced) while charging the fold's
+    /// 1900, so `OrderPlaced`'s lines never summed to what was actually charged. Mutant: freeze
+    /// `priced.items` (the projection) instead of `verified_priced`'s (the fold's own) -- expected
+    /// red: items sum 1500 vs a 1900 charge.
     #[tokio::test]
     async fn the_charged_total_comes_from_the_fold_when_the_projection_disagrees() {
         // The PROJECTION (TestCatalogs) prices offer at 1500; the FOLD's stream prices it at 1900
@@ -5875,11 +5889,15 @@ mod quote_guard_tests {
             .expect("a valid quote at the fold's own coordinate must accept");
         let _ = outcome;
         let stream = bed.store.stream(&format!("Payment-{}", "pi_quote_test"));
-        let intent_amount = stream.iter().find_map(|e| match e {
-            DomainEvent::PaymentIntentCreated(p) => Some(p.checkout.total_amount.amount_cents.0),
+        let (intent_amount, items_sum) = stream.iter().find_map(|e| match e {
+            DomainEvent::PaymentIntentCreated(p) => Some((
+                p.checkout.total_amount.amount_cents.0,
+                p.checkout.items.iter().map(|i| i.line_total.amount_cents.0).sum::<i64>(),
+            )),
             _ => None,
-        });
-        assert_eq!(intent_amount, Some(1900), "rebuilding the projection changes no assertion -- the charge must come from the fold (1900), not the stale projection (1500)");
+        }).unwrap();
+        assert_eq!(Some(intent_amount), Some(1900), "rebuilding the projection changes no assertion -- the charge must come from the fold (1900), not the stale projection (1500)");
+        assert_eq!(items_sum, 1900, "the FROZEN items must sum to the SAME total that was charged (1900), never the stale projection's 1500 -- OrderPlaced's lines must sum to the charge");
     }
 
     /// business's F4: a HEAD price that has since moved LOWER than the quoted total still charges

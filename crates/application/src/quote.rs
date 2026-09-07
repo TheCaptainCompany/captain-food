@@ -412,9 +412,11 @@ impl QuoteGuard {
 /// caller keeps charging `price_cart`'s HEAD-projection total, exactly today's behaviour, and
 /// `quote`/`catalogs`/`lines` are not even inspected. OPEN: an absent `quote` refuses with
 /// `QuoteVerificationFailed`; every other check maps through [`QuoteRefusal::into_domain_error`]. On success,
-/// returns `Some(total)` — the FRESH [`price_cart_at`] recompute at the token's own coordinate,
-/// which the caller charges INSTEAD OF the HEAD-projection total (never the token's own
-/// `totalCents`, which is carried for observability only — see the module doc).
+/// returns `Some(the fold's whole `PricedCart`)` — items, breakdown AND total, ALL from the FRESH
+/// [`price_cart_at`] recompute at the token's own coordinate, one value at one coordinate (evans,
+/// checkpoint 2 item G): a caller that froze `items`/`breakdown` from the HEAD projection while
+/// charging THIS total would freeze an `OrderPlaced` whose lines never sum to what was charged.
+/// Never the token's own `totalCents`, which is carried for observability only (module doc).
 pub async fn verify_quote(
     guard: &QuoteGuard,
     quote: Option<&CartQuote>,
@@ -423,7 +425,7 @@ pub async fn verify_quote(
     catalogs: &dyn CatalogReadRepository,
     lines: &[CartLineItem],
     now: DateTime<Utc>,
-) -> Result<Option<Money>, DomainError> {
+) -> Result<Option<crate::pricing::PricedCart>, DomainError> {
     if !guard.is_open() {
         return Ok(None);
     }
@@ -458,7 +460,7 @@ pub async fn verify_quote(
         QuoteRefusal::FoldUnavailable.into_domain_error(cart_id)
     })?;
     let _ = (payload.total_cents, payload.currency); // observability only -- see module doc.
-    Ok(Some(priced.total_amount))
+    Ok(Some(priced))
 }
 
 // Silence "unused" for the plain re-export path some callers want (span attribute construction
