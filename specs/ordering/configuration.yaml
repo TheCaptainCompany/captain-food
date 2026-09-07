@@ -263,19 +263,25 @@ keys:
   QUOTE_SIGNING_KEY_HMAC_SECRET:
     type: string
     secret: true
-    required: [staging, production]
+    required: []
     gates: >
       The signed quote's CURRENT signing key (ADR-20260906-192007 D-H), copying
-      `specs/common/configuration.yaml#/EMAIL_QUOTA_KEY_HMAC_SECRET` key-for-key. PROMOTED to
-      `required: [staging, production]` in the SAME change that lands the write door's boot-time
-      refusal (gate-then-stabilize, the two-step rollout ADR-20260906-192007 D-H records): the
-      verify guard now reads this key whenever the write door is OPEN, so an unset secret in a
-      live profile with the door open must stop boot, the same posture
-      `EMAIL_QUOTA_KEY_HMAC_SECRET` already holds. NO default -- a defaulted signing key is a
-      forgeable price (dba). Unset in development/test, a fixed `DEV_ONLY` value is used
-      (`application::quote::DEV_ONLY_HMAC_KEY`, `application::email_guard::DEV_ONLY_HMAC_KEY`'s own
-      precedent), and the write door REFUSES TO OPEN AT BOOT when the resolved key is that dev
-      value and the door is open in a LIVE profile (staging/production) --
+      `specs/common/configuration.yaml#/EMAIL_QUOTA_KEY_HMAC_SECRET` key-for-key. REVERTED
+      (checkpoint 2, farley + business + reviewer item J) back to `required: []`, TEMPORARILY --
+      a brief promotion to `required: [staging, production]` (phase C) was found to add ZERO
+      safety with the write door OFF (the default everywhere, the only state shipped today):
+      `QuoteGuard::resolve_at_boot`'s OWN dev-key refusal already catches an unprovisioned/dev key
+      whenever the door is OPEN in a live profile (see below), so a MANIFEST-level `required:`
+      only wedges every one of the 14 bin deploy manifests + `deploy.yml:68` (incl. the rollback
+      path) on a secret nothing consumes while the door stays closed. The promotion is the FLIP
+      CARD's, landing alongside the door actually opening (D-H's own two-step rollout, restated:
+      the manifest requirement gates the FLIP, never the code that merely CAN read the key). NO
+      default -- a defaulted signing key is a forgeable price (dba). Unset in development/test, a
+      fixed `DEV_ONLY` value is used (`application::quote::DEV_ONLY_HMAC_KEY`,
+      `application::email_guard::DEV_ONLY_HMAC_KEY`'s own precedent), and the write door REFUSES
+      TO OPEN AT BOOT when the resolved key is that dev value (an ABSENT secret resolves to the
+      SAME dev-only fallback, so "absent" and "the placeholder dev value" are ONE case, not two)
+      and the door is open in a LIVE profile (staging/production) --
       `application::quote::QuoteGuard::resolve_at_boot`, never a per-request check, pinned by a
       named Rust unit test (`noTestFixturePossible` class: no `tests.yaml` scenario can select a
       profile). `application::quote::SigningKey` wraps this value with a module-private
@@ -298,8 +304,10 @@ keys:
     required: []
     gates: >
       The signed quote's RETIRED-BUT-STILL-ACCEPTED key (ADR-20260906-192007 D-H) -- explicitly
-      `required: []` PERMANENTLY (round 3, ADR-20260815-015422), never promoted the way its
-      `QUOTE_SIGNING_KEY_HMAC_SECRET` current-key sibling is: absent whenever no rotation
+      `required: []` PERMANENTLY (round 3, ADR-20260815-015422) -- unlike its
+      `QUOTE_SIGNING_KEY_HMAC_SECRET` current-key sibling, which is TEMPORARILY `required: []` too
+      as of checkpoint 2 item J (reverted from a brief promotion, above) but only until the flip
+      card promotes it back alongside the write door actually opening: absent whenever no rotation
       is in flight. `QuoteVerifier` holds a key SET built from both
       values (plural -- it must accept a quote signed under a key that has since been retired but
       is still inside the overlap window), a DIFFERENT type from `QuoteMinter`'s single current

@@ -8585,11 +8585,14 @@ fn the_deployed_monolith_has_a_generated_manifest() {
 /// mentions `required:` silently became optional too. On the real spec catalog exactly THREE
 /// production secret keys write `required: []`: `PLATFORM_BOOTSTRAP_ADMIN_SUBJECT` (a genuinely
 /// optional dark-feature secret), and the two quote-signing keys added by #816's B'.4 --
-/// `QUOTE_SIGNING_KEY_HMAC_SECRET` (TEMPORARILY optional: the write door does not read it yet, so
-/// `required: [staging, production]` would block every deploy on a secret nothing consumes; the
-/// promotion back lands with the write door's boot-time refusal) and
-/// `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET` (PERMANENTLY optional -- absent whenever no rotation
-/// is in flight).
+/// `QUOTE_SIGNING_KEY_HMAC_SECRET` (TEMPORARILY optional: a brief promotion to
+/// `required: [staging, production]`, D-H, was found at checkpoint 2 (item J) to add zero safety
+/// with the write door still closed -- `QuoteGuard::resolve_at_boot`'s own dev-key boot refusal
+/// already catches an unprovisioned key whenever the door is OPEN in a live profile, so the
+/// manifest-level requirement only wedged every deploy on a secret nothing consumes with the door
+/// off; reverted, the promotion moves to the flip card, landing with the door actually opening)
+/// and `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET` (PERMANENTLY optional -- absent whenever no
+/// rotation is in flight).
 #[test]
 fn only_the_explicitly_declared_optional_secret_is_optional() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -8603,17 +8606,16 @@ fn only_the_explicitly_declared_optional_secret_is_optional() {
         optional_keys,
         vec![
             "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT".to_string(),
+            "QUOTE_SIGNING_KEY_HMAC_SECRET".to_string(),
             "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET".to_string(),
         ],
-        "exactly two production secret keys may be optional at deploy -- an absent `required:` \
+        "exactly three production secret keys may be optional at deploy -- an absent `required:` \
          must stay fatal, only an EXPLICIT `required: []` on a `secret: true` key may declare \
-         `missing-optional`; got {optional_keys:?}. QUOTE_SIGNING_KEY_HMAC_SECRET was promoted to \
-         `required: [staging, production]` (ADR-20260906-192007 D-H) in the SAME change that \
-         landed the write door's boot-time refusal -- it is no longer in this list."
+         `missing-optional`; got {optional_keys:?}"
     );
 
     // The generated contract must agree: `secret-keys.json` carries `optional: true` on exactly
-    // those two keys.
+    // those three keys.
     let pins = read_image_pins(&root).expect("pins parse");
     let tree = emit_deploy_tree(&model, &pins);
     let secret_keys_json = tree
@@ -8633,9 +8635,10 @@ fn only_the_explicitly_declared_optional_secret_is_optional() {
         optional_in_json,
         vec![
             "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT",
+            "QUOTE_SIGNING_KEY_HMAC_SECRET",
             "QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET",
         ],
-        "secret-keys.json must carry `optional: true` on exactly these two keys"
+        "secret-keys.json must carry `optional: true` on exactly these three keys"
     );
 }
 
