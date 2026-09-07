@@ -1023,6 +1023,7 @@ pub struct Cart {
     pub breakdown: Option<PaymentBreakdown>,
     #[graphql(name = "uberComparison")]
     pub uber_comparison: Option<UberComparison>,
+    /// Signed coordinate binding (ADR-20260906-192007 D-A/D-J). A null quote is NEVER a refusal: never render refusal copy for it; the refusal is keyed on operationStatus REJECTED only (the PlaceOrder mutation's own field).
     #[graphql(name = "quote")]
     pub quote: Option<CartQuote>,
     #[graphql(name = "updatedAt")]
