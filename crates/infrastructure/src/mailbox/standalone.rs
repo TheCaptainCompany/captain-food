@@ -357,12 +357,15 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
     // PROP-20260831-134539 slice 3b + the command change (ADR-20260904-081527 §8 STANDING CLAUSE,
     // consent farley + vernon -- NOT the seventh carve-out, which covers the processmanager.yaml/
     // mailbox hunks of a LATER phase of this same PR): the standing clause pre-authorizes exactly
-    // this bare `declare_flag` + `env_flag` default for every `runKind: door` key introduced after
-    // 2026-09-06, under the fifth carve-out's own four conditions -- byte-parallel to the monolith
-    // root's line above, additive-only, no other hunk under this licence, this comment naming it.
+    // this bare `declare_flag` line, byte-parallel to the monolith root's line above, additive-only,
+    // no other hunk under this licence, this comment naming it. Fed by `deps.quote_guard.is_open()`
+    // -- the real, already-constructed guard's OWN witness (checkpoint 2, farley item K) -- never
+    // the raw `env_flag` bool: this composition root always has a live pool (unlike the monolith's
+    // DB-less branch), so the true interlocked witness is available here and is strictly more
+    // honest than re-reading the two raw env vars a second time.
     telemetry::meters::runtime::declare_flag(
         "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
-        env_flag("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", false),
+        deps.quote_guard.is_open(),
     );
     deps
 }

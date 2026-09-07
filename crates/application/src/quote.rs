@@ -370,6 +370,24 @@ impl QuoteGuard {
         self.door.is_some()
     }
 
+    /// The fleet-parity gauge's own witness (checkpoint 2, farley item K): the SAME boolean
+    /// [`QuoteGuard::is_open`] reports once a live guard is constructed, computed from the two
+    /// raw config values ALONE — so `RUN_QUOTE_REQUIRED_ON_PLACE_ORDER`'s fleet-parity
+    /// declaration can be fed by the interlock's OWN resolution rather than the single raw bool,
+    /// even at a composition-root call site with no live `QuoteGuard` in scope (the
+    /// DB-less-monolith hole this closes: `crates/server/src/lib.rs` declares this flag
+    /// unconditionally, outside the `DATABASE_URL` arm that alone constructs a real guard).
+    /// Never diverges from a live guard's `is_open()`: both compute the identical
+    /// [`WriteDoorOpen::resolve`] over the same two inputs.
+    pub fn would_be_open(
+        run_quote_required_on_place_order: bool,
+        run_fold_priced_cart_read: bool,
+    ) -> bool {
+        WriteDoorOpen::resolve(run_quote_required_on_place_order, run_fold_priced_cart_read)
+            .map(|door| door.is_some())
+            .unwrap_or(false)
+    }
+
     /// The CLOSED-door guard every OTHER crate's test harness needs (#510's `for_tests` shape,
     /// `queries::MailboxRequeueAccess::for_tests` precedent): both doors false, so
     /// `resolve_at_boot` can never refuse, over a fold authority that panics if ever called (the
@@ -654,6 +672,36 @@ mod tests {
         }
     }
     impl Eq for WriteDoorOpen {}
+
+    /// checkpoint 2, farley item K: `QuoteGuard::would_be_open` (the fleet-parity gauge's witness,
+    /// callable with no live guard in scope) must agree with a REAL, constructed guard's own
+    /// `is_open()` on every one of the four (bool, bool) combinations -- the DB-less-monolith
+    /// composition site and the DB-backed one must never report two different fleet-parity values
+    /// for the identical config.
+    #[test]
+    fn would_be_open_agrees_with_a_live_guards_is_open_on_every_combination() {
+        for (quote_required, fold_priced_read) in
+            [(false, false), (false, true), (true, true)]
+        {
+            let guard = QuoteGuard::resolve_at_boot(
+                quote_required,
+                fold_priced_read,
+                false,
+                SigningKey::from_resolved_secret("k", "s"),
+                None,
+                Arc::new(NeverCalled),
+            )
+            .expect("only (true, false) refuses to boot");
+            assert_eq!(
+                QuoteGuard::would_be_open(quote_required, fold_priced_read),
+                guard.is_open(),
+                "would_be_open({quote_required}, {fold_priced_read}) disagreed with a live guard's is_open()"
+            );
+        }
+        // The one combination a live guard can never reach (refuses to boot) -- would_be_open must
+        // still answer `false` for it (never panic, never claim OPEN for a state that cannot boot).
+        assert!(!QuoteGuard::would_be_open(true, false));
+    }
 
     struct NeverCalled;
     #[async_trait::async_trait]

@@ -842,7 +842,7 @@ pub async fn router() -> Router {
                     support_contact.clone(),
                     config.run_rider_restriction_door,
                     config.run_fold_priced_cart_read,
-                    config.quote_signing_key_hmac_secret.clone(),
+                    config.quote_signing_key_hmac_secret.clone().unwrap_or_default(),
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already
@@ -1213,7 +1213,7 @@ pub async fn router() -> Router {
                                 matches!(config.profile, crate::generated::config::Profile::Staging | crate::generated::config::Profile::Production),
                                 application::quote::SigningKey::from_resolved_secret(
                                     "current",
-                                    &config.quote_signing_key_hmac_secret,
+                                    config.quote_signing_key_hmac_secret.as_deref().unwrap_or(""),
                                 ),
                                 config.quote_signing_key_previous_hmac_secret.as_deref().filter(|s| !s.is_empty()).map(
                                     |s| application::quote::SigningKey::from_resolved_secret("previous", s),
@@ -1760,12 +1760,20 @@ pub async fn router() -> Router {
     // declaration for the `runKind: door` key. Corrected (checkpoint 2, vernon item E): this
     // used to say "no verify logic reads this yet" -- FALSE as of phase C, which wired
     // `application::quote::verify_quote` into `commands::place_order`'s pre-payment block for
-    // real, reading `quote_guard` (constructed above, inside the `Ok(pool)` arm). This call
-    // registers the key's resolved value for the fleet-parity gate, the `RUN_FOLD_PRICED_CART_READ`
-    // precedent immediately above.
+    // real, reading `quote_guard` (constructed above, inside the `Ok(pool)` arm). Fed by
+    // `application::quote::QuoteGuard::would_be_open` (checkpoint 2, farley item K), never the raw
+    // `config.run_quote_required_on_place_order` bool: this call site sits OUTSIDE the
+    // `Ok(pool)` arm that alone constructs a live `quote_guard` (a DB-less monolith boot never
+    // builds one at all), so `would_be_open` recomputes the SAME interlock resolution
+    // (`WriteDoorOpen::resolve`) a live guard's own `is_open()` would answer, from the two raw
+    // config values alone -- closing the DB-less-monolith hole where this flag, declared
+    // unconditionally, previously reported the single raw bool with no interlock applied.
     telemetry::meters::runtime::declare_flag(
         "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
-        config.run_quote_required_on_place_order,
+        application::quote::QuoteGuard::would_be_open(
+            config.run_quote_required_on_place_order,
+            config.run_fold_priced_cart_read,
+        ),
     );
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
