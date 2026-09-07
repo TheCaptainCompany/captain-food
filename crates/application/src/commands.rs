@@ -5710,7 +5710,11 @@ mod quote_guard_tests {
 
     /// beck (iv), FIRST: the cart-edited refusal -- quoted at V (offer 1500), a SECOND line added
     /// AFTER the mint moves the cart's lines-digest, PlaceOrder with the STALE quote refuses
-    /// `QuoteNoLongerHonoured{cartId}` with NO other context field.
+    /// `QuoteNoLongerHonoured{cartId}` with NO other context field. checkpoint 2 item C2 (reviewer
+    /// 7, "the zero-intent pin"): every refusal test in this module now runs over a
+    /// `CountingGateway`, never `bed.payments` (`FakeGateway`, a stateless unit struct with no
+    /// ability to observe a call at all) -- a spy that CANNOT record zero calls proves nothing
+    /// about "zero calls".
     #[tokio::test]
     async fn a_cart_edited_after_the_mint_is_refused_with_quote_no_longer_honoured() {
         let (bed, catalogs, fold) = world(1500).await;
@@ -5722,8 +5726,9 @@ mod quote_guard_tests {
             line: Line { cart_line_id: CartLineId(uuid::Uuid::from_u128(0xA009)), offer_id: offer(), quantity: 1, selected_option_ids: vec![] },
         })]).await;
 
+        let gateway = CountingGateway::default();
         let guard = open_guard(fold);
-        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
             .await
             .expect_err("a cart edited after mint must refuse");
         match err {
@@ -5733,6 +5738,7 @@ mod quote_guard_tests {
             }
             other => panic!("expected DomainError::Rejected, got {other:?}"),
         }
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "a cart-edited refusal must authorize zero PaymentIntents");
     }
 
     /// beck (iv): a quote older than the 30-minute QUOTE-STALENESS backstop refuses
@@ -5742,11 +5748,13 @@ mod quote_guard_tests {
         let (bed, catalogs, fold) = world(1500).await;
         let old_mint = chrono::Utc::now() - chrono::Duration::minutes(31);
         let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), old_mint);
+        let gateway = CountingGateway::default();
         let guard = open_guard(fold);
-        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
             .await
             .expect_err("an expired quote must refuse");
         assert_eq!(err.code(), Some("QuoteNoLongerHonoured"));
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "an expired-quote refusal must authorize zero PaymentIntents");
     }
 
     /// beck (iv): a single flipped byte in the token (a forged/tampered signature) refuses the ONE
@@ -5760,11 +5768,13 @@ mod quote_guard_tests {
         let mid = raw.len() / 2;
         raw[mid] ^= 0x01;
         let tampered = domain::generated::scalars::CartQuote(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw));
+        let gateway = CountingGateway::default();
         let guard = open_guard(fold);
-        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(tampered)), None, &actor(), chrono::Utc::now(), false, &guard)
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(tampered)), None, &actor(), chrono::Utc::now(), false, &guard)
             .await
             .expect_err("a forged token must refuse");
         assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "a forged-signature refusal must authorize zero PaymentIntents");
     }
 
     /// beck (iv): a quote naming a DIFFERENT cart than the command's refuses `QuoteVerificationFailed`
@@ -5774,11 +5784,13 @@ mod quote_guard_tests {
         let (bed, catalogs, fold) = world(1500).await;
         let foreign_cart = CartId(uuid::Uuid::from_u128(0xBAD));
         let token = minter().mint(foreign_cart, resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let gateway = CountingGateway::default();
         let guard = open_guard(fold);
-        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
             .await
             .expect_err("a foreign cart's quote must refuse");
         assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "a foreign-cart refusal must authorize zero PaymentIntents");
     }
 
     /// beck (iv): a quote signed under a keyId the verifier does not hold at all (never rotated
@@ -5789,11 +5801,13 @@ mod quote_guard_tests {
         let (bed, catalogs, fold) = world(1500).await;
         let retired = QuoteMinter::new(SigningKey::from_resolved_secret("retired-long-ago", "some-other-secret"));
         let token = retired.mint(cart(), resto(), catalog(), CatalogVersion::try_new(2).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let gateway = CountingGateway::default();
         let guard = open_guard(fold);
-        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
             .await
             .expect_err("an unknown keyId must refuse");
         assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "a retired-key refusal must authorize zero PaymentIntents");
     }
 
     /// beck (iv): a coordinate beyond the live stream head (the token names V=99, the fold has 2
@@ -5804,11 +5818,13 @@ mod quote_guard_tests {
         // Sign a token whose payload NAMES V=99 -- minted directly (never through `at_head`, which
         // could not produce this coordinate honestly) to pin the verifier's OWN bounds check.
         let token = minter().mint(cart(), resto(), catalog(), CatalogVersion::try_new(99).unwrap(), &vec![line()], &eur(1500), chrono::Utc::now());
+        let gateway = CountingGateway::default();
         let guard = open_guard(fold);
-        let err = place_order(&bed.store, catalogs.as_ref(), &bed.payments, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
+        let err = place_order(&bed.store, catalogs.as_ref(), &gateway, &bed.payment_pm, cmd(Some(token)), None, &actor(), chrono::Utc::now(), false, &guard)
             .await
             .expect_err("a coordinate beyond head must refuse, never clamp");
         assert_eq!(err.code(), Some("QuoteVerificationFailed"));
+        assert_eq!(gateway.requests.load(Ordering::SeqCst), 0, "a coordinate-beyond-head refusal must authorize zero PaymentIntents");
     }
 
     /// beck: the FIRST guard-swap pin -- a failed verify refuses BEFORE any payment authorization.
