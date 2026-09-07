@@ -94,7 +94,8 @@ pub struct TrackingState {
     pub birth_pending: bool,
     /// The `PlaceOrder` mutation's OWN observed terminal REJECTION (#816 follow-up, ux, "a live
     /// customer-facing lie today") — fed by `operationStatus`, never by `order.byId`: a rejected
-    /// checkout typically produces NO `Order` at all (`PriceMismatch`/`PriceUnresolvable`/etc.
+    /// checkout typically produces NO `Order` at all (`QuoteVerificationFailed`/
+    /// `QuoteNoLongerHonoured`/`PriceUnresolvable`/etc.
     /// reject strictly BEFORE any `OrderCreated`), so `order.byId` legitimately stays
     /// Unresolved/Absent FOREVER and `birth_pending` alone has no correcting signal — without this,
     /// the acceptance reassurance ("Reçu ✓ — confirmation en cours…") would render forever over an

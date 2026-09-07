@@ -60,8 +60,11 @@ pub struct CheckoutContext {
     pub cart_id: String,
     /// Bound when the customer is authenticated; `PlaceOrder.customerId` is nullable by spec.
     pub customer_id: Option<String>,
-    /// The total the UI displayed — sent as `expectedTotal` so the server can reject a
-    /// `PriceMismatch` instead of ever charging an amount the customer did not see.
+    /// The total the UI displayed — DEPRECATED (`rules.yaml#/ServerPriceAuthority`,
+    /// PROP-20260831-134539 slice 3b): `errors.yaml#/PriceMismatch` (the error this field's
+    /// equality check used to trigger) is RETIRED, and the server now ignores this field
+    /// entirely, on either door state. Superseded by the signed `quote` (D-A/D-J, checkpoint 2
+    /// item (1)); still sent for observability/legacy-fixture reasons only.
     pub expected_total: Option<Value>,
 }
 
@@ -656,7 +659,9 @@ mod tests {
         assert_eq!(input["deliveryAddress"]["city"], "Tours");
         assert_eq!(input["note"], "Ring twice");
         assert_eq!(input["paymentMethodId"], "pm_123");
-        // The displayed total travels — the server's PriceMismatch guard depends on it.
+        // The displayed total still travels on the wire (retargeted, checkpoint 2 item I): the
+        // server IGNORES this field entirely now (errors.yaml#/PriceMismatch retired) -- dropping
+        // it from the wire is checkpoint 2's separate item (1) (D-J client minimum), not this fix.
         assert_eq!(input["expectedTotal"]["amountCents"], 2350);
     }
 
@@ -711,20 +716,22 @@ mod tests {
 
     #[tokio::test]
     async fn a_rejected_checkout_resolves_as_a_business_rejection_not_an_error() {
-        // The two-step contract on the money path: PriceMismatch arrives as REJECTED with its
-        // errors.yaml code — normal UX flow (re-quote the cart), never an exception.
+        // The two-step contract on the money path: retargeted (checkpoint 2 item I) from the
+        // retired `errors.yaml#/PriceMismatch` to `QuoteVerificationFailed` -- the structural code
+        // the signed-quote verify guard now actually rejects with (D-D) -- arrives as REJECTED
+        // with its errors.yaml code — normal UX flow (re-quote the cart), never an exception.
         let fake = FakeTransport::scripted(vec![
             Ok(acceptance("PENDING")),
             Ok(json!({ "operationStatus": {
                 "messageId": "00000000-0000-7000-8000-000000000000",
                 "correlationId": "00000000-0000-7000-8000-000000000000",
-                "status": "REJECTED", "errorCode": "PriceMismatch",
-                "message": "The displayed total is stale", "occurredAt": "2026-07-23T12:00:00Z",
+                "status": "REJECTED", "errorCode": "QuoteVerificationFailed",
+                "message": "We couldn't confirm your total", "occurredAt": "2026-07-23T12:00:00Z",
             }})),
         ]);
         let placed = submit(&fake, &ctx(), &form(), "pm_123").await.unwrap();
         match placed.handle.resolve_with(&fake, 5, Duration::ZERO).await.unwrap() {
-            ActionOutcome::Rejected { error_code, .. } => assert_eq!(error_code, "PriceMismatch"),
+            ActionOutcome::Rejected { error_code, .. } => assert_eq!(error_code, "QuoteVerificationFailed"),
             other => panic!("expected the anticipated rejection, got {other:?}"),
         }
     }

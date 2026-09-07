@@ -202,8 +202,9 @@ pub fn holds_place_order(store: &dyn PendingStore, order_id: Uuid) -> bool {
 /// follow-up, "a live customer-facing lie today") — the value [`holds_place_order`]'s presence
 /// check discards. Lets the tracking page RESOLVE the intent's own terminal outcome
 /// (`DispatchHandle::resolve`) directly, instead of only re-polling `order.byId` — which a
-/// REJECTED checkout may never populate at all, since most business refusals (`PriceMismatch`,
-/// `PriceUnresolvable`, …) reject strictly before any `OrderCreated`.
+/// REJECTED checkout may never populate at all, since most business refusals
+/// (`QuoteVerificationFailed`, `QuoteNoLongerHonoured`, `PriceUnresolvable`, …) reject strictly
+/// before any `OrderCreated`.
 pub fn place_order_message_id(store: &dyn PendingStore, order_id: Uuid) -> Option<Uuid> {
     store
         .load()
