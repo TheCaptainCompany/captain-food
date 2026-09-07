@@ -1755,11 +1755,14 @@ pub async fn router() -> Router {
         config.run_fold_priced_cart_read,
     );
     // PROP-20260831-134539 slice 3b + the command change (ADR-20260906-192007 D-B/D-H), NOT the
-    // seventh carve-out (that licenses the processmanager.yaml/mailbox hunks, a LATER phase of the
-    // same PR): a bare fleet-parity declaration for a new `runKind: door` key, `crates/server/src/lib.rs`
-    // is not a fenced file at all -- no verify logic reads this yet (D-F/D-G land in that later
-    // phase), so this call registers the key's resolved value for the fleet-parity gate ONLY, the
-    // `RUN_FOLD_PRICED_CART_READ` precedent immediately above.
+    // seventh carve-out (that still licenses the processmanager.yaml/mailbox hunks -- pm_delivery.rs
+    // stays a fenced, threaded-argument-only site, a LATER phase of the same PR): a fleet-parity
+    // declaration for the `runKind: door` key. Corrected (checkpoint 2, vernon item E): this
+    // used to say "no verify logic reads this yet" -- FALSE as of phase C, which wired
+    // `application::quote::verify_quote` into `commands::place_order`'s pre-payment block for
+    // real, reading `quote_guard` (constructed above, inside the `Ok(pool)` arm). This call
+    // registers the key's resolved value for the fleet-parity gate, the `RUN_FOLD_PRICED_CART_READ`
+    // precedent immediately above.
     telemetry::meters::runtime::declare_flag(
         "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
         config.run_quote_required_on_place_order,
