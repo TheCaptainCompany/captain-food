@@ -91,7 +91,15 @@ one catalog is a validation error (`scope-duplicate-item`).
   `tests.yaml` `thrown:` case, and `emit/behaviour_tests.rs` drives the REAL handler — so a new error
   or PM guard can never be phased "spec now, Rust later": the wiring, its test and the code land in one
   change. A card that splits phases around a new error names the gate that makes the intermediate
-  state legal and shows it validating, or it does not split.
+  state legal and shows it validating, or it does not split. **An error the gate will not let you
+  wire is a design signal, not an obstacle to route around** (PR #933 phase E, 2026-09-07):
+  `noTestFixturePossible` is legal only for the `readOnlyCatchAll` class (see below), so an error
+  reachable only through a signature- or credential-bearing input is DECLARED, Rust-pinned by a real
+  test, and its gap RECORDED (a register row), never given a `throws:` to route around the class it
+  does not belong to. `guard.throws` is exactly ONE `$ref`
+  (`tools/codegen-rs/src/validate/process_managers.rs`) — a guard whose logic can refuse for two
+  distinct causes merges them under one error, or splits into two guards; it never names a second
+  cause on the same `throws:`.
 - After any DSL change: `make validate` must be green before `make generate`.
 
 ## `legacyStates:` — a retired lifecycle state, exempt from reachability (#639 part C step 4-i, ADR-20260904-081527 §6)

@@ -552,7 +552,15 @@ screens:
             full_width: true
             action:
               type: place_order
-              variables: { restaurantId: "{{ restaurant.id }}", cartId: "{{ cart.id }}", customerInfo: "{{ contact_form.values }}", deliveryMode: "{{ selected_delivery_mode }}", deliveryAddress: "{{ delivery_address }}", paymentMethodId: "{{ stripe_payment.paymentMethodId }}" }
+              # `quote` is the signed token from the SAME `cart.current` read that painted THIS
+              # screen's recap total above (ADR-20260906-192007 D-A/D-J, checkpoint 2 item (1)) —
+              # never one stashed from an earlier read (e.g. `/cart`'s own `cart.current`). The
+              # binding is structural: `cart.current` is this screen's OWN `data_requirements`
+              # entry (above), so `cart.quote` is always the token this paint minted, by
+              # construction, never a second read. `expectedTotal` is DROPPED (never sent) —
+              # superseded by this token; `errors.yaml#/PriceMismatch`, the error its equality
+              # check fed, is retired.
+              variables: { restaurantId: "{{ restaurant.id }}", cartId: "{{ cart.id }}", customerInfo: "{{ contact_form.values }}", deliveryMode: "{{ selected_delivery_mode }}", deliveryAddress: "{{ delivery_address }}", paymentMethodId: "{{ stripe_payment.paymentMethodId }}", quote: "{{ cart.quote }}" }
               # acceptance-first (ADR-20260720-015500): the mutation returns only the acceptance envelope;
               # orderId is CLIENT-GENERATED (PlaceOrder command input — the client mints it before
               # dispatch), and the confirmation screen resolves paymentStatus.byOrder / subscribes
@@ -571,7 +579,23 @@ screens:
     # Review round 2 on #870: `delivery.byOrder` dropped — the handback signal
     # (`order.deliveryHandedBack`) now rides the SAME `order.byId` read (and the pushed
     # subscription frame), so a second resolver call here would fetch data nothing consumes.
-    data_requirements: [order.byId]
+    # checkpoint 2 item (1) bullet 2 (D-J): `operationStatus.byMessage` joins it — a REJECTED
+    # PlaceOrder (D-D: QuoteVerificationFailed/QuoteNoLongerHonoured, cause-neutral) typically
+    # produces NO `Order` at all, so `order.byId` alone can never surface it; this client's OWN
+    # `PlaceOrder` intent (if still held, `pending::place_order_message_id`) is resolved through
+    # this read instead (`crates/web/src/tracking.rs::TrackingState::check_place_order_rejection`).
+    data_requirements: [order.byId, operationStatus.byMessage]
+    # See checkout's OWN `paymentStatus.byOrder` skipped_reads entry for the same shape: `messageId`
+    # is not a route param (only `:orderId` is) -- it is the client-persisted PlaceOrder acceptance
+    # handle (`pending.rs`'s own record), supplied at dispatch time, never at paint time. A
+    # stranger's URL (or an order this client did not place) holds no record, so the paint-time
+    # read has nothing to ask about and the resolver call is skipped entirely (never attempted with
+    # a garbage id) -- `check_place_order_rejection` is a no-op in that case.
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/operationStatus.byMessage' }
+        missing_arg: { $ref: 'api.yaml#/queries/operationStatus/args/messageId' }
+        supplied_by: client_dispatch
+        note: "messageId is the client's OWN PlaceOrder acceptance handle, held in the persisted pending-write record (crates/web/src/pending.rs) keyed by this route's orderId -- absent for a stranger's URL or an order this client never placed, in which case the read is never attempted at all."
     subscription: { $ref: 'api.yaml#/subscriptions/orderStatusChanged' }
     actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
@@ -581,6 +605,26 @@ screens:
       - "Customer → restaurant contact: the api Restaurant type exposes no phone (the projection intent exists — DECISIONS STO-8 — but no api field), so the contact row bound dead fields and tracking.rs never rendered it; removed (#717). The concept: a customer mid-delivery needs to reach the restaurant."
       - "Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code."
     components:
+      # checkpoint 2 item (1) bullet 2 (D-J client minimum): a REJECTED PlaceOrder (D-D:
+      # QuoteVerificationFailed/QuoteNoLongerHonoured, cause-neutral) typically produces NO `Order`
+      # at all -- `operationStatus.byMessage`'s OWN status (this client's held PlaceOrder intent,
+      # never `order.status`) is checked BEFORE the hero below and REPLACES it when REJECTED. The
+      # body is the SERVER's own `operationStatus.message` -- NEVER `order.status.rejected.body`
+      # (that copy is a DIFFERENT REJECTED: the restaurant declining an ALREADY-CREATED order, not
+      # a pre-payment quote refusal where no order was ever created). Title reuses
+      # `order.status.rejected.title`, CTA reuses `checkout.payment_failed.back_to_cart` -- NO NEW
+      # KEYS. The delivery_reassigning_banner house style (a bare hand-synced element, sdui: false)
+      # extended with the CTA button this state needs. `sdui: false`, hand-synced
+      # (`crates/web/src/tracking.rs::TrackingState::refused`/`check_place_order_rejection`/
+      # `render_tracking_html`) -- this documents the same predicate the hand-written code applies,
+      # kept in sync by hand, never parsed as a live condition here.
+      - type: conditional_section
+        id: quote_refusal_state
+        visible_when: "operation_status.status == 'REJECTED'"
+        content:
+          - { type: text, id: quote_refusal_title, value: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.rejected.title' } }
+          - { type: text, id: quote_refusal_body, value: "{{ operation_status.message }}" }
+          - { type: button, id: quote_refusal_back_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_failed.back_to_cart' }, variant: outline, full_width: true, action: { type: navigate, route: "/cart" } }
       - type: order_status_hero
         status: "{{ order.status }}"
         status_config:

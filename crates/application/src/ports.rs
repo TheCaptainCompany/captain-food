@@ -272,9 +272,16 @@ pub trait AsOfPriceAuthority: Send + Sync {
     /// current version" as a number and reconstruct the priced read elsewhere, splitting price
     /// authority from coordinate authority across two calls — the exact mixed-authority mint this
     /// port refuses to offer. `Err` when the stream has no rows at all (no catalog created yet) —
-    /// never a HEAD price for a catalog that does not exist. The returned [`CatalogVersion`] is
-    /// non-`Option`, matching [`AsOfCatalog::coordinate`]: there is no code path that mints prices
-    /// without a coordinate to name them.
+    /// never a HEAD price for a catalog that does not exist.
+    ///
+    /// **The tuple collapse** (ADR-20260906-192007 D-L, vernon/holub, compiler-first per
+    /// ADR-20260803-234035 level 4): this used to return `(AsOfCatalog, CatalogVersion)` as a pair
+    /// that could silently disagree — [`AsOfCatalog`] already carries its own coordinate
+    /// ([`AsOfCatalog::coordinate`]), so the second element of the tuple was always redundant with
+    /// the first's own field. Returning `AsOfCatalog` alone makes "the coordinate returned by
+    /// `at_head`" and "the coordinate the returned value was folded at" the SAME field, not two
+    /// values a caller must remember to keep in sync. Every caller that needs the coordinate calls
+    /// [`AsOfCatalog::coordinate`] on the result.
     ///
     /// `correlation_id` (PROP-20260831-134539 slice 3a, D5) is the priced read's own request-scoped
     /// id, recorded on `catalog.as_of.fold` — this is the mint's FIRST real caller, so the field
@@ -283,7 +290,7 @@ pub trait AsOfPriceAuthority: Send + Sync {
         &self,
         catalog_id: CatalogId,
         correlation_id: uuid::Uuid,
-    ) -> Result<(AsOfCatalog, CatalogVersion), DomainError>;
+    ) -> Result<AsOfCatalog, DomainError>;
 }
 
 /// Google Business Profile ownership-proof verification (ADR-0019: "delegate ownership proof to

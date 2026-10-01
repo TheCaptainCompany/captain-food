@@ -73,7 +73,8 @@ fn deps_over(pool: &PgPool) -> CommandDeps {
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 /// Enqueue one COMMAND row addressed to the Conversation instance `actor_id` on `partition`.

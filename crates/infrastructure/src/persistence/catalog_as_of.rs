@@ -55,6 +55,27 @@ use crate::persistence::db_err;
 /// `$`-prefixed technical rows that would otherwise hide a short read.
 type RawRow = (i64, String, serde_json::Value);
 
+/// Classify a database failure crossing this seam into a stable, DISTINCT `business.failure_reason`
+/// (checkpoint 2 item N, dba): a bulkhead-pool ACQUIRE timeout (saturation -- the two-connection
+/// budget is exhausted) and a Postgres STATEMENT timeout (a slow/runaway query that ran but never
+/// finished) are different operational failures needing different alert routing, never folded
+/// into the same generic bucket as each other or as the two STRUCTURAL causes
+/// (`coordinate_beyond_head`/`catalog_not_created`) this module already classifies from row-count
+/// logic, never from error text. `db_err` (this crate's own `sqlx::Error` -> `DomainError` mapper)
+/// keeps only the `Display` string, so this classifies on substrings of THAT — a stopgap until the
+/// port's error type carries a structured reason; still strictly more informative than the single
+/// `technical_error` bucket every OTHER failure at this seam fell into before this change.
+fn classify_db_failure(e: &DomainError) -> &'static str {
+    let DomainError::Repository(message) = e else { return "technical_error" };
+    if message.contains("pool timed out") {
+        "acquire_timeout"
+    } else if message.contains("statement timeout") {
+        "statement_timeout"
+    } else {
+        "technical_error"
+    }
+}
+
 pub struct PgAsOfCatalogRepository {
     pool: PgPool,
 }
@@ -62,6 +83,30 @@ pub struct PgAsOfCatalogRepository {
 impl PgAsOfCatalogRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// The fold's own BULKHEAD pool (PROP-20260831-134539 slice 3b, D-K): a saturated fold read
+    /// (an unbounded `at_head`/bounded `as_of` range scan under load) must never starve the
+    /// SHARED pool every other read/write on the process depends on, and must fail FAST rather
+    /// than queue behind it. `max_connections(2)`: this pool serves exactly the priced-read OPEN
+    /// arm and the write-side verify guard, never a third caller — two connections is enough
+    /// headroom for one in-flight read of each kind without reserving a share of the shared
+    /// pool's budget. `acquire_timeout` ~250ms: fail into `technical_error` quickly rather than
+    /// let a caller wait behind a saturated bulkhead the length of the shared pool's own timeout.
+    /// `statement_timeout` set on THIS pool's OWN [`sqlx::postgres::PgConnectOptions`] (a startup
+    /// packet option, applied once per NEW connection this pool opens) — never `after_connect`
+    /// on the shared pool (which would apply the fold's timeout to every OTHER query the process
+    /// runs), never `SET` on a borrowed connection (a per-session GUC a later borrower of the
+    /// SAME pooled connection would inherit), never `SET LOCAL` (scoped to a transaction this
+    /// read never opens). Derived from the SAME [`sqlx::postgres::PgConnectOptions`] the shared
+    /// pool already resolved (`pool.connect_options()`) so there is no second `DATABASE_URL` to
+    /// keep in sync — both pools always target the identical database.
+    pub fn bulkhead_pool(pool: &PgPool) -> PgPool {
+        let options = (*pool.connect_options()).clone().options([("statement_timeout", "2000")]);
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy_with(options)
     }
 
     /// The SQL leg alone: rows at or before `version` (inclusive, the 1-based `domain_events.version`
@@ -164,7 +209,15 @@ impl PgAsOfCatalogRepository {
         version: CatalogVersion,
         span: &tracing::Span,
     ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize), DomainError> {
-        let rows = self.fetch_rows(stream, version).await?;
+        let rows = self.fetch_rows(stream, version).await.map_err(|e| {
+            // checkpoint 2 item N (dba): a genuine SQL/pool failure here (a bulkhead acquire
+            // timeout, a Postgres statement timeout) used to propagate via `?` with NO reason
+            // ever recorded on this span at all -- distinct from, never folded into,
+            // `coordinate_beyond_head` below (a STRUCTURAL fact this method determines itself
+            // from row counts, never from the error text).
+            telemetry::spans::record_catalog_as_of_fold_error(span, classify_db_failure(&e));
+            e
+        })?;
         let stream_length = rows.len();
         let highest = rows.iter().map(|(v, _, _)| *v).max();
         if highest != Some(version.get()) {
@@ -205,11 +258,20 @@ impl PgAsOfCatalogRepository {
     async fn load_to_head(
         &self,
         stream: &str,
+        span: &tracing::Span,
     ) -> Result<(Vec<(CatalogVersion, DomainEvent)>, usize, CatalogVersion, usize), DomainError> {
-        let (rows, payload_bytes) = self.fetch_all_rows_with_byte_total(stream).await?;
+        let (rows, payload_bytes) = self.fetch_all_rows_with_byte_total(stream).await.map_err(|e| {
+            // checkpoint 2 item N (dba): distinct from `catalog_not_created` below (a STRUCTURAL
+            // fact from row counts, never from the error text) -- the caller (`at_head`) used to
+            // label EVERY failure here `catalog_not_created` unconditionally, including a genuine
+            // acquire/statement timeout that never even reached the "no rows" check.
+            telemetry::spans::record_catalog_as_of_fold_error(span, classify_db_failure(&e));
+            e
+        })?;
         let stream_length = rows.len();
         let highest = rows.iter().map(|(v, _, _)| *v).max();
         let Some(coordinate) = highest.and_then(CatalogVersion::try_new) else {
+            telemetry::spans::record_catalog_as_of_fold_error(span, "catalog_not_created");
             return Err(db_err(format!(
                 "stream {stream} has no rows: catalog not created (highest available version: \
                  {highest:?})"
@@ -221,13 +283,17 @@ impl PgAsOfCatalogRepository {
 
     /// [`Self::fetch_all_rows`]'s SAME rows, plus the total payload byte count Postgres computes in
     /// the SAME query (`sum(octet_length(payload::text)) OVER ()`, one extra column expression on
-    /// every row, never a second round trip and never a second query). Kept SEPARATE from
-    /// `fetch_all_rows` on purpose: the DB-gated benchmark times `fetch_all_rows` directly as "the
-    /// SQL leg alone" (`crates/infrastructure/tests/as_of_catalog_read.rs`), and that shape must
-    /// stay exactly what it always was — widening its row shape would move the goalposts under an
-    /// existing, unrelated measurement. `pub` for the SAME reason `fetch_rows`/`fetch_all_rows`/
+    /// every row, never a second round trip and never a second query). Kept as a SEPARATE method
+    /// from `fetch_all_rows` (a plain caller with no need for the byte total should not pay for
+    /// computing it) — but the DB-gated benchmark's split "sql" leg times THIS one, never
+    /// `fetch_all_rows` (corrected, checkpoint 2 item N, dba): [`Self::load_to_head`] — the ONE
+    /// production caller [`AsOfPriceAuthority::at_head`] actually reaches — calls THIS query, so a
+    /// split leg measuring the plain `fetch_all_rows` timed a cheaper, different query than the
+    /// one really inside the `e2e_median` it was supposed to be one component of, biasing the
+    /// paired-slack invariant positive. `pub` for the SAME reason `fetch_rows`/`fetch_all_rows`/
     /// `decode_rows` are: the DB-gated test needs to verify the reported byte total directly,
-    /// against `sum(octet_length(payload::text))` computed independently.
+    /// against `sum(octet_length(payload::text))` computed independently, AND to time this exact
+    /// query as the split "sql" leg.
     pub async fn fetch_all_rows_with_byte_total(
         &self,
         stream_name: &str,
@@ -303,7 +369,7 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
         &self,
         catalog_id: CatalogId,
         correlation_id: uuid::Uuid,
-    ) -> Result<(AsOfCatalog, CatalogVersion), DomainError> {
+    ) -> Result<AsOfCatalog, DomainError> {
         let stream = domain::catalog::stream(catalog_id);
         let span = telemetry::spans::catalog_as_of_fold_at_head(
             &catalog_id.0.to_string(),
@@ -312,20 +378,18 @@ impl AsOfPriceAuthority for PgAsOfCatalogRepository {
         let span_for_record = span.clone();
         let started = std::time::Instant::now();
         let outcome = async move {
+            // checkpoint 2 item N (dba): `load_to_head` now labels its OWN failure reason
+            // distinctly (catalog_not_created vs acquire_timeout/statement_timeout/
+            // technical_error) -- this call site no longer overwrites every one of them with the
+            // single "catalog_not_created" label it used to apply unconditionally.
             let (events, stream_length, coordinate, payload_bytes) =
-                self.load_to_head(&stream).await.map_err(|e| {
-                    telemetry::spans::record_catalog_as_of_fold_error(
-                        &span_for_record,
-                        "catalog_not_created",
-                    );
-                    e
-                })?;
+                self.load_to_head(&stream, &span_for_record).await?;
             let catalog = AsOfCatalog::from_stream(&events, coordinate);
             telemetry::spans::record_catalog_as_of_fold(&span_for_record, stream_length, events.len());
             telemetry::spans::record_catalog_as_of_fold_version(&span_for_record, coordinate.get());
             telemetry::meters::catalog_as_of::stream_length(stream_length as f64);
             telemetry::meters::catalog_as_of::payload_bytes(payload_bytes as f64);
-            Ok((catalog, coordinate))
+            Ok(catalog)
         }
         .instrument(span)
         .await;

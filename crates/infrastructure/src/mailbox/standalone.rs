@@ -251,6 +251,29 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // threading, the run_platform_access_grant precedent immediately above): the ADMIN
         // sign-in door, same ENV-GATED posture, same default (OFF).
         run_admin_sign_in_door: env_flag("RUN_ADMIN_SIGN_IN_DOOR", false),
+        // ADR-20260904-081527 §8 seventh carve-out condition (c): the ONE new CommandDeps field
+        // (D-F/D-G), resolved here at boot -- the D-B interlock and D-H dev-key refusal both fire
+        // inside `resolve_at_boot` (never per-request), so a misconfigured standalone fleet
+        // refuses to start rather than serving a fraction of requests wrong. Same ENV-GATED
+        // posture as every other gate in this fn (this crate cannot read the generated Config);
+        // `QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET` absent (no rotation in flight) is `None`, the
+        // key's own permanently-optional posture (configuration.yaml).
+        quote_guard: Arc::new(
+            application::quote::QuoteGuard::resolve_at_boot(
+                env_flag("RUN_QUOTE_REQUIRED_ON_PLACE_ORDER", false),
+                env_flag("RUN_FOLD_PRICED_CART_READ", false),
+                matches!(std::env::var("APP_PROFILE").as_deref(), Ok("staging") | Ok("production")),
+                application::quote::SigningKey::from_resolved_secret(
+                    "current",
+                    &std::env::var("QUOTE_SIGNING_KEY_HMAC_SECRET").unwrap_or_default(),
+                ),
+                std::env::var("QUOTE_SIGNING_KEY_PREVIOUS_HMAC_SECRET").ok().filter(|s| !s.is_empty()).map(
+                    |s| application::quote::SigningKey::from_resolved_secret("previous", &s),
+                ),
+                Arc::new(crate::PgAsOfCatalogRepository::new(crate::PgAsOfCatalogRepository::bulkhead_pool(&pool))),
+            )
+            .expect("boot refusal: RUN_QUOTE_REQUIRED_ON_PLACE_ORDER/RUN_FOLD_PRICED_CART_READ interlock or the dev signing key in a live profile (ADR-20260906-192007 D-B/D-H)"),
+        ),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -330,6 +353,19 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
     telemetry::meters::runtime::declare_flag(
         "RUN_FOLD_PRICED_CART_READ",
         env_flag("RUN_FOLD_PRICED_CART_READ", false),
+    );
+    // PROP-20260831-134539 slice 3b + the command change (ADR-20260904-081527 §8 STANDING CLAUSE,
+    // consent farley + vernon -- NOT the seventh carve-out, which covers the processmanager.yaml/
+    // mailbox hunks of a LATER phase of this same PR): the standing clause pre-authorizes exactly
+    // this bare `declare_flag` line, byte-parallel to the monolith root's line above, additive-only,
+    // no other hunk under this licence, this comment naming it. Fed by `deps.quote_guard.is_open()`
+    // -- the real, already-constructed guard's OWN witness (checkpoint 2, farley item K) -- never
+    // the raw `env_flag` bool: this composition root always has a live pool (unlike the monolith's
+    // DB-less branch), so the true interlocked witness is available here and is strictly more
+    // honest than re-reading the two raw env vars a second time.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_QUOTE_REQUIRED_ON_PLACE_ORDER",
+        deps.quote_guard.is_open(),
     );
     deps
 }

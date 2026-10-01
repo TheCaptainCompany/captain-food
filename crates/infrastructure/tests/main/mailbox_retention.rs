@@ -74,7 +74,8 @@ fn deps_over(pool: &PgPool) -> CommandDeps {
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 fn money(cents: i64) -> serde_json::Value {

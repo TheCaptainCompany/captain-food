@@ -60,9 +60,16 @@ pub struct CheckoutContext {
     pub cart_id: String,
     /// Bound when the customer is authenticated; `PlaceOrder.customerId` is nullable by spec.
     pub customer_id: Option<String>,
-    /// The total the UI displayed — sent as `expectedTotal` so the server can reject a
-    /// `PriceMismatch` instead of ever charging an amount the customer did not see.
-    pub expected_total: Option<Value>,
+    /// The signed quote from the SAME `cart.current` read that painted THIS screen's recap total
+    /// (ADR-20260906-192007 D-A/D-J, checkpoint 2 item (1)) — never one stashed from an earlier
+    /// read (e.g. `/cart`'s own `cart.current`). `None` when that read's own `quote` was null
+    /// (the fold-priced door CLOSED, the fold failed, or — never on this single-cart screen — the
+    /// `carts` LIST read, D-L); a `None` here is never sent on the wire at all
+    /// (`place_order_input` omits the field entirely rather than sending a null placeholder).
+    /// Replaces `expectedTotal` (DROPPED, never sent): `errors.yaml#/PriceMismatch`, the error its
+    /// equality check fed, is retired (`rules.yaml#/ServerPriceAuthority`, PROP-20260831-134539
+    /// slice 3b).
+    pub quote: Option<String>,
 }
 
 /// Everything checkout can fail with beyond the dispatcher's own errors.
@@ -214,8 +221,12 @@ fn place_order_input(
         input.insert("note".into(), json!(note));
     }
     input.insert("paymentMethodId".into(), json!(payment_method_id));
-    if let Some(total) = &ctx.expected_total {
-        input.insert("expectedTotal".into(), total.clone());
+    // The quote of the read that painted THIS screen's recap (checkpoint 2 item (1)) -- echoed
+    // VERBATIM from `ctx.quote`, never re-derived or substituted from any other source (the
+    // structural guarantee that makes "never one stashed from /cart" true: there is exactly ONE
+    // field this value can come from). Omitted entirely when absent -- never a null placeholder.
+    if let Some(quote) = &ctx.quote {
+        input.insert("quote".into(), json!(quote));
     }
     input
 }
@@ -614,7 +625,7 @@ mod tests {
             restaurant_id: "rest-1".into(),
             cart_id: "cart-1".into(),
             customer_id: Some("cust-1".into()),
-            expected_total: Some(json!({ "amountCents": 2350, "currency": "EUR" })),
+            quote: Some("recap-quote-token".into()),
         }
     }
 
@@ -663,8 +674,44 @@ mod tests {
         assert_eq!(input["deliveryAddress"]["city"], "Tours");
         assert_eq!(input["note"], "Ring twice");
         assert_eq!(input["paymentMethodId"], "pm_123");
-        // The displayed total travels — the server's PriceMismatch guard depends on it.
-        assert_eq!(input["expectedTotal"]["amountCents"], 2350);
+        // checkpoint 2 item (1): expectedTotal is DROPPED entirely -- never on the wire, whatever
+        // the context. The signed quote replaces it (see the two tests below).
+        assert!(input.get("expectedTotal").is_none(), "expectedTotal must never reach the wire -- superseded by the signed quote");
+        assert_eq!(input["quote"], "recap-quote-token");
+    }
+
+    /// checkpoint 2 item (1) (D-J client minimum): the submitted `quote` is EXACTLY the one on
+    /// the resolved `CheckoutContext` -- the read that painted THIS screen's recap -- never a
+    /// DIFFERENT value the way a quote stashed from an earlier `/cart` read would be. Red-first
+    /// mutant: `place_order_input` sends a hardcoded quote (simulating a value stashed from
+    /// `/cart`) instead of `ctx.quote` -- expected red: the submitted quote differs from the
+    /// context's own (the recap read's) quote.
+    #[tokio::test]
+    async fn the_checkout_sends_the_quote_of_the_read_that_painted_the_recap() {
+        let fake = FakeTransport::scripted(vec![Ok(acceptance("PENDING"))]);
+        let mut context = ctx();
+        context.quote = Some("this-screens-own-recap-quote".into());
+        submit(&fake, &context, &form(), "pm_123").await.unwrap();
+        let (_, variables) = fake.call(0);
+        assert_eq!(
+            variables["input"]["quote"],
+            json!("this-screens-own-recap-quote"),
+            "the submitted quote must be the recap read's own, never a different (e.g. /cart-stashed) value"
+        );
+    }
+
+    /// checkpoint 2 item (1): an ABSENT quote (the fold-priced read CLOSED, or the fold failed)
+    /// never reaches the wire at all -- never sent as `null`, never a placeholder. A stale
+    /// leftover value from some OTHER path could otherwise slip in exactly where this key is
+    /// omitted; asserting its total absence is the stronger claim.
+    #[tokio::test]
+    async fn an_absent_quote_never_reaches_the_wire() {
+        let fake = FakeTransport::scripted(vec![Ok(acceptance("PENDING"))]);
+        let mut context = ctx();
+        context.quote = None;
+        submit(&fake, &context, &form(), "pm_123").await.unwrap();
+        let (_, variables) = fake.call(0);
+        assert!(variables["input"].get("quote").is_none(), "an absent quote must never be sent, not even as null");
     }
 
     #[tokio::test]
@@ -718,20 +765,22 @@ mod tests {
 
     #[tokio::test]
     async fn a_rejected_checkout_resolves_as_a_business_rejection_not_an_error() {
-        // The two-step contract on the money path: PriceMismatch arrives as REJECTED with its
-        // errors.yaml code — normal UX flow (re-quote the cart), never an exception.
+        // The two-step contract on the money path: retargeted (checkpoint 2 item I) from the
+        // retired `errors.yaml#/PriceMismatch` to `QuoteVerificationFailed` -- the structural code
+        // the signed-quote verify guard now actually rejects with (D-D) -- arrives as REJECTED
+        // with its errors.yaml code — normal UX flow (re-quote the cart), never an exception.
         let fake = FakeTransport::scripted(vec![
             Ok(acceptance("PENDING")),
             Ok(json!({ "operationStatus": {
                 "messageId": "00000000-0000-7000-8000-000000000000",
                 "correlationId": "00000000-0000-7000-8000-000000000000",
-                "status": "REJECTED", "errorCode": "PriceMismatch",
-                "message": "The displayed total is stale", "occurredAt": "2026-07-23T12:00:00Z",
+                "status": "REJECTED", "errorCode": "QuoteVerificationFailed",
+                "message": "We couldn't confirm your total", "occurredAt": "2026-07-23T12:00:00Z",
             }})),
         ]);
         let placed = submit(&fake, &ctx(), &form(), "pm_123").await.unwrap();
         match placed.handle.resolve_with(&fake, 5, Duration::ZERO).await.unwrap() {
-            ActionOutcome::Rejected { error_code, .. } => assert_eq!(error_code, "PriceMismatch"),
+            ActionOutcome::Rejected { error_code, .. } => assert_eq!(error_code, "QuoteVerificationFailed"),
             other => panic!("expected the anticipated rejection, got {other:?}"),
         }
     }

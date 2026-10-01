@@ -342,9 +342,12 @@ Named at the slice 3b+4 briefing (2026-09-06,
 [ADR-20260906-192007](../adr/ADR-20260906-192007-slice-3b-and-the-command-change-land-as-expand-contract-behind-an-interlocked-write-door-with-the-refusal-set-enumerated.md)):
 that record enumerates a refusal set (structural rejections, `QuoteNoLongerHonoured`, a fold
 technical error) that all surface through **one cause-neutral customer screen** — ux's draft, quoted
-in that ADR as a draft for counsel, never clearance — and requires that a `PaymentIntent` be created
-before verify runs (D-F: verify sits in the pre-payment guard block, before the Stripe call) but is
-never captured on any refusal path. Two questions on what that screen must say, not answered here:
+in that ADR as a draft for counsel, never clearance. **Corrected 2026-09-07** (P8, fix round after
+presentation pass 1, legal NB3): at HEAD, quote verify runs strictly BEFORE any `PaymentIntent` is
+created (D-F: verify sits in the pre-payment guard block, before the Stripe call,
+`application::commands::place_order`) — so a verify-guard refusal never has an intent to worry
+about, and CQ-7b below does not arise from THIS guard's own refusal path. Two questions on what
+that screen must say, not answered here:
 
 - **CQ-7a — does a no-cause refusal discharge the information duty on a refused distance order?**
   The consumer sees "we could not confirm your total" with no cause named (deliberately, per the
@@ -354,8 +357,13 @@ never captured on any refusal path. Two questions on what that screen must say, 
   refusal that states no cause at all, or does refusing an order still trigger a duty to state SOME
   reason, even a generic one, distinct from the duty to disclose a REPRICE (which this design is
   careful never to name)?
-- **CQ-7b — must "nothing was charged" say anything more when a `PaymentIntent` was created and not
-  captured?** The design's copy says "your card was not charged and no authorization was taken" —
+- **CQ-7b — re-premised 2026-09-07 (P8, legal NB3): must "nothing was charged" say anything more
+  when the refusal fires AFTER a `PaymentIntent` was already created and then not captured?** At
+  HEAD the quote-verify guard's own refusal path fires BEFORE any intent exists (the premise this
+  question originally carried does not occur on that path) — but the question survives, generally,
+  for any OTHER refusal that DOES fire after intent creation (the same cause-neutral copy is
+  reused across the whole refusal set, and a future refusal cause could land downstream of the
+  Stripe call). The design's copy says "your card was not charged and no authorization was taken" —
   but a `PaymentIntent` in manual-capture mode (`ADR-20260808-195315` §1.2) DOES place an
   authorization hold at creation, released (not "never taken") on cancellation or expiry. Is stating
   "no authorization was taken" accurate consumer-facing language for a hold that WAS placed and then

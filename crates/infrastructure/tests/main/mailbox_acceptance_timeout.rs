@@ -78,7 +78,8 @@ fn deps_over(pool: &PgPool, enforce_acceptance_timeout: bool) -> CommandDeps {
             mark_order_delivered_to_order: false,
         },
         enforce_acceptance_timeout,
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 /// The wired windows: BOTH Order-lane keys — gate-OFF is a config value, never an absent key

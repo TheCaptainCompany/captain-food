@@ -113,7 +113,8 @@ fn deps_over(store: Arc<dyn EventStore>, pool: &PgPool) -> CommandDeps {
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 fn settings(per_actor_enabled: bool) -> Arc<ActivationSettings> {

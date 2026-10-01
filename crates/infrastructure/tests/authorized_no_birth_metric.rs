@@ -317,7 +317,8 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>, closed: Arc<Atomi
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 fn address() -> Address {

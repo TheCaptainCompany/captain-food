@@ -21,6 +21,7 @@ pub mod process_managers;
 pub mod projections;
 pub mod projectors;
 pub mod ports;
+pub mod quote;
 pub mod queries;
 pub mod reminders;
 pub mod repository;

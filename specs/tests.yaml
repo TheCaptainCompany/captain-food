@@ -2552,8 +2552,8 @@ tests:
     then:
       - { $ref: '#/fixtures/paymentIntentCreatedCollection' }
 
-  TestPlaceOrderRejectsPriceMismatch:
-    name: "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority; the displayed total the consumer agreed to is the only total that can be charged — L112-1/L221-5 posture)"
+  TestPlaceOrderRejectsQuoteVerificationFailed:
+    name: "The write door OPEN and no signed quote submitted rejects the checkout before any payment authorization (ADR-20260906-192007 D-A/D-F/D-G)"
     rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
@@ -2565,6 +2565,9 @@ tests:
       - { $ref: '#/fixtures/cartLineAdded' }
     when:
       type: { $ref: 'commands.yaml#/PlaceOrder' }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_QUOTE_REQUIRED_ON_PLACE_ORDER' }
+        - { $ref: 'configuration.yaml#/keys/RUN_FOLD_PRICED_CART_READ' }
       data:
         orderId: "order-1"
         restaurantId: "resto-1"
@@ -2572,10 +2575,9 @@ tests:
         customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
-        expectedTotal: { amountCents: 100, currency: "EUR" }
         paymentMethodId: "pm_123"
     thrown:
-      - { $ref: 'errors.yaml#/PriceMismatch' }
+      - { $ref: 'errors.yaml#/QuoteVerificationFailed' }
 
   TestPlaceOrderRejectsUnresolvablePrice:
     name: "A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)"

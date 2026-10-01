@@ -63,6 +63,7 @@ pub struct PlaceOrder {
     pub note: Option<OrderNote>,
     pub payment_method_id: String,
     pub expected_total: Option<Money>,
+    pub quote: Option<CartQuote>,
 }
 
 /// Restaurant accepts an order and commits to preparing it.

@@ -254,7 +254,8 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 /// Enqueue one PM COMMAND row (kind COMMAND, actor lane = the PM's identity).

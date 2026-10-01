@@ -7,7 +7,7 @@ pub const GRAPHQL_ROLES: &[&str] = &["PUBLIC", "CUSTOMER", "RESTAURANT_ACCOUNT",
 /// PUBLIC: the deepest generated client document for this role: catalog (via resolver key 'catalog.byRestaurant').
 pub const MAX_DEPTH_PUBLIC: usize = 5;
 /// PUBLIC: the deepest generated client document for this role: current (via resolver key 'cart.current').
-pub const MAX_COMPLEXITY_PUBLIC: usize = 69;
+pub const MAX_COMPLEXITY_PUBLIC: usize = 70;
 
 /// CUSTOMER: the deepest generated client document for this role: orders (via resolver key 'orders.byRestaurant').
 pub const MAX_DEPTH_CUSTOMER: usize = 5;

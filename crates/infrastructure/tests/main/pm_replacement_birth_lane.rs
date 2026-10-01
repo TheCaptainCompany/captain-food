@@ -186,7 +186,8 @@ fn order_deps(pool: &PgPool) -> CommandDeps {
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 /// An Order-lane worker with the reminder windows wired — a missing window aborts every delivery on

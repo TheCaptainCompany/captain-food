@@ -264,7 +264,8 @@ fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps 
             grant_customer_credit_to_customer_credit: false,
             mark_order_delivered_to_order: false,
         },
-    }
+            quote_guard: application::quote::QuoteGuard::closed_for_tests().into(),
+}
 }
 
 async fn worker_over(pool: &PgPool, actor_type: &str, deps: CommandDeps) -> MailboxWorker {

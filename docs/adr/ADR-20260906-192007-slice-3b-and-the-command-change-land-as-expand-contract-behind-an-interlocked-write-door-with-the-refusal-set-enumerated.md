@@ -144,6 +144,49 @@ commander à nouveau."* MUST NOT: "the price changed", any amount, an old→new 
 currency figure, a countdown, refund/bank-date language. The CTA reuses
 `checkout.payment_failed.back_to_cart` — no new CTA, no retry control.
 
+**Amended 2026-09-07** (PR #933 phase C / checkpoint 2 — living record, this paragraph adds to the
+decision above rather than replacing it): `errors.yaml#/QuoteRequired` is now confirmed to have
+never existed as a catalogued error (checkpoint 2, legal item D) — the absent-quote structural
+cause folds into `QuoteVerificationFailed`'s set, and the PM guard's `throws:` stays exactly ONE
+`$ref` (`processmanager.yaml`), never a second refusal name; the absent-quote cause is now its own
+`QuoteRefusal::Absent` variant inside that one error (phase C2 item M). `QuoteNoLongerHonoured` is
+DECLARED and Rust-pinned — a real `application::commands` test throws it — but stays
+**DSL-UNWIRED**: no `throws:` `$ref` names it in `processmanager.yaml`, because
+`noTestFixturePossible` ([docs/claude/dsl.md](../claude/dsl.md)) is legal only for the
+`readOnlyCatchAll` class and this error's causes (a cart edited after minting, expiry) are not that
+class. Closing that gap is an **OPEN OPTION SPACE** for the team's decision queue
+([ADR-20260904-013834](ADR-20260904-013834-the-team-decides-option-spaces-and-spec-diffs-external-legal-and-admin-gated-actions-stay-with-the-founder.md)),
+not decided here: **(A)** a `tests.yaml` minting fixture the behaviour-test emitter resolves
+through the real `QuoteMinter` at generation time — **RECOMMENDED** (architect, reviewer;
+final-vision-first, [ADR-20260808-235113](ADR-20260808-235113-final-vision-first-no-intermediate-steps.md);
+must also fix `SpecCatalogs` double-answering `None` on the write path, or the fixture would not
+actually exercise the guard); **(B)** a second, narrowly-scoped exemption class beside
+`noTestFixturePossible` — **against** (architect, reviewer): inconvenient is not the same as
+unspellable, and a second class converts a structural gate into a judgement gate; **(C)** beck's
+`pinnedBy:` field on the error declaration, naming the Rust test, validator-verified as existing.
+Also, **D-F**: the fold's WHOLE `PricedCart` (items, breakdown and total, one coordinate) is the
+frozen snapshot on the OPEN arm, landed phase C2 item G (evans) — `OrderPlaced`'s frozen lines now
+always sum to the charge; the fold's recompute is compared to the token's `total_cents` and a
+mismatch refuses **structurally** (`TotalMismatch`, landed phase C2 item M — young, business),
+closing the gap D-E below left open when this record was first written. **D-K**: the monolith ships
+ONE shared bulkhead pool, never two independently-built ones (landed phase C2 item N — dba); D-K
+below already stated the intended shape, this note confirms it landed rather than merely intended.
+Consulted: evans (the fold-freeze finding and the merge-not-repurpose posture, restated), young (the
+structural total compare), business (the same compare, independently), architect (the option-space
+framing and its recommendation), reviewer (the same recommendation and the rejection of option B),
+dba (the shared-pool confirmation).
+
+**Amended 2026-09-07** (PR #933, presentation pass 1 fix round, item P6 — living record, this
+sentence adds to the paragraph above rather than replacing it): bullet 2 above, and D-J's binding
+context, both say the token binds "the cart's own stream version" — it does not. The cart read
+projection (`application::generated::rows::CartRow`) carries no stream-version column, and adding
+one would be a `View_cart` schema change this deliverable does not make; the token instead binds a
+SHA-256 digest of the cart's repricing inputs
+(`application::quote::QuotePayload::lines_digest`, `crates/application/src/quote.rs:10-18,520`),
+which proves the same fact ("has this cart's priceable content changed since mint") without a new
+stored column. `errors.yaml#/QuoteNoLongerHonoured`'s description already recorded this
+substitution; this ADR did not, until now (reviewer NB20).
+
 ### D-E — `totalCents` scope: the token signs the catalog-lines total, never the delta
 
 The token signs the catalog-lines total (D1's `totalCents`), not the full CTA number the customer
@@ -153,6 +196,19 @@ delta. This is the temporal-coherence half of legal's finding: the guarantee (Co
 consommation L112-1/L221-5 posture) binds the **total** shown before the consumer is bound, and this
 deliverable's card must state the sentence above **before** any test is written against it
 (legal's red-first: `the_charge_never_exceeds_the_total_the_customer_was_shown`).
+
+**Amended 2026-09-07** (PR #933, presentation pass 1 fix round, item R2 — living record, this
+paragraph adds to the decision above rather than replacing it): the "displayed CTA total does not
+equal lines-total plus live fees" compare above is **vacuously true today** — every fee leg is
+currently zero (`application::pricing`), so no code path ever exercises a fee-aware compare;
+`specs/ordering/rules.yaml`'s own qualifier states this precisely — fees are **UNBOUND by any
+token**, and the guarantee is **inert**, not yet exercised. A non-zero fee leg (ADR-0016/0017,
+delivery fee / service fee) is therefore a **precondition of the guarantee actually holding**, not
+an afterthought: it requires either binding the fee into the signed token (a token schema change)
+or a live CTA-total compare at verify time (fold lines-total + recomputed fees vs. the CTA the
+customer was shown) — recorded as a flip-card precondition
+(`docs/decisions/QUOTE-MINT-PRECONDITIONS.yaml`), not decided here.
+Consulted: legal (the vacuous-truth finding, NB2).
 
 ### D-F — Where verify runs
 
@@ -207,6 +263,26 @@ UNVERIFIED-Little's-law estimate ~15–25 live tokens/restaurant, ~500–750 acr
 (not a crypto-shredding key — nothing personal is encrypted by it); **rotation policy** is the
 team's, recorded here as: single key + one live `keyId` is acceptable at V0 provided the overlap
 above is observed on any rotation.
+
+**Amended 2026-09-07** (PR #933 checkpoint 2, item J — living record, this paragraph adds to the
+decision above rather than replacing it): the `required: [staging, production]` promotion this
+section states was landed in phase C, then **REVERTED** to `required: []` at checkpoint 2 — the
+promotion added **ZERO safety** with the write door OFF (the default, and the only state shipped so
+far): `QuoteGuard::resolve_at_boot`'s **own** dev-key/unprovisioned-key refusal already refuses
+before bind whenever the door is OPEN in a live profile with the key absent or set to the dev value,
+so a MANIFEST-level `required:` only wedges all 14 deploy manifests plus `deploy.yml`'s rollback
+path on a secret nothing consumes while the door stays closed. The gate is the **door's own boot
+refusal**, never the manifest — `required: []` stays until the flip card promotes the key back,
+alongside the write door actually opening (gate-then-stabilize,
+[ADR-20260808-144738](ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md)),
+matching this same section's own
+two-step rollout language above. The deploy wedge was caught **twice** — once in phase C's own
+checkpoint and again identically at checkpoint 2 — under a **split** among the lenses that spoke to
+it, resolved by taking the **reversible option**: `required: []` now, the promotion recorded as the
+flip card's own later step.
+Consulted: farley (the deploy-wedge finding, both times), business (the reversible-option framing
+under the split), reviewer (the same wedge, independently confirmed), holub (consent on the
+reversible option).
 
 ### D-I — Observability
 
