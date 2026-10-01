@@ -235,6 +235,12 @@ goes quiet exactly when the thing it waits on has died.**
 running. A silent agent and a dead agent are identical from inside the session, and the difference
 is one `ListAgents` call.
 
+**Sharpened 2026-10-01 (PR #933): the reclaim after an IDLE GAP also wipes the scratchpad.** The session
+sat idle after a usage limit, the container was reclaimed, and on resume the PR-body draft, the triage
+file and the follow-up issue draft — all held only in the scratchpad — were gone; they were re-derived
+from the GitHub PR body/comments and the session transcript (~15 min). Anything needed after an idle
+gap lives in the repo or on GitHub (PR body, a comment, a pushed file), never only in the scratchpad.
+
 ### A mob aggregation exceeds the Bash output cap — read it in slices, never `cat`
 
 Roster returns and their aggregations are consistently **300+ lines**; `cat`-ing one truncates, and a
@@ -440,3 +446,11 @@ remote-tracking ref in it until a fetch refspec is added
 until then the stop hook reports "no remote branch" for a branch that is, in fact, pushed and
 live on `origin`. Cost that earned this: two failed lens dispatches, two wasted by-hand hook runs,
 and one false stop-hook report, all in the same Lane B session.
+
+## A running lens can be killed by a model rate limit (HTTP 429) mid-pass — "failed" is not a verdict (2026-10-01, PR #933 pass 2)
+
+The pass-2 `reviewer` was running on the bigger model tier when that tier answered HTTP 429; the agent
+returned a failed hand-back with no findings. A failed lens is NOT a PASS and not a STOP — the pass has
+no verdict from that lens yet. Rule: relaunch the same brief with a model override (here, Opus) rather
+than waiting out the limit, and say in the per-PR row that the pass was re-run and why. Cost that earned
+it: one lost reviewer pass and the wait the coordinator would otherwise have spent on the limit.

@@ -854,6 +854,9 @@ real line NUMBER in that file, and that line itself carries one of the tokens ab
 paraphrase — the citation must be checkable without reading the whole file). Cost that earned the
 sentence: two dispatches refused on 2026-09-06 (PR #922 round 2) with a file path in the record
 clause and a `— NEW —` clause inserted between test and record.
+**A `<record>:<line>` citation goes stale the moment a phase AMENDS the cited record** (2026-10-01, PR #933): the
+ADR line moved `:504` → `:528` after the fix round's dated amendment, and the next dispatch was refused
+twice. Re-grep the token line after any phase that touches the cited record, before writing the next card.
 `mutant:` names the planted change that should turn the test red; `expected red:` names the
 message fragment that proves it did.
 
@@ -1001,6 +1004,10 @@ by default; `haiku` for purely mechanical sweeps — renames, grep-and-fix, rege
 the coordinator model for: triage decisions, review verdicts, records (ADRs/journal/call sheet),
 and anything on the `HOLD: human` class. Cost asymmetry is the reason: a long diff-authoring run
 is mostly tool-echo tokens, which price the same on every tier and carry no judgment.
+
+**A mid-run scope expansion sent to an executor by message is refused by design — the card is the message**; the
+coordinator issues a NEW card, which is the cheaper path anyway (2026-10-01, PR #933 reconciliation: the
+fix-round executor refused a merge-main instruction as out-of-card and a separate reconciliation card followed).
 
 ## A serialized merge queue makes its own conflicts — check every armed PR's mergeable_state after each merge, never wait for an event (founder, 2026-08-28)
 
