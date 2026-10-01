@@ -2,6 +2,9 @@
 
 Journal entries for ISO week 2026-W37, newest first, in the order they were written.
 
+> **2026-09-07 — [PR #945 "926: consults are exempt from Rule 1's red-first card step (architect-consult)"](https://github.com/TheCaptainCompany/captain-food/pull/945)
+> (Lane B) was merged 2026-09-07 (squash `2b4079c`) by this coordinator on Lane B's Ask 9.**
+
 > **2026-09-07 — [#926 "#924 follow-ups (the Red-first gate, round 2): the none form is a prefix
 > glob, per-hit is unenforced, the Rust token mirror is unpinned, sharper 0-hit cases, the
 > gate-scripts job growth is unmetered"](https://github.com/TheCaptainCompany/captain-food/issues/926)
