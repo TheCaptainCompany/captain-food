@@ -28,7 +28,7 @@ body:
         - Codegen / validator (tools/codegen-rs)
         - Specs (specs/*.yaml)
         - CI / deploy (workflows, Render)
-        - Live service (live.captain.food)
+        - Live service (captain-food.onrender.com)
         - Other
     validations:
       required: true

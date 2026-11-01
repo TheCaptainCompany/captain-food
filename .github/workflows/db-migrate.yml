@@ -83,7 +83,10 @@ jobs:
           # all — role = path per audience host there (ADR-0006) — so a check hard-wired to `api.`
           # would start failing the moment the cutover lands, on a job that gates every schema
           # change. `live.` is served identically by the monolith today and by fo-marketplace after.
-          HEALTH_URL: https://live.captain.food/health
+          # captain.food is not renewed (expires 2026-11-05): use Render's default host, which answers
+          # every path the same way (`/health` is host-independent). Requires the service's
+          # "Render Subdomain" to be enabled (Render dashboard -> Settings -> Custom Domains).
+          HEALTH_URL: https://captain-food.onrender.com/health
           # Render rollouts take minutes (image pull + boot + health gate); 15 min is generous but
           # finite -- an unbounded wait would hold the schema hostage to a stuck rollout.
           DEADLINE_SECONDS: "900"

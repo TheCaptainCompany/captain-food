@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
-  - name: ⚓ join.captain.food — the project & FAQ
-    url: https://join.captain.food
+  - name: ⚓ The project & FAQ
+    url: https://github.com/TheCaptainCompany/captain-food#readme
     about: What Captain.Food is, the 0% commission model, and how to join as a restaurateur.
   - name: 🔒 Report a security vulnerability
     url: https://github.com/TheCaptainCompany/captain-food/security/advisories/new
